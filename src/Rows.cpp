@@ -19,6 +19,7 @@
 // (github.com/TrumanGIT/ReLight, GPL-3.0-or-later, used with his permission), as Held.cpp MakeOwnLight.
 
 #include "BeamRow.h"
+#include "Fade.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -284,7 +285,12 @@ namespace Plugin
 				}
 				const auto  toLocal = live.root->world.Invert();
 				const auto  row = BeamRow::Lay(length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
-				const auto& color = live.tint ? *live.tint : rec.color;
+				RE::NiColor color = live.tint ? *live.tint : rec.color;
+				if (auto* fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr; fired && fired->GetProjectileRuntimeData().spell) {
+					if (const auto own = Fade::Items::ChoiceColor(fired->GetProjectileRuntimeData().spell->GetFormID())) {
+						color = *own;  // the spell's Lights by Item color reaches its row too
+					}
+				}
 				for (std::size_t i = 0; i < live.lights.size(); ++i) {
 					auto* light = live.lights[i] ? netimmerse_cast<RE::NiPointLight*>(live.lights[i]->light.get()) : nullptr;
 					if (!light) {
