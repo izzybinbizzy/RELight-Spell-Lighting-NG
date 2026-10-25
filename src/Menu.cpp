@@ -667,7 +667,7 @@ namespace Plugin
 				SetShadowLights(shadows);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T("Your own hand and held-weapon lights cast shadows. Off while Quality is on Performance."));
+			MenuStyle::Tip(T("Your own hand lights cast shadows on Vanilla and ENB. Off while Quality is on Performance."));
 			ImGuiMCP::EndDisabled();
 			ImGuiMCP::SameLine();
 			ImGuiMCP::TextColored(ImGuiMCP::ImVec4{ 1.0f, 0.9f, 0.25f, 1.0f }, "%s", T("Will likely lower your frame rate."));
