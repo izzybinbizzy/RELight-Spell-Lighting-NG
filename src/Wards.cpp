@@ -161,6 +161,66 @@ namespace Plugin
 			return changed;
 		}
 
+		// Strange Wards (a vanilla ward replacer, Nexus 139921) puts its own dome at the vanilla mesh path; its textures sit
+		// under effects\po3_strangerunes\. Its Amber and Sswaye Special picks differ only by the dome's base color.
+		constexpr RE::NiColor kStrangeAmber{ 0.886f, 0.345f, 0.133f };
+		constexpr RE::NiColor kStrangeWhite{ 0.935f, 0.869f, 0.843f };
+
+		struct StrangeWards
+		{
+			bool                       installed{ false };
+			std::optional<RE::NiColor> color;  // none = its Blue pick, the vanilla blue-white
+		};
+
+		[[nodiscard]] bool Near(const RE::NiColor& a_a, const RE::NiColor& a_b)
+		{
+			return std::abs(a_a.red - a_b.red) < 0.02f && std::abs(a_a.green - a_b.green) < 0.02f && std::abs(a_a.blue - a_b.blue) < 0.02f;
+		}
+
+		StrangeWards ReadStrangeWards()
+		{
+			StrangeWards              s;
+			RE::NiPointer<RE::NiNode> root;
+			if (REL::Module::IsVR() || RE::BSModelDB::Demand("magic\\wardbodyfx.nif", root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone ||
+				!root) {
+				return s;
+			}
+			RE::BSVisit::TraverseScenegraphGeometries(root.get(), [&](RE::BSGeometry* a_geometry) {
+				auto* shader = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
+				auto* effect = netimmerse_cast<RE::BSEffectShaderProperty*>(shader);
+				auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr;
+				if (!material) {
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				const auto source = LightKit::Lower(material->sourceTexturePath.c_str());
+				const auto grey = LightKit::Lower(material->greyscaleTexturePath.c_str());
+				s.installed = s.installed || source.contains("po3_strangerunes") || grey.contains("po3_strangerunes");
+				const RE::NiColor base{ material->baseColor.red, material->baseColor.green, material->baseColor.blue };
+				for (const auto& pick : { kStrangeAmber, kStrangeWhite }) {
+					if (Near(base, pick)) {
+						s.color = pick;
+					}
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+			if (!s.installed) {
+				s.color.reset();
+			}
+			return s;
+		}
+
+		const StrangeWards& StrangeWardsLook()
+		{
+			static const StrangeWards look = [] {
+				auto s = ReadStrangeWards();
+				SKSE::log::info("wards: Strange Wards is {}{}", s.installed ? "installed - its dome keeps its own look" : "not installed",
+					!s.installed ? "" : s.color ? (Near(*s.color, kStrangeAmber) ? ", the Amber pick" : ", the Sswaye Special pick") :
+												  ", the Blue pick");
+				return s;
+			}();
+			return look;
+		}
+
 		// point an art form at our copy, or back at the model it had
 		void Point(RE::BGSArtObject* a_art, const char* a_ours)
 		{
@@ -195,6 +255,8 @@ namespace Plugin
 			if (has360) {
 				Point(dome, look.sphere);
 				Point(flash, look.flash);
+			} else if (StrangeWardsLook().installed) {
+				Point(dome, nullptr);  // Strange Wards' own dome, whatever the color pick
 			} else {
 				// his call: Vanilla blue wears OUR dome too - the vanilla look, reading our own copies of its
 				// textures, so no other mod's loose textures reach it
@@ -227,7 +289,12 @@ namespace Plugin
 				if (!gWardLightColor) {
 					gWardLightColor = light->data.color;
 				}
-				light->data.color = white ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
+				if (const auto& strange = StrangeWardsLook(); strange.installed && strange.color && !has360) {
+					light->data.color = RE::Color{ static_cast<std::uint8_t>(strange.color->red * 255.0f),
+						static_cast<std::uint8_t>(strange.color->green * 255.0f), static_cast<std::uint8_t>(strange.color->blue * 255.0f), 0 };
+				} else {
+					light->data.color = white ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
+				}
 			}
 			SKSE::log::info("wards: {} {} ({}), hand {}", has360 ? "360 sphere" : "dome", white ? "white" : "vanilla blue",
 				dome && dome->GetModel() ? dome->GetModel() : "no art form", hand && hand->GetModel() ? hand->GetModel() : "no art form");
