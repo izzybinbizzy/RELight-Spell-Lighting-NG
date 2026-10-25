@@ -299,7 +299,8 @@ namespace Plugin
 					const auto byte = [](float a_value) { return static_cast<std::uint8_t>(std::lround(std::clamp(a_value, 0.0f, 1.0f) * 255.0f)); };
 					light->data.color = RE::Color{ byte(strange.color->red), byte(strange.color->green), byte(strange.color->blue), 0 };
 				} else {
-					light->data.color = white ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
+					// Strange Wards' Blue pick keeps its own blue dome, so its light stays the game's blue whatever the look
+					light->data.color = white && !(strange.installed && !has360) ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
 				}
 			}
 			SKSE::log::info("wards: {} {} ({}), hand {}", has360 ? "360 sphere" : "dome", white ? "white" : "vanilla blue",
