@@ -224,6 +224,9 @@ namespace Plugin
 	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
 	[[nodiscard]] bool PerformanceMode();             // the Performance page's Quality pick on Performance (his 2026-10-20 order)
 	void               SetPerformanceMode(bool a_on);
+	[[nodiscard]] bool ShadowLightsPicked();  // Performance > Shadow-casting lights as the player set it
+	void               SetShadowLights(bool a_on);
+	[[nodiscard]] bool ShadowLights();  // that switch, never with Performance or all lights off
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);

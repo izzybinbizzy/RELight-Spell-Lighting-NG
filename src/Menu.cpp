@@ -661,6 +661,16 @@ namespace Plugin
 				"This mod's lights go out - every switch's lights and the hand, weapon and ground lights (sprays and bolts keep their own "
 				"light) - to compare, or when every frame counts. A spell already in your hand changes the next time you ready it. Off "
 				"again brings them all back."));
+			bool shadows = ShadowLightsPicked();
+			ImGuiMCP::BeginDisabled(PerformanceMode());
+			if (ImGuiMCP::Checkbox(T("Shadow-casting lights"), &shadows)) {
+				SetShadowLights(shadows);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Your own hand and held-weapon lights cast shadows. Off while Quality is on Performance."));
+			ImGuiMCP::EndDisabled();
+			ImGuiMCP::SameLine();
+			ImGuiMCP::TextColored(ImGuiMCP::ImVec4{ 1.0f, 0.9f, 0.25f, 1.0f }, "%s", T("Will likely lower your frame rate."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
