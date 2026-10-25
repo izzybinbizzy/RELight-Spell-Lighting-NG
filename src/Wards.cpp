@@ -15,7 +15,8 @@
 // pointed at our meshes (`meshes\magic\Glow Wards\`): the dome (with 360 Ward the 360 sphere, in place of its orange), the
 // hand art and 360 Ward's hit flash. Vanilla keeps the vanilla dome and hand, and gives the 360 sphere and flash the TRUE
 // vanilla blue - `Glow Wards\Vanilla\`, the same files Illuminated uses (his answer 2026-10-13; the old `Blue\` sphere was
-// Dynamic Wards' deeper Adept Blue). The hand light follows in HandLights.cpp. Nothing is saved.
+// Dynamic Wards' deeper Adept Blue) and a hand in the sphere's blue beside it. With Strange Wards the hand keeps the game's own
+// art, which reads the gradient its pick ships. The hand light follows in HandLights.cpp. Nothing is saved.
 
 #include "Plugin.h"
 
@@ -40,13 +41,17 @@ namespace Plugin
 			const char* hand;
 			const char* wornDome;
 			const char* wornHand;
+			const char* sphereHand;  // the hands beside 360 Ward's sphere
+			const char* sphereWornHand;
 		};
 		constexpr Look kWhite{ "Magic\\Glow Wards\\White\\wardbodyfx360.nif", "Magic\\Glow Wards\\White\\wardshieldhitfx.nif",
 			"Magic\\Glow Wards\\White\\wardbodyfx.nif", "Magic\\Glow Wards\\White\\wardinhandfx.nif",
-			"Magic\\Glow Wards\\White\\wardbodyfxworn.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif" };
+			"Magic\\Glow Wards\\White\\wardbodyfxworn.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif",
+			"Magic\\Glow Wards\\White\\wardinhandfx.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif" };
 		constexpr Look kVanillaBlue{ "Magic\\Glow Wards\\Vanilla\\wardbodyfx360.nif", "Magic\\Glow Wards\\Vanilla\\wardshieldhitfx.nif",
 			"Magic\\Glow Wards\\Blue\\wardbodyfx.nif", "Magic\\Glow Wards\\Blue\\wardinhandfx.nif",
-			"Magic\\Glow Wards\\Blue\\wardbodyfxworn.nif", "Magic\\Glow Wards\\Blue\\wardinhandfxworn.nif" };
+			"Magic\\Glow Wards\\Blue\\wardbodyfxworn.nif", "Magic\\Glow Wards\\Blue\\wardinhandfxworn.nif",
+			"Magic\\Glow Wards\\Vanilla\\wardinhandfx.nif", "Magic\\Glow Wards\\Vanilla\\wardinhandfxworn.nif" };
 
 		RE::BGSArtObject*                                  gEmpty = nullptr;
 		std::vector<RE::EffectSetting*>                    gSilenced;
@@ -262,7 +267,8 @@ namespace Plugin
 				// textures, so no other mod's loose textures reach it
 				Point(dome, look.dome);
 			}
-			Point(hand, look.hand);
+			Point(hand, has360 ? look.sphereHand : StrangeWardsLook().installed ? nullptr :
+																				  look.hand);
 			// the worn wards: their own hand always (its graph has the same fault on 360), their own dome unless 360 Ward's
 			// sphere - already on BeginLoopEnd - is the dome
 			if (!gWornDome) {
@@ -273,7 +279,7 @@ namespace Plugin
 			}
 			if (gWornDome && gWornHand) {
 				gWornDome->SetModel(look.wornDome);
-				gWornHand->SetModel(look.wornHand);
+				gWornHand->SetModel(has360 ? look.sphereWornHand : look.wornHand);
 				std::size_t worn = 0;
 				for (const auto& r : kWorn) {
 					if (auto* e = dh->LookupForm<RE::EffectSetting>(r.id, r.plugin)) {
