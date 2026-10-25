@@ -167,22 +167,26 @@ namespace LightKit
 		return netimmerse_cast<RE::NiPointLight*>(master->Clone());
 	}
 
-	// Registers a light already attached under a node and updated once: a dynamic light that casts no shadow, as ReLight
-	// registers its own (field of view 90, the one a shadowless light is given). a_portalStrict false: a row that lets its
-	// light through portals. nullptr when the scene refused it - the caller then detaches it. Main thread.
+	// Registers a light already attached under a node and updated once: a dynamic light, as ReLight registers its own (field of
+	// view 90, the one a shadowless light is given). a_portalStrict false: a row that lets its light through portals. a_shadow:
+	// an omni shadow caster (the scene makes one for a field of view of 2 pi). nullptr when the scene refused it - the caller then
+	// detaches it. Main thread.
+	// A shadow caster's near plane, in game units: past the thickness of the body and arm it hangs in, so they never block it.
+	inline constexpr float kShadowNear = 50.0f;
+
 	[[nodiscard]] inline RE::BSLight* AddToScene(RE::ShadowSceneNode* a_scene, RE::NiPointLight* a_light, float a_falloff = 1.0f,
-		bool a_portalStrict = true)
+		bool a_portalStrict = true, bool a_shadow = false)
 	{
 		RE::ShadowSceneNode::LIGHT_CREATE_PARAMS params{};
 		params.dynamic = true;
-		params.shadowLight = false;
+		params.shadowLight = a_shadow;
 		params.portalStrict = a_portalStrict;
 		params.affectLand = true;
 		params.affectWater = true;
 		params.neverFades = true;
-		params.fov = 90.0f;
+		params.fov = a_shadow ? RE::NI_TWO_PI : 90.0f;
 		params.falloff = a_falloff;
-		params.nearDistance = 5.0f;
+		params.nearDistance = a_shadow ? kShadowNear : 5.0f;
 		params.depthBias = 1.0f;
 		params.sceneGraphIndex = 0;
 		params.restrictedNode = nullptr;

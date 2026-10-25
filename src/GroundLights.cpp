@@ -37,6 +37,7 @@ namespace Plugin
 			RE::NiPointer<RE::NiAVObject>   anchor;              // where it sits: magic's third-person counterpart (also in first person), or magic itself when there is none
 			bool                            handsDown{ false };  // dropped because the hands went down: the game's light stays hidden
 			RE::NiPointer<RE::NiAVObject>   magic;               // the nearest node above the casting light whose name holds "MagicNode", or the light's own parent when none does
+			bool                            shadow{ false };     // made a shadow caster (the player's, with Shadow-casting lights on)
 		};
 
 		std::unordered_map<std::uint64_t, Twin> gTwins;  // main thread only; key = actor form id << 1 | hand
@@ -95,7 +96,7 @@ namespace Plugin
 		// the scene refused it - the twin is then dropped
 		bool Register(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
-			auto* bs = LightKit::AddToScene(a_scene, a_twin.light.get());
+			auto* bs = LightKit::AddToScene(a_scene, a_twin.light.get(), 1.0f, true, a_twin.shadow);
 			if (!bs) {
 				return false;
 			}
@@ -199,6 +200,7 @@ namespace Plugin
 			// the hands are readied, and one dropped because they went down leaves the game's light hidden as the game keeps it.
 			const auto* state = a_actor->AsActorState();
 			const bool  readied = state && state->IsWeaponDrawn();
+			const bool  shadow = a_actor->IsPlayerRef() && ShadowLights();  // a light cannot change its kind once in the scene: remade
 			for (std::uint64_t hand = 0; hand < 2; ++hand) {
 				const auto key = (static_cast<std::uint64_t>(a_actor->GetFormID()) << 1) | hand;
 				auto*      caster = casters[hand];
@@ -226,11 +228,14 @@ namespace Plugin
 					}
 				}
 				auto& twin = it != gTwins.end() ? it->second : gTwins[key];
-				if (twin.light && (twin.source.get() != source || twin.parent.get() != parent)) {
+				if (twin.light && (twin.source.get() != source || twin.parent.get() != parent || twin.shadow != shadow)) {
 					Drop(twin, a_scene);
 				}
-				if (!twin.light && !Make(twin, source, parent)) {
-					continue;
+				if (!twin.light) {
+					if (!Make(twin, source, parent)) {
+						continue;
+					}
+					twin.shadow = shadow;
 				}
 				if (twin.anchor.get() != anchor) {
 					twin.anchor.reset(anchor);

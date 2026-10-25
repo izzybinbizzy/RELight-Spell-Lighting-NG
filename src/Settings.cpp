@@ -60,6 +60,7 @@ namespace Plugin
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
 		std::atomic<bool> gPerformance{ false };
+		std::atomic<bool> gShadows{ false };  // Performance > Shadow-casting lights
 
 		[[nodiscard]] std::string_view Trim(std::string_view a_s) noexcept
 		{
@@ -111,6 +112,7 @@ namespace Plugin
 			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
+			{ "ShadowLights", [] { return gShadows ? 1 : 0; }, [](int v) { gShadows = v != 0; } },
 		};
 
 		// [Switches] lines for options that are not installed now, as read: written back unchanged, so an option taken out
@@ -424,6 +426,9 @@ namespace Plugin
 	void SetDynamicLighting(bool a_on) { gDynamic = a_on; }
 	bool PerformanceMode() { return gPerformance; }
 	void SetPerformanceMode(bool a_on) { gPerformance = a_on; }
+	bool ShadowLightsPicked() { return gShadows; }
+	void SetShadowLights(bool a_on) { gShadows = a_on; }
+	bool ShadowLights() { return gShadows && !gPerformance && !gAllOff; }
 
 	// his call: a pack the build split across the downloads is ONE switch - its files share a `file` line, so
 	// every option with that id turns together
