@@ -296,8 +296,8 @@ namespace Plugin
 					gWardLightColor = light->data.color;
 				}
 				if (const auto& strange = StrangeWardsLook(); strange.installed && strange.color && !has360) {
-					light->data.color = RE::Color{ static_cast<std::uint8_t>(strange.color->red * 255.0f),
-						static_cast<std::uint8_t>(strange.color->green * 255.0f), static_cast<std::uint8_t>(strange.color->blue * 255.0f), 0 };
+					const auto byte = [](float a_value) { return static_cast<std::uint8_t>(std::lround(std::clamp(a_value, 0.0f, 1.0f) * 255.0f)); };
+					light->data.color = RE::Color{ byte(strange.color->red), byte(strange.color->green), byte(strange.color->blue), 0 };
 				} else {
 					light->data.color = white ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
 				}
