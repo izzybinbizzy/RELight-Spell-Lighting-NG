@@ -75,12 +75,11 @@ namespace Plugin
 			return a_lighting == Lighting::kShaders ? 1.0f : 2.0f;
 		}
 
-		[[nodiscard]] bool RowsOn()
-		{
-			// while she sneaks the rows fade with her spell lights (Hooks.cpp dims every light on a magic projectile), and
-			// come off once faded out
-			return !PerformanceMode() && !AllLightsOff() && SneakLevel() > 0.0f;
-		}
+		[[nodiscard]] bool RowsOn() { return !PerformanceMode() && !AllLightsOff(); }
+
+		// while she sneaks the rows on HER spells fade with her spell lights (Hooks.cpp dims the lights on what she cast) and
+		// come off once faded out; another caster's row keeps its light
+		[[nodiscard]] bool RowOn(const RE::TESObjectREFR* a_ref) { return RowsOn() && (SneakLevel() > 0.0f || !CastByPlayer(a_ref)); }
 
 		// Community Shaders draws an inverse-square point light at four times its fade and writes back the reach that gives, so the
 		// cutoff is set for that (laid reach 197 read 389 otherwise)
@@ -356,7 +355,7 @@ namespace Plugin
 		std::vector<const RE::NiAVObject*> drop;
 		for (const auto& [root, live] : gLive) {
 			const bool gone = !live.root->parent || !live.ref || live.ref->Get3D() != live.root.get();
-			if (!on || gone || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
+			if (gone || !RowOn(live.ref.get()) || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
 				drop.push_back(root);
 				if (!gone) {
 					gParked.push_back(live.ref);
@@ -370,9 +369,9 @@ namespace Plugin
 			gParked.insert(gParked.end(), queued.begin(), queued.end());
 		} else if (scene) {
 			// kept while its option or the light cap still holds it back, so it is tried again
-			std::erase_if(gParked, [scene](const auto& a_ref) { return Hang(a_ref.get(), scene); });
+			std::erase_if(gParked, [scene](const auto& a_ref) { return RowOn(a_ref.get()) && Hang(a_ref.get(), scene); });
 			for (const auto& ref : queued) {
-				if (!Hang(ref.get(), scene)) {
+				if (!RowOn(ref.get()) || !Hang(ref.get(), scene)) {
 					gParked.push_back(ref);
 				}
 			}

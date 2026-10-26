@@ -142,6 +142,8 @@ namespace Plugin
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: how far the sneak fade has her lights now, 1 = full, down to "Sneaking brightness" (any thread)
 	[[nodiscard]] float SneakLevel();
+	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (any thread)
+	[[nodiscard]] bool CastByPlayer(const RE::TESObjectREFR* a_ref);
 
 	void                                                LoadData();
 	[[nodiscard]] std::vector<Option>&                  Options();
