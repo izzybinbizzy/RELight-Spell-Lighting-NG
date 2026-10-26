@@ -282,10 +282,10 @@ namespace Plugin
 			off += (o.switchable && !o.on) ? 1 : 0;
 		}
 		SKSE::log::info(
-			"settings: brightness {}%, reach {}%, lights fade while sneaking {} (to {}%), hand lights {}, weapon lights {}, {} switch(es) off "
-			"({} line(s) read, {} problem(s))",
-			gBrightness.load(), gReach.load(), gSneak ? "on" : "off", gSneakBrightness.load(), gHands ? "on" : "off", gWeapons ? "on" : "off",
-			off, read, problems.size());
+			"settings: brightness {}%, reach {}%, lights fade while sneaking {} (to {}%, runes {}), hand lights {}, weapon lights {}, {} "
+			"switch(es) off ({} line(s) read, {} problem(s))",
+			gBrightness.load(), gReach.load(), gSneak ? "on" : "off", gSneakBrightness.load(), gRunes ? "fade" : "stay lit", gHands ? "on" : "off",
+			gWeapons ? "on" : "off", off, read, problems.size());
 	}
 
 	// The menu calls this on the RENDER thread, often many times while a slider is dragged: the file is written once, by an

@@ -540,14 +540,14 @@ namespace Plugin
 					SaveSettings();
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
-				const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
-				int               runes = RunesFadeOn() ? 0 : 1;
-				if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
-					SetRunesFadeOn(runes == 0);
-					SaveSettings();
-				}
-				MenuStyle::Tip(T("Whether the runes you lay fade too while you sneak. Stay lit keeps them glowing."));
 			}
+			const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
+			int               runes = RunesFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
+				SetRunesFadeOn(runes == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
 			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
 			int               hidden = InvisibleFadeOn() ? 0 : 1;
 			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
