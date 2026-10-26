@@ -541,6 +541,13 @@ namespace Plugin
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
 			}
+			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
+			int               hidden = InvisibleFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
+				SetInvisibleFadeOn(hidden == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
 
 			// the old installer's Dynamic Lighting question, in Illuminated's place for it (its Flicker group)
 			GlowHeading("Flicker", Icon::kBulb);
@@ -661,16 +668,6 @@ namespace Plugin
 				"This mod's lights go out - every switch's lights and the hand, weapon and ground lights (sprays and bolts keep their own "
 				"light) - to compare, or when every frame counts. A spell already in your hand changes the next time you ready it. Off "
 				"again brings them all back."));
-			bool shadows = ShadowLightsPicked();
-			ImGuiMCP::BeginDisabled(PerformanceMode());
-			if (ImGuiMCP::Checkbox(T("Shadow-casting lights"), &shadows)) {
-				SetShadowLights(shadows);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T("Your own hand lights cast shadows on Vanilla and ENB. Off while Quality is on Performance."));
-			ImGuiMCP::EndDisabled();
-			ImGuiMCP::SameLine();
-			ImGuiMCP::TextColored(ImGuiMCP::ImVec4{ 1.0f, 0.9f, 0.25f, 1.0f }, "%s", T("Will likely lower your frame rate."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation

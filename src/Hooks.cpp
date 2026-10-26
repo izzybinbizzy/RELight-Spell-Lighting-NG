@@ -103,10 +103,83 @@ namespace
 		DimAll(gSneakLevel.load(std::memory_order_relaxed));
 	}
 
-	// a light made now is dimmed: she sneaks with the setting on, or her lights are still coming back up (any thread)
+	// a perk or ability that only pays off in the dark (a Shadow birthsign: spells cheaper and quieter "in shadows") reads the
+	// light level, which her lights raise - so while she carries one her lights fade out (his pick). Found once: every perk whose
+	// conditions, or an entry point's, ask for a LOW light level, and every ability with such an effect
+	[[nodiscard]] bool ReadsLightLevel(const RE::TESCondition& a_condition)
+	{
+		using Op = RE::CONDITION_ITEM_DATA::OpCode;
+		for (const auto* item = a_condition.head; item; item = item->next) {
+			const auto op = item->data.flags.opCode;
+			if (item->data.functionData.function.get() == RE::FUNCTION_DATA::FunctionID::kGetLightLevel &&
+				item->data.object.get() == RE::CONDITIONITEMOBJECT::kSelf && (op == Op::kLessThan || op == Op::kLessThanOrEqualTo)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	struct ShadowSigns
+	{
+		std::vector<RE::BGSPerk*>   perks;
+		std::vector<RE::SpellItem*> abilities;
+	};
+
+	[[nodiscard]] const ShadowSigns& Signs()
+	{
+		static const ShadowSigns signs = [] {
+			ShadowSigns found;
+			auto*       dh = RE::TESDataHandler::GetSingleton();
+			if (!dh) {
+				return found;
+			}
+			for (auto* perk : dh->GetFormArray<RE::BGSPerk>()) {
+				const bool reads = perk && (ReadsLightLevel(perk->perkConditions) || std::ranges::any_of(perk->perkEntries, [](const auto* a_entry) {
+					const auto* point = a_entry && a_entry->GetType() == RE::PERK_ENTRY_TYPE::kEntryPoint ?
+					                        static_cast<const RE::BGSEntryPointPerkEntry*>(a_entry) :
+					                        nullptr;
+					return point && std::ranges::any_of(point->conditions, ReadsLightLevel);
+				}));
+				if (reads) {
+					found.perks.push_back(perk);
+				}
+			}
+			for (auto* spell : dh->GetFormArray<RE::SpellItem>()) {
+				if (spell && spell->GetSpellType() == RE::MagicSystem::SpellType::kAbility &&
+					std::ranges::any_of(spell->effects, [](const auto* a_effect) {
+						return a_effect && (ReadsLightLevel(a_effect->conditions) || (a_effect->baseEffect && ReadsLightLevel(a_effect->baseEffect->conditions)));
+					})) {
+					found.abilities.push_back(spell);
+				}
+			}
+			SKSE::log::info("sneak fade: {} perk(s) and {} abilit(y/ies) read the light level (her lights fade while she carries one)",
+				found.perks.size(), found.abilities.size());
+			return found;
+		}();
+		return signs;
+	}
+
+	std::atomic<bool> gHidden{ false };  // she is invisible or carries a shadow sign, with that setting on - the player update's look
+
+	// her lights fade out: invisible (the Shadow Stone, Invisibility - every such effect raises the Invisibility value) or carrying
+	// a shadow sign, with "While invisible or in shadow" on Lights fade out. Main thread
+	[[nodiscard]] bool HiddenNow(const RE::PlayerCharacter& a_player)
+	{
+		if (!Plugin::InvisibleFadeOn()) {
+			return false;
+		}
+		if (a_player.AsActorValueOwner()->GetActorValue(RE::ActorValue::kInvisibility) > 0.0f) {
+			return true;
+		}
+		const auto& signs = Signs();
+		return std::ranges::any_of(signs.perks, [&](auto* a_perk) { return a_player.HasPerk(a_perk); }) ||
+		       std::ranges::any_of(signs.abilities, [&](auto* a_spell) { return a_player.HasSpell(a_spell); });
+	}
+
+	// a light made now is dimmed: she sneaks with the setting on, she is hidden, or her lights are still coming back up (any thread)
 	bool SneakDimsNow()
 	{
-		if (gSneakLevel.load(std::memory_order_relaxed) < 1.0f) {
+		if (gSneakLevel.load(std::memory_order_relaxed) < 1.0f || gHidden.load(std::memory_order_relaxed)) {
 			return true;
 		}
 		if (!Plugin::SneakOn()) {
@@ -118,8 +191,11 @@ namespace
 
 	float StepSneakLevel(const RE::PlayerCharacter* a_player, float a_delta)
 	{
-		const bool  sneaking = Plugin::SneakOn() && a_player && a_player->IsSneaking();
-		const float target = sneaking ? static_cast<float>(Plugin::SneakBrightness()) / 100.0f : 1.0f;
+		const bool sneaking = Plugin::SneakOn() && a_player && a_player->IsSneaking();
+		const bool hidden = a_player && HiddenNow(*a_player);
+		gHidden.store(hidden, std::memory_order_relaxed);
+		const float target = hidden ? 0.0f : sneaking ? static_cast<float>(Plugin::SneakBrightness()) / 100.0f :
+		                                                1.0f;
 		const float step = std::clamp(a_delta, 0.0f, 0.25f) / kSneakFadeSeconds;
 		float       level = gSneakLevel.load(std::memory_order_relaxed);
 		level = level < target ? (std::min)(level + step, target) : (std::max)(level - step, target);
@@ -212,7 +288,8 @@ namespace
 		if (const auto* projectile = a_ref->As<RE::Projectile>(); projectile && hers(projectile->GetProjectileRuntimeData().shooter)) {
 			return true;
 		}
-		if (const auto* explosion = a_ref->As<RE::Explosion>(); explosion && hers(explosion->GetExplosionRuntimeData().actorOwner)) {
+		// As<> never matches a placed explosion: it shares its form type with BGSExplosion
+		if (const auto* explosion = skyrim_cast<const RE::Explosion*>(a_ref); explosion && hers(explosion->GetExplosionRuntimeData().actorOwner)) {
 			return true;
 		}
 		if (const auto* hazard = a_ref->As<RE::Hazard>(); hazard && hers(hazard->GetHazardRuntimeData().ownerActor)) {
@@ -656,7 +733,11 @@ namespace Plugin
 {
 	void FindSpellBases() { FindSpellBasesOnce(); }
 	void InstallSpellLightHooks() { InstallCallSites(); }
-	void InstallLateHooks() { InstallLoadHooks(); }
+	void InstallLateHooks()
+	{
+		InstallLoadHooks();
+		static_cast<void>(Signs());  // the perks and abilities that need the dark, found once here - never on the first frame of play
+	}
 }
 
 bool Plugin::WantedDark(RE::NiLight* a_light)

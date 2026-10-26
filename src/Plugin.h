@@ -202,6 +202,8 @@ namespace Plugin
 	void                SetSneakOn(bool a_on);
 	[[nodiscard]] int   SneakBrightness();  // percent, 0 to 100
 	void                SetSneakBrightness(int a_percent);
+	[[nodiscard]] bool  InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
+	void                SetInvisibleFadeOn(bool a_on);
 	[[nodiscard]] bool  HandLightsOn();
 	void                SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool  WeaponLightsOn();
@@ -227,9 +229,6 @@ namespace Plugin
 	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
 	[[nodiscard]] bool PerformanceMode();             // the Performance page's Quality pick on Performance (his 2026-10-20 order)
 	void               SetPerformanceMode(bool a_on);
-	[[nodiscard]] bool ShadowLightsPicked();  // Performance > Shadow-casting lights as the player set it
-	void               SetShadowLights(bool a_on);
-	[[nodiscard]] bool ShadowLights();  // that switch, never with Performance or all lights off
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);
@@ -297,7 +296,7 @@ namespace Plugin
 	[[nodiscard]] std::size_t LiveHeldLights();
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
-		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
+		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made);
 	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
 	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community
