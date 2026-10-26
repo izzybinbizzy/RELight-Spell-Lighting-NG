@@ -84,9 +84,6 @@ namespace Plugin
 			return nullptr;
 		}
 
-		// the ward color pick (Wards.cpp): White gives the ward's hand light white, in the layer's own strength and reach.
-		// Not while Dynamic Wards is loaded: it colors the wards and the menu hides the pick, so a White left in the settings
-		// file must not whiten the hand light under its color (the audit, 2026-10-14)
 		// a copy of a hand in another color, made once per hand (under gLock, like every caller)
 		const Hand* Tinted(std::unordered_map<const Hand*, Hand>& a_copies, const Hand* a_hand, const RE::NiColor& a_color)
 		{
@@ -101,8 +98,9 @@ namespace Plugin
 			return &it->second;
 		}
 
-		// Strange Wards' own hand shows (no 360 Ward): its pick's color, whatever the White look says - its Blue pick keeps the
-		// layer's blue
+		// the ward color pick: White gives the ward's hand light white, in the layer's own strength and reach - never while
+		// Dynamic Wards colors the wards. Strange Wards' own hand (no 360 Ward) wears its pick's color whatever the White look
+		// says; its Blue pick keeps the layer's blue
 		const Hand* Picked(const Hand* a_hand)
 		{
 			if (!a_hand || WardsSteppedDown() || MeshKey(a_hand->key) != "wardinhandfx") {

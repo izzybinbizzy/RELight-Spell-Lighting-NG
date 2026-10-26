@@ -312,9 +312,12 @@ namespace Plugin
 
 	bool StrangeWardsHandShows()
 	{
-		auto*      dh = RE::TESDataHandler::GetSingleton();
-		const bool has360 = dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
-		return !has360 && StrangeWardsLook().installed;
+		static const bool shows = [] {
+			auto*      dh = RE::TESDataHandler::GetSingleton();
+			const bool has360 = dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
+			return !has360 && StrangeWardsLook().installed;
+		}();
+		return shows;
 	}
 
 	std::optional<RE::NiColor> StrangeWardsPick() { return StrangeWardsLook().color; }
