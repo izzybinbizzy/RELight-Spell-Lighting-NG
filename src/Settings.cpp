@@ -9,6 +9,7 @@
 //   Reach=100                   percent, 50 to 150 - the peak is held
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
+//   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
 //   FadeWhileInvisible=1        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
@@ -47,6 +48,7 @@ namespace Plugin
 		std::atomic<int>                gReach{ 100 };
 		std::atomic<bool>               gSneak{ false };
 		std::atomic<int>                gSneakBrightness{ 0 };
+		std::atomic<bool>               gRunes{ true };
 		std::atomic<bool>               gInvisible{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
@@ -100,6 +102,7 @@ namespace Plugin
 			{ "Reach", [] { return gReach.load(); }, [](int v) { gReach = std::clamp(v, kReachMin, kReachMax); } },
 			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
+			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
 			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
@@ -279,10 +282,10 @@ namespace Plugin
 			off += (o.switchable && !o.on) ? 1 : 0;
 		}
 		SKSE::log::info(
-			"settings: brightness {}%, reach {}%, lights fade while sneaking {} (to {}%), hand lights {}, weapon lights {}, {} switch(es) off "
-			"({} line(s) read, {} problem(s))",
-			gBrightness.load(), gReach.load(), gSneak ? "on" : "off", gSneakBrightness.load(), gHands ? "on" : "off", gWeapons ? "on" : "off",
-			off, read, problems.size());
+			"settings: brightness {}%, reach {}%, lights fade while sneaking {} (to {}%, runes {}), hand lights {}, weapon lights {}, {} "
+			"switch(es) off ({} line(s) read, {} problem(s))",
+			gBrightness.load(), gReach.load(), gSneak ? "on" : "off", gSneakBrightness.load(), gRunes ? "fade" : "stay lit", gHands ? "on" : "off",
+			gWeapons ? "on" : "off", off, read, problems.size());
 	}
 
 	// The menu calls this on the RENDER thread, often many times while a slider is dragged: the file is written once, by an
@@ -337,6 +340,15 @@ namespace Plugin
 	}
 
 	int SneakBrightness() { return gSneakBrightness; }
+
+	bool RunesFadeOn() { return gRunes; }
+
+	void SetRunesFadeOn(bool a_on)
+	{
+		if (gRunes.exchange(a_on) != a_on) {
+			SKSE::log::info("runes fade while sneaking turned {}", a_on ? "on" : "off");
+		}
+	}
 
 	bool InvisibleFadeOn() { return gInvisible; }
 

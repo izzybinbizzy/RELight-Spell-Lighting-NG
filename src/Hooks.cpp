@@ -267,6 +267,7 @@ namespace
 		const void*   name{ nullptr };
 		const void*   parent{ nullptr };
 		bool          spell{ false };
+		bool          rune{ false };  // the Runes setting itself is read every frame, so a change reaches a known light
 		std::uint32_t frame{ 0 };
 	};
 	std::unordered_map<const RE::NiLight*, SneakKnown> gSneakKnown;
@@ -300,11 +301,22 @@ namespace
 		return cause && hers(cause->actor);
 	}
 
+	// a rune: a lobbed projectile set off by someone coming near (its proximity trigger) - a timed burst or a bloom has none
+	[[nodiscard]] bool IsRune(const RE::TESObjectREFR* a_ref)
+	{
+		const auto* base = a_ref && a_ref->Is(RE::FormType::ProjectileGrenade) ? a_ref->GetBaseObject() : nullptr;
+		const auto* data = base ? base->As<RE::BGSProjectile>() : nullptr;
+		return data && data->IsGrenade() && data->data.explosionProximity > 0.0f;
+	}
+
+	// a rune keeps its light while she sneaks when Runes says "Stay lit" (main thread)
+	[[nodiscard]] bool RuneStaysLit(const RE::TESObjectREFR* a_ref) { return !Plugin::RunesFadeOn() && IsRune(a_ref); }
+
 	// a spell light made through the hooked call goes dark while she sneaks when it hangs on her (a casting light) or on a magic
-	// object she cast - never on a trap's explosion that happens to go through the same call (any thread)
+	// object she cast - never on a trap's explosion that happens to go through the same call (main thread: CastByHer)
 	[[nodiscard]] bool SneakDarkens(const RE::TESObjectREFR* a_ref)
 	{
-		return CastByHer(a_ref) && (!a_ref || a_ref->As<RE::Actor>() || IsSpellObject(a_ref));
+		return CastByHer(a_ref) && !RuneStaysLit(a_ref) && (!a_ref || a_ref->As<RE::Actor>() || IsSpellObject(a_ref));
 	}
 
 	// any thread (a loader or job thread runs the hooks): no handle is resolved here - a light that MAY be hers goes out at
@@ -338,10 +350,10 @@ namespace
 				gSneakKnown.erase(a_light);
 				return false;
 			}
-			k = { name, parent, spell, gSneakFrame };
+			k = { name, parent, spell, IsRune(ref), gSneakFrame };
 		}
 		k.frame = gSneakFrame;
-		return k.spell;
+		return k.spell && !(k.rune && !Plugin::RunesFadeOn());
 	}
 
 	// the player update, at its start: every light dimmed last frame back to what the other passes left it, so this frame's
