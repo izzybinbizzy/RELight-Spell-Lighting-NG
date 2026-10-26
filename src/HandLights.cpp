@@ -87,18 +87,37 @@ namespace Plugin
 		// the ward color pick (Wards.cpp): White gives the ward's hand light white, in the layer's own strength and reach.
 		// Not while Dynamic Wards is loaded: it colors the wards and the menu hides the pick, so a White left in the settings
 		// file must not whiten the hand light under its color (the audit, 2026-10-14)
-		const Hand* Picked(const Hand* a_hand)
+		// a copy of a hand in another color, made once per hand (under gLock, like every caller)
+		const Hand* Tinted(std::unordered_map<const Hand*, Hand>& a_copies, const Hand* a_hand, const RE::NiColor& a_color)
 		{
-			if (!a_hand || WardsSteppedDown() || WardColor() != 1 || MeshKey(a_hand->key) != "wardinhandfx") {
-				return a_hand;
-			}
-			static std::unordered_map<const Hand*, Hand> white;  // under gLock, like every caller
-			auto [it, fresh] = white.try_emplace(a_hand, *a_hand);
+			auto [it, fresh] = a_copies.try_emplace(a_hand, *a_hand);
 			if (fresh) {
-				it->second.color = { 1.0f, 1.0f, 1.0f };
-				it->second.rgb[0] = it->second.rgb[1] = it->second.rgb[2] = 255;
+				const auto byte = [](float a_v) { return static_cast<std::uint8_t>(std::lround(std::clamp(a_v, 0.0f, 1.0f) * 255.0f)); };
+				it->second.color = a_color;
+				it->second.rgb[0] = byte(a_color.red);
+				it->second.rgb[1] = byte(a_color.green);
+				it->second.rgb[2] = byte(a_color.blue);
 			}
 			return &it->second;
+		}
+
+		// Strange Wards' own hand shows (no 360 Ward): its pick's color, whatever the White look says - its Blue pick keeps the
+		// layer's blue
+		const Hand* Picked(const Hand* a_hand)
+		{
+			if (!a_hand || WardsSteppedDown() || MeshKey(a_hand->key) != "wardinhandfx") {
+				return a_hand;
+			}
+			if (StrangeWardsHandShows()) {
+				static std::unordered_map<const Hand*, Hand> strange;
+				const auto                                   pick = StrangeWardsPick();
+				return pick ? Tinted(strange, a_hand, *pick) : a_hand;
+			}
+			if (WardColor() != 1) {
+				return a_hand;
+			}
+			static std::unordered_map<const Hand*, Hand> white;
+			return Tinted(white, a_hand, { 1.0f, 1.0f, 1.0f });
 		}
 
 		// vanilla MagicLightFrostHand01's shape (falloff 1, field of view 90, near clip 1) with the layer's color, reach and strength

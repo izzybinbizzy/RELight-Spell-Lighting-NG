@@ -207,6 +207,16 @@ namespace Plugin
 			gLive.erase(it);
 		}
 
+		// its spell set to Off in Lights by Item (the choice reads black; a chosen black lights nothing either): no row, so it
+		// holds none of the scene's row lights a lit row could use
+		bool SpellRowOff(const RE::TESObjectREFR* a_ref)
+		{
+			const auto* proj = a_ref ? a_ref->As<RE::Projectile>() : nullptr;
+			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
+			const auto  own = spell ? Fade::Items::ChoiceColor(spell->GetFormID()) : std::nullopt;
+			return own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f;
+		}
+
 		// true once the projectile wears its row
 		bool Hang(RE::TESObjectREFR* a_ref, RE::ShadowSceneNode* a_scene)
 		{
@@ -221,7 +231,7 @@ namespace Plugin
 			if (!node || !node->parent || !proj || recipe == gRecipes.end() || gLights >= kMostRowLights) {
 				return false;
 			}
-			if (recipe->second.option != kNone && !OptionLit(recipe->second.option)) {
+			if ((recipe->second.option != kNone && !OptionLit(recipe->second.option)) || SpellRowOff(a_ref)) {
 				return false;
 			}
 			const bool isl = InverseSquare();
@@ -358,7 +368,7 @@ namespace Plugin
 		std::vector<const RE::NiAVObject*> drop;
 		for (const auto& [root, live] : gLive) {
 			const bool gone = !live.root->parent || !live.ref || live.ref->Get3D() != live.root.get();
-			if (gone || !RowOn(live.hers) || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
+			if (gone || !RowOn(live.hers) || (live.recipe->option != kNone && !OptionLit(live.recipe->option)) || SpellRowOff(live.ref.get())) {
 				drop.push_back(root);
 				if (!gone) {
 					gParked.push_back(live.ref);

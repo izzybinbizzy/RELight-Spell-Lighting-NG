@@ -310,6 +310,15 @@ namespace Plugin
 
 	bool WardsSteppedDown() { return DynamicWardsLoaded(); }
 
+	bool StrangeWardsHandShows()
+	{
+		auto*      dh = RE::TESDataHandler::GetSingleton();
+		const bool has360 = dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
+		return !has360 && StrangeWardsLook().installed;
+	}
+
+	std::optional<RE::NiColor> StrangeWardsPick() { return StrangeWardsLook().color; }
+
 	void ApplyWards(const char* a_why)
 	{
 		if (DynamicWardsLoaded()) {

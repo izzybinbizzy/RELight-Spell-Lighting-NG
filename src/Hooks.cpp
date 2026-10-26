@@ -197,8 +197,8 @@ namespace
 	std::uint32_t                                      gSneakFrame = 0;
 
 	// the player's own: a light on her, or on what she cast (a projectile she shot, an explosion or hazard she set off). Only
-	// hers fade while she sneaks - an enemy's hands and runes and a trap keep their light. No owner counts as hers, as before
-	// (any thread: handles are only read)
+	// hers fade while she sneaks - an enemy's hands and runes and a trap keep their light. No owner counts as hers, as before.
+	// Main thread only: it resolves handles and the actor cause (the hooks below use MaybeSneakDarkens)
 	[[nodiscard]] bool CastByHer(const RE::TESObjectREFR* a_ref)
 	{
 		const auto* player = RE::PlayerCharacter::GetSingleton();
@@ -228,6 +228,19 @@ namespace
 	[[nodiscard]] bool SneakDarkens(const RE::TESObjectREFR* a_ref)
 	{
 		return CastByHer(a_ref) && (!a_ref || a_ref->As<RE::Actor>() || IsSpellObject(a_ref));
+	}
+
+	// any thread (a loader or job thread runs the hooks): no handle is resolved here - a light that MAY be hers goes out at
+	// once, and AdoptSneakCulled asks on the main thread whose it is
+	[[nodiscard]] bool MaybeSneakDarkens(const RE::TESObjectREFR* a_ref)
+	{
+		if (!a_ref) {
+			return true;
+		}
+		if (a_ref->As<RE::Actor>()) {
+			return a_ref == RE::PlayerCharacter::GetSingleton();
+		}
+		return IsSpellObject(a_ref);
 	}
 
 	// a light the sneaking pass puts out: a spell light the hooked call made, on a caster or on a magic object (never on a
@@ -366,7 +379,7 @@ namespace
 		if (made) {
 			LightKit::Guarded("spell light", [&]() {
 				const bool ours = hand || Plugin::IsSprayLight(a_light) || Plugin::IsStreamObject(a_ref);
-				const bool sneaking = SneakDimsNow() && SneakDarkens(a_ref);
+				const bool sneaking = SneakDimsNow() && MaybeSneakDarkens(a_ref);
 				if (sneaking) {
 					made->SetAppCulled(true);
 				}
@@ -418,6 +431,10 @@ namespace
 			if (light->GetRefCount() <= 1 || Plugin::HeldOutForOption(light.get()) || Plugin::HandLightHeldOut(light.get())) {
 				continue;  // already gone from the game, or held out
 			}
+			if (!SneakDarkens(Plugin::ReferenceOf(light.get()))) {
+				light->SetAppCulled(false);  // another caster's or a trap's, put out by the hook only to ask here: back at full strength
+				continue;
+			}
 			if (level < 1.0f) {
 				Plugin::KeepLight(light.get());
 				std::lock_guard lock(gDimLock);
@@ -445,9 +462,9 @@ namespace
 				if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
 					tasks->AddTask([lights = std::move(culled), option]() { Plugin::AdoptOptionLights(option, lights); });
 				}
-				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them (an arrow, a
-				// trap's explosion or an oil fire keeps its light - IsSpellObject)
-				if (SneakDimsNow() && IsSpellObject(a_this) && CastByHer(a_this)) {
+				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them, or gives them
+				// back when another caster made it (an arrow, a trap's explosion or an oil fire keeps its light - IsSpellObject)
+				if (SneakDimsNow() && MaybeSneakDarkens(a_this)) {
 					if (auto culled = CullTree(root); !culled.empty()) {
 						tasks->AddTask([lights = std::move(culled)]() { AdoptSneakCulled(lights); });
 					}
