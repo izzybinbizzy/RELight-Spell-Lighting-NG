@@ -167,14 +167,22 @@ namespace Plugin
 		}
 
 		// Strange Wards (a vanilla ward replacer, Nexus 139921) puts its own dome at the vanilla mesh path; its textures sit
-		// under effects\po3_strangerunes\. Its Amber and Sswaye Special picks differ only by the dome's base color.
-		constexpr RE::NiColor kStrangeAmber{ 0.886f, 0.345f, 0.133f };
-		constexpr RE::NiColor kStrangeWhite{ 0.935f, 0.869f, 0.843f };
+		// under effects\po3_strangerunes\. Its picks differ only by the dome's base color (read off its three meshes).
+		struct StrangePick
+		{
+			RE::NiColor base;
+			const char* name;
+			bool        tinted;  // our ward light takes its color; the Blue pick keeps the vanilla blue-white
+		};
+		constexpr std::array kStrangePicks{ StrangePick{ { 0.098f, 0.592f, 0.902f }, "the Blue pick", false },
+			StrangePick{ { 0.886f, 0.345f, 0.133f }, "the Amber pick", true },
+			StrangePick{ { 0.935f, 0.869f, 0.843f }, "the Sswaye Special pick", true } };
 
 		struct StrangeWards
 		{
 			bool                       installed{ false };
-			std::optional<RE::NiColor> color;  // none = its Blue pick, the vanilla blue-white
+			const StrangePick*         pick{ nullptr };  // none = a pick not known
+			std::optional<RE::NiColor> color;            // none = the vanilla blue-white
 		};
 
 		[[nodiscard]] bool Near(const RE::NiColor& a_a, const RE::NiColor& a_b)
@@ -182,34 +190,32 @@ namespace Plugin
 			return std::abs(a_a.red - a_b.red) < 0.02f && std::abs(a_a.green - a_b.green) < 0.02f && std::abs(a_a.blue - a_b.blue) < 0.02f;
 		}
 
+		// the model loader resolves on VR too (its id is in the VR Address Library), as Dynamic Wards' VR build uses it
 		StrangeWards ReadStrangeWards()
 		{
 			StrangeWards              s;
 			RE::NiPointer<RE::NiNode> root;
-			if (REL::Module::IsVR() || RE::BSModelDB::Demand("magic\\wardbodyfx.nif", root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone ||
-				!root) {
+			if (RE::BSModelDB::Demand("magic\\wardbodyfx.nif", root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone || !root) {
 				return s;
 			}
 			RE::BSVisit::TraverseScenegraphGeometries(root.get(), [&](RE::BSGeometry* a_geometry) {
 				auto* shader = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
 				auto* effect = netimmerse_cast<RE::BSEffectShaderProperty*>(shader);
 				auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr;
-				if (!material) {
-					return RE::BSVisit::BSVisitControl::kContinue;
+				if (!material || (!LightKit::Lower(material->sourceTexturePath.c_str()).contains("po3_strangerunes") &&
+									 !LightKit::Lower(material->greyscaleTexturePath.c_str()).contains("po3_strangerunes"))) {
+					return RE::BSVisit::BSVisitControl::kContinue;  // only Strange Wards' own blocks tell its pick
 				}
-				const auto source = LightKit::Lower(material->sourceTexturePath.c_str());
-				const auto grey = LightKit::Lower(material->greyscaleTexturePath.c_str());
-				s.installed = s.installed || source.contains("po3_strangerunes") || grey.contains("po3_strangerunes");
+				s.installed = true;
 				const RE::NiColor base{ material->baseColor.red, material->baseColor.green, material->baseColor.blue };
-				for (const auto& pick : { kStrangeAmber, kStrangeWhite }) {
-					if (Near(base, pick)) {
-						s.color = pick;
-					}
+				if (!s.pick) {
+					const auto found = std::ranges::find_if(kStrangePicks, [&](const StrangePick& a_pick) { return Near(base, a_pick.base); });
+					s.pick = found != kStrangePicks.end() ? &*found : nullptr;  // the first block that names a pick decides
 				}
 				return RE::BSVisit::BSVisitControl::kContinue;
 			});
-			if (!s.installed) {
-				s.color.reset();
+			if (s.pick && s.pick->tinted) {
+				s.color = s.pick->base;
 			}
 			return s;
 		}
@@ -218,9 +224,9 @@ namespace Plugin
 		{
 			static const StrangeWards look = [] {
 				auto s = ReadStrangeWards();
-				SKSE::log::info("wards: Strange Wards is {}{}", s.installed ? "installed - its dome keeps its own look" : "not installed",
-					!s.installed ? "" : s.color ? (Near(*s.color, kStrangeAmber) ? ", the Amber pick" : ", the Sswaye Special pick") :
-												  ", the Blue pick");
+				SKSE::log::info("wards: Strange Wards is {}{}", s.installed ? "installed - its dome keeps its own look, " : "not installed",
+					!s.installed ? "" : s.pick ? s.pick->name :
+												 "a pick not known (the vanilla blue-white light kept)");
 				return s;
 			}();
 			return look;
