@@ -112,7 +112,7 @@ namespace
 		for (const auto* item = a_condition.head; item; item = item->next) {
 			const auto op = item->data.flags.opCode;
 			if (item->data.functionData.function.get() == RE::FUNCTION_DATA::FunctionID::kGetLightLevel &&
-				(op == Op::kLessThan || op == Op::kLessThanOrEqualTo)) {
+				item->data.object.get() == RE::CONDITIONITEMOBJECT::kSelf && (op == Op::kLessThan || op == Op::kLessThanOrEqualTo)) {
 				return true;
 			}
 		}
