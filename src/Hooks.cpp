@@ -208,16 +208,19 @@ namespace
 		if (a_ref->As<RE::Actor>()) {
 			return a_ref == player;
 		}
-		if (const auto* projectile = a_ref->As<RE::Projectile>()) {
-			return projectile->GetProjectileRuntimeData().shooter.get().get() == player;
+		const auto hers = [player](const auto& a_handle) { return a_handle.get().get() == player; };
+		if (const auto* projectile = a_ref->As<RE::Projectile>(); projectile && hers(projectile->GetProjectileRuntimeData().shooter)) {
+			return true;
 		}
-		if (const auto* explosion = a_ref->As<RE::Explosion>()) {
-			return explosion->GetExplosionRuntimeData().actorOwner.get().get() == player;
+		if (const auto* explosion = a_ref->As<RE::Explosion>(); explosion && hers(explosion->GetExplosionRuntimeData().actorOwner)) {
+			return true;
 		}
-		if (const auto* hazard = a_ref->As<RE::Hazard>()) {
-			return hazard->GetHazardRuntimeData().ownerActor.get().get() == player;
+		if (const auto* hazard = a_ref->As<RE::Hazard>(); hazard && hers(hazard->GetHazardRuntimeData().ownerActor)) {
+			return true;
 		}
-		return false;
+		// a projectile an explosion spawned, or an explosion / hazard with no owner of its own: whoever set the chain off
+		const auto* cause = a_ref->GetActorCause();
+		return cause && hers(cause->actor);
 	}
 
 	// a spell light made through the hooked call goes dark while she sneaks when it hangs on her (a casting light) or on a magic

@@ -45,6 +45,7 @@ namespace Plugin
 			const RowRecipe*                        recipe{ nullptr };
 			std::vector<RE::NiPointer<RE::BSLight>> lights;
 			const RE::NiColor*                      tint{ nullptr };  // the art pick's color for this projectile, as its own light wears it (Brightness.cpp)
+			bool                                    hers{ false };    // cast by the player: it fades with her lights while she sneaks
 		};
 		std::unordered_map<const RE::NiAVObject*, Live> gLive;  // main thread
 		std::size_t                                     gLights = 0;
@@ -79,7 +80,8 @@ namespace Plugin
 
 		// while she sneaks the rows on HER spells fade with her spell lights (Hooks.cpp dims the lights on what she cast) and
 		// come off once faded out; another caster's row keeps its light
-		[[nodiscard]] bool RowOn(const RE::TESObjectREFR* a_ref) { return RowsOn() && (SneakLevel() > 0.0f || !CastByPlayer(a_ref)); }
+		[[nodiscard]] bool RowOn(bool a_hers) { return RowsOn() && (SneakLevel() > 0.0f || !a_hers); }
+		[[nodiscard]] bool RowOn(const RE::TESObjectREFR* a_ref) { return RowOn(CastByPlayer(a_ref)); }
 
 		// Community Shaders draws an inverse-square point light at four times its fade and writes back the reach that gives, so the
 		// cutoff is set for that (laid reach 197 read 389 otherwise)
@@ -228,6 +230,7 @@ namespace Plugin
 			const auto n = (std::min)(want.size(), kMostRowLights - gLights);
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };
 			live.tint = TintOf(base);
+			live.hers = CastByPlayer(a_ref);
 			for (std::size_t i = 0; i < n; ++i) {
 				auto* light = LightKit::CloneLight();
 				if (!light) {
@@ -355,7 +358,7 @@ namespace Plugin
 		std::vector<const RE::NiAVObject*> drop;
 		for (const auto& [root, live] : gLive) {
 			const bool gone = !live.root->parent || !live.ref || live.ref->Get3D() != live.root.get();
-			if (gone || !RowOn(live.ref.get()) || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
+			if (gone || !RowOn(live.hers) || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
 				drop.push_back(root);
 				if (!gone) {
 					gParked.push_back(live.ref);
