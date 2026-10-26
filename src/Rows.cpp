@@ -19,6 +19,7 @@
 // (github.com/TrumanGIT/ReLight, GPL-3.0-or-later, used with his permission), as Held.cpp MakeOwnLight.
 
 #include "BeamRow.h"
+#include "Fade.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -44,6 +45,7 @@ namespace Plugin
 			const RowRecipe*                        recipe{ nullptr };
 			std::vector<RE::NiPointer<RE::BSLight>> lights;
 			const RE::NiColor*                      tint{ nullptr };  // the art pick's color for this projectile, as its own light wears it (Brightness.cpp)
+			bool                                    hers{ false };    // cast by the player: it fades with her lights while she sneaks
 		};
 		std::unordered_map<const RE::NiAVObject*, Live> gLive;  // main thread
 		std::size_t                                     gLights = 0;
@@ -74,12 +76,12 @@ namespace Plugin
 			return a_lighting == Lighting::kShaders ? 1.0f : 2.0f;
 		}
 
-		[[nodiscard]] bool RowsOn()
-		{
-			// while she sneaks the rows fade with her spell lights (Hooks.cpp dims every light on a magic projectile), and
-			// come off once faded out
-			return !PerformanceMode() && !AllLightsOff() && SneakLevel() > 0.0f;
-		}
+		[[nodiscard]] bool RowsOn() { return !PerformanceMode() && !AllLightsOff(); }
+
+		// while she sneaks the rows on HER spells fade with her spell lights (Hooks.cpp dims the lights on what she cast) and
+		// come off once faded out; another caster's row keeps its light
+		[[nodiscard]] bool RowOn(bool a_hers) { return RowsOn() && (SneakLevel() > 0.0f || !a_hers); }
+		[[nodiscard]] bool RowOn(const RE::TESObjectREFR* a_ref) { return RowOn(CastByPlayer(a_ref)); }
 
 		// Community Shaders draws an inverse-square point light at four times its fade and writes back the reach that gives, so the
 		// cutoff is set for that (laid reach 197 read 389 otherwise)
@@ -205,6 +207,16 @@ namespace Plugin
 			gLive.erase(it);
 		}
 
+		// its spell set to Off in Lights by Item (the choice reads black; a chosen black lights nothing either): no row, so it
+		// holds none of the scene's row lights a lit row could use
+		bool SpellRowOff(const RE::TESObjectREFR* a_ref)
+		{
+			const auto* proj = a_ref ? a_ref->As<RE::Projectile>() : nullptr;
+			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
+			const auto  own = spell ? Fade::Items::ChoiceColor(spell->GetFormID()) : std::nullopt;
+			return own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f;
+		}
+
 		// true once the projectile wears its row
 		bool Hang(RE::TESObjectREFR* a_ref, RE::ShadowSceneNode* a_scene)
 		{
@@ -219,7 +231,7 @@ namespace Plugin
 			if (!node || !node->parent || !proj || recipe == gRecipes.end() || gLights >= kMostRowLights) {
 				return false;
 			}
-			if (recipe->second.option != kNone && !OptionLit(recipe->second.option)) {
+			if ((recipe->second.option != kNone && !OptionLit(recipe->second.option)) || SpellRowOff(a_ref)) {
 				return false;
 			}
 			const bool isl = InverseSquare();
@@ -228,6 +240,7 @@ namespace Plugin
 			const auto n = (std::min)(want.size(), kMostRowLights - gLights);
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };
 			live.tint = TintOf(base);
+			live.hers = CastByPlayer(a_ref);
 			for (std::size_t i = 0; i < n; ++i) {
 				auto* light = LightKit::CloneLight();
 				if (!light) {
@@ -284,7 +297,12 @@ namespace Plugin
 				}
 				const auto  toLocal = live.root->world.Invert();
 				const auto  row = BeamRow::Lay(length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
-				const auto& color = live.tint ? *live.tint : rec.color;
+				RE::NiColor color = live.tint ? *live.tint : rec.color;
+				if (auto* fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr; fired && fired->GetProjectileRuntimeData().spell) {
+					if (const auto own = Fade::Items::ChoiceColor(fired->GetProjectileRuntimeData().spell->GetFormID())) {
+						color = *own;  // the spell's Lights by Item color reaches its row too
+					}
+				}
 				for (std::size_t i = 0; i < live.lights.size(); ++i) {
 					auto* light = live.lights[i] ? netimmerse_cast<RE::NiPointLight*>(live.lights[i]->light.get()) : nullptr;
 					if (!light) {
@@ -350,7 +368,7 @@ namespace Plugin
 		std::vector<const RE::NiAVObject*> drop;
 		for (const auto& [root, live] : gLive) {
 			const bool gone = !live.root->parent || !live.ref || live.ref->Get3D() != live.root.get();
-			if (!on || gone || (live.recipe->option != kNone && !OptionLit(live.recipe->option))) {
+			if (gone || !RowOn(live.hers) || (live.recipe->option != kNone && !OptionLit(live.recipe->option)) || SpellRowOff(live.ref.get())) {
 				drop.push_back(root);
 				if (!gone) {
 					gParked.push_back(live.ref);
@@ -364,9 +382,9 @@ namespace Plugin
 			gParked.insert(gParked.end(), queued.begin(), queued.end());
 		} else if (scene) {
 			// kept while its option or the light cap still holds it back, so it is tried again
-			std::erase_if(gParked, [scene](const auto& a_ref) { return Hang(a_ref.get(), scene); });
+			std::erase_if(gParked, [scene](const auto& a_ref) { return RowOn(a_ref.get()) && Hang(a_ref.get(), scene); });
 			for (const auto& ref : queued) {
-				if (!Hang(ref.get(), scene)) {
+				if (!RowOn(ref.get()) || !Hang(ref.get(), scene)) {
 					gParked.push_back(ref);
 				}
 			}

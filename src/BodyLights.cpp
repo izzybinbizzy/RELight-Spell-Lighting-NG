@@ -37,7 +37,8 @@ namespace Plugin
 			RE::NiPointer<RE::NiPointLight>         light;
 			float                                   written{ -1.0f }, wroteReach{ -1.0f };
 			bool                                    seen{ false };
-			bool                                    hers{ false };  // on the player: it fades with her spell lights while she sneaks
+			bool                                    hers{ false };    // on the player: it fades with her spell lights while she sneaks
+			bool                                    shadow{ false };  // a shadow caster (hers, "Shadow-casting lights" on)
 		};
 
 		std::vector<Live> gLive;  // main thread only
@@ -144,9 +145,13 @@ namespace Plugin
 				if (!node) {
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
-				// already lit: kept, unless its node was rebuilt (a view switch, a new 3D) - then it is made again below
+				// her body glow casts shadows with "Shadow-casting lights" on, as Illuminated's art lights (ArtLights.cpp)
+				const bool hers = actor == player;
+				const bool shadow = hers && ShadowLights();
+				// already lit: kept, unless its node was rebuilt (a view switch, a new 3D) or it must change kind (a light cannot
+				// become a shadow caster once in the scene) - then it is made again below
 				const auto have = std::ranges::find_if(gLive, [art](const Live& v) { return v.art.get() == art; });
-				if (have != gLive.end() && have->node.get() == node && have->body == body) {
+				if (have != gLive.end() && have->node.get() == node && have->body == body && have->shadow == shadow) {
 					have->seen = true;
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
@@ -169,11 +174,10 @@ namespace Plugin
 					}
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
-				const bool        hers = actor == player;
 				const float       fade = body->fade * scale * (hers ? sneak : 1.0f);
 				const float       reach = body->radius * reachScale;
 				RE::NiPointLight* light = nullptr;
-				auto*             bs = MakeOwnLight(*body, fade, reach, node, scene, kLightName, light);
+				auto*             bs = MakeOwnLight(*body, fade, reach, node, scene, kLightName, light, shadow);
 				if (!bs) {
 					if (failed != gFailed.end()) {
 						failed->retryAt = gUpdate + kRetryUpdates;
@@ -188,7 +192,7 @@ namespace Plugin
 					gFailed.erase(failed);  // made at last: a later failure warns again
 				}
 				gLive.push_back({ RE::NiPointer<RE::ModelReferenceEffect>(art), body, RE::NiPointer<RE::NiNode>(node),
-					RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, true, hers });
+					RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, true, hers, shadow });
 				if (++gMade <= 16) {
 					SKSE::log::info("[BODY] {} | on {:08X} at {} | fade {:.2f} | radius {:.0f}", body->key, actor->GetFormID(),
 						node->name.c_str(), fade, reach);

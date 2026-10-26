@@ -196,9 +196,52 @@ namespace
 	std::unordered_map<const RE::NiLight*, SneakKnown> gSneakKnown;
 	std::uint32_t                                      gSneakFrame = 0;
 
-	// a spell light made through the hooked call goes dark while she sneaks when it hangs on a caster (a casting light) or
-	// on a magic object - never on a trap's explosion that happens to go through the same call (any thread)
-	[[nodiscard]] bool SneakDarkens(const RE::TESObjectREFR* a_ref) { return !a_ref || a_ref->As<RE::Actor>() || IsSpellObject(a_ref); }
+	// the player's own: a light on her, or on what she cast (a projectile she shot, an explosion or hazard she set off). Only
+	// hers fade while she sneaks - an enemy's hands and runes and a trap keep their light. No owner counts as hers, as before.
+	// Main thread only: it resolves handles and the actor cause (the hooks below use MaybeSneakDarkens)
+	[[nodiscard]] bool CastByHer(const RE::TESObjectREFR* a_ref)
+	{
+		const auto* player = RE::PlayerCharacter::GetSingleton();
+		if (!a_ref || !player) {
+			return !a_ref;
+		}
+		if (a_ref->As<RE::Actor>()) {
+			return a_ref == player;
+		}
+		const auto hers = [player](const auto& a_handle) { return a_handle.get().get() == player; };
+		if (const auto* projectile = a_ref->As<RE::Projectile>(); projectile && hers(projectile->GetProjectileRuntimeData().shooter)) {
+			return true;
+		}
+		if (const auto* explosion = a_ref->As<RE::Explosion>(); explosion && hers(explosion->GetExplosionRuntimeData().actorOwner)) {
+			return true;
+		}
+		if (const auto* hazard = a_ref->As<RE::Hazard>(); hazard && hers(hazard->GetHazardRuntimeData().ownerActor)) {
+			return true;
+		}
+		// a projectile an explosion spawned, or an explosion / hazard with no owner of its own: whoever set the chain off
+		const auto* cause = a_ref->GetActorCause();
+		return cause && hers(cause->actor);
+	}
+
+	// a spell light made through the hooked call goes dark while she sneaks when it hangs on her (a casting light) or on a magic
+	// object she cast - never on a trap's explosion that happens to go through the same call (any thread)
+	[[nodiscard]] bool SneakDarkens(const RE::TESObjectREFR* a_ref)
+	{
+		return CastByHer(a_ref) && (!a_ref || a_ref->As<RE::Actor>() || IsSpellObject(a_ref));
+	}
+
+	// any thread (a loader or job thread runs the hooks): no handle is resolved here - a light that MAY be hers goes out at
+	// once, and AdoptSneakCulled asks on the main thread whose it is
+	[[nodiscard]] bool MaybeSneakDarkens(const RE::TESObjectREFR* a_ref)
+	{
+		if (!a_ref) {
+			return true;
+		}
+		if (a_ref->As<RE::Actor>()) {
+			return a_ref == RE::PlayerCharacter::GetSingleton();
+		}
+		return IsSpellObject(a_ref);
+	}
 
 	// a light the sneaking pass puts out: a spell light the hooked call made, on a caster or on a magic object (never on a
 	// trap's explosion that happens to go through the same call), or any light on a magic projectile, explosion or hazard
@@ -209,9 +252,10 @@ namespace
 		const void* parent = a_light->parent;
 		if (k.frame == 0 || k.name != name || k.parent != parent) {
 			const auto* ref = Plugin::ReferenceOf(a_light);
+			const bool  hers = CastByHer(ref);
 			const bool  made = gMagicLights.contains(a_light);
-			const bool  spell = IsSpellObject(ref) || (made && SneakDarkens(ref));
-			if (!spell && ref && ref->As<RE::Actor>()) {
+			const bool  spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)));
+			if (!spell && hers && ref && ref->As<RE::Actor>()) {
 				// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again
 				// next frame, never remembered as "not a spell light"
 				gSneakKnown.erase(a_light);
@@ -335,7 +379,7 @@ namespace
 		if (made) {
 			LightKit::Guarded("spell light", [&]() {
 				const bool ours = hand || Plugin::IsSprayLight(a_light) || Plugin::IsStreamObject(a_ref);
-				const bool sneaking = SneakDimsNow() && SneakDarkens(a_ref);
+				const bool sneaking = SneakDimsNow() && MaybeSneakDarkens(a_ref);
 				if (sneaking) {
 					made->SetAppCulled(true);
 				}
@@ -387,6 +431,10 @@ namespace
 			if (light->GetRefCount() <= 1 || Plugin::HeldOutForOption(light.get()) || Plugin::HandLightHeldOut(light.get())) {
 				continue;  // already gone from the game, or held out
 			}
+			if (!SneakDarkens(Plugin::ReferenceOf(light.get()))) {
+				light->SetAppCulled(false);  // another caster's or a trap's, put out by the hook only to ask here: back at full strength
+				continue;
+			}
 			if (level < 1.0f) {
 				Plugin::KeepLight(light.get());
 				std::lock_guard lock(gDimLock);
@@ -414,9 +462,9 @@ namespace
 				if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
 					tasks->AddTask([lights = std::move(culled), option]() { Plugin::AdoptOptionLights(option, lights); });
 				}
-				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them (an arrow, a
-				// trap's explosion or an oil fire keeps its light - IsSpellObject)
-				if (SneakDimsNow() && IsSpellObject(a_this)) {
+				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them, or gives them
+				// back when another caster made it (an arrow, a trap's explosion or an oil fire keeps its light - IsSpellObject)
+				if (SneakDimsNow() && MaybeSneakDarkens(a_this)) {
 					if (auto culled = CullTree(root); !culled.empty()) {
 						tasks->AddTask([lights = std::move(culled)]() { AdoptSneakCulled(lights); });
 					}
@@ -619,6 +667,8 @@ bool Plugin::WantedDark(RE::NiLight* a_light)
 }
 
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }
+
+bool Plugin::CastByPlayer(const RE::TESObjectREFR* a_ref) { return CastByHer(a_ref); }
 
 bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 {

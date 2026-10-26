@@ -62,6 +62,11 @@ namespace
 			Plugin::gNearby);
 		Fade::Tuning::Register("Vanilla and ENB", "GroundLights", 1.0f, 0.0f, 1.0f,
 			"1: off Community Shaders a hand light lights the ground too (its twin, made with land lighting on); 0: off", Plugin::gGroundLightsOn);
+		if (REL::Module::IsVR()) {
+			// only the VR build's file carries the line, as Illuminated's
+			Fade::Tuning::Register("Vanilla and ENB", "GroundLightAtVRHand", 0.0f, 0.0f, 1.0f,
+				"VR only - 1: a hand's ground light hangs at your VR hand; 0: at the body's hand (the default)", Plugin::gGroundLightVRHand);
+		}
 		Plugin::LoadSettings(false);  // the art picks and Dynamic Lighting decide which data files count
 		Plugin::FixDynamicLighting();
 		Plugin::LoadData();

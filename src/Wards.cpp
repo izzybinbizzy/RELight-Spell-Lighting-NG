@@ -15,7 +15,8 @@
 // pointed at our meshes (`meshes\magic\Glow Wards\`): the dome (with 360 Ward the 360 sphere, in place of its orange), the
 // hand art and 360 Ward's hit flash. Vanilla keeps the vanilla dome and hand, and gives the 360 sphere and flash the TRUE
 // vanilla blue - `Glow Wards\Vanilla\`, the same files Illuminated uses (his answer 2026-10-13; the old `Blue\` sphere was
-// Dynamic Wards' deeper Adept Blue). The hand light follows in HandLights.cpp. Nothing is saved.
+// Dynamic Wards' deeper Adept Blue) and a hand in the sphere's blue beside it. With Strange Wards the hand keeps the game's own
+// art, which reads the gradient its pick ships. The hand light follows in HandLights.cpp. Nothing is saved.
 
 #include "Plugin.h"
 
@@ -40,13 +41,17 @@ namespace Plugin
 			const char* hand;
 			const char* wornDome;
 			const char* wornHand;
+			const char* sphereHand;  // the hands beside 360 Ward's sphere
+			const char* sphereWornHand;
 		};
 		constexpr Look kWhite{ "Magic\\Glow Wards\\White\\wardbodyfx360.nif", "Magic\\Glow Wards\\White\\wardshieldhitfx.nif",
 			"Magic\\Glow Wards\\White\\wardbodyfx.nif", "Magic\\Glow Wards\\White\\wardinhandfx.nif",
-			"Magic\\Glow Wards\\White\\wardbodyfxworn.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif" };
+			"Magic\\Glow Wards\\White\\wardbodyfxworn.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif",
+			"Magic\\Glow Wards\\White\\wardinhandfx.nif", "Magic\\Glow Wards\\White\\wardinhandfxworn.nif" };
 		constexpr Look kVanillaBlue{ "Magic\\Glow Wards\\Vanilla\\wardbodyfx360.nif", "Magic\\Glow Wards\\Vanilla\\wardshieldhitfx.nif",
 			"Magic\\Glow Wards\\Blue\\wardbodyfx.nif", "Magic\\Glow Wards\\Blue\\wardinhandfx.nif",
-			"Magic\\Glow Wards\\Blue\\wardbodyfxworn.nif", "Magic\\Glow Wards\\Blue\\wardinhandfxworn.nif" };
+			"Magic\\Glow Wards\\Blue\\wardbodyfxworn.nif", "Magic\\Glow Wards\\Blue\\wardinhandfxworn.nif",
+			"Magic\\Glow Wards\\Vanilla\\wardinhandfx.nif", "Magic\\Glow Wards\\Vanilla\\wardinhandfxworn.nif" };
 
 		RE::BGSArtObject*                                  gEmpty = nullptr;
 		std::vector<RE::EffectSetting*>                    gSilenced;
@@ -161,6 +166,66 @@ namespace Plugin
 			return changed;
 		}
 
+		// Strange Wards (a vanilla ward replacer, Nexus 139921) puts its own dome at the vanilla mesh path; its textures sit
+		// under effects\po3_strangerunes\. Its Amber and Sswaye Special picks differ only by the dome's base color.
+		constexpr RE::NiColor kStrangeAmber{ 0.886f, 0.345f, 0.133f };
+		constexpr RE::NiColor kStrangeWhite{ 0.935f, 0.869f, 0.843f };
+
+		struct StrangeWards
+		{
+			bool                       installed{ false };
+			std::optional<RE::NiColor> color;  // none = its Blue pick, the vanilla blue-white
+		};
+
+		[[nodiscard]] bool Near(const RE::NiColor& a_a, const RE::NiColor& a_b)
+		{
+			return std::abs(a_a.red - a_b.red) < 0.02f && std::abs(a_a.green - a_b.green) < 0.02f && std::abs(a_a.blue - a_b.blue) < 0.02f;
+		}
+
+		StrangeWards ReadStrangeWards()
+		{
+			StrangeWards              s;
+			RE::NiPointer<RE::NiNode> root;
+			if (REL::Module::IsVR() || RE::BSModelDB::Demand("magic\\wardbodyfx.nif", root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone ||
+				!root) {
+				return s;
+			}
+			RE::BSVisit::TraverseScenegraphGeometries(root.get(), [&](RE::BSGeometry* a_geometry) {
+				auto* shader = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
+				auto* effect = netimmerse_cast<RE::BSEffectShaderProperty*>(shader);
+				auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr;
+				if (!material) {
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				const auto source = LightKit::Lower(material->sourceTexturePath.c_str());
+				const auto grey = LightKit::Lower(material->greyscaleTexturePath.c_str());
+				s.installed = s.installed || source.contains("po3_strangerunes") || grey.contains("po3_strangerunes");
+				const RE::NiColor base{ material->baseColor.red, material->baseColor.green, material->baseColor.blue };
+				for (const auto& pick : { kStrangeAmber, kStrangeWhite }) {
+					if (Near(base, pick)) {
+						s.color = pick;
+					}
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+			if (!s.installed) {
+				s.color.reset();
+			}
+			return s;
+		}
+
+		const StrangeWards& StrangeWardsLook()
+		{
+			static const StrangeWards look = [] {
+				auto s = ReadStrangeWards();
+				SKSE::log::info("wards: Strange Wards is {}{}", s.installed ? "installed - its dome keeps its own look" : "not installed",
+					!s.installed ? "" : s.color ? (Near(*s.color, kStrangeAmber) ? ", the Amber pick" : ", the Sswaye Special pick") :
+												  ", the Blue pick");
+				return s;
+			}();
+			return look;
+		}
+
 		// point an art form at our copy, or back at the model it had
 		void Point(RE::BGSArtObject* a_art, const char* a_ours)
 		{
@@ -195,12 +260,15 @@ namespace Plugin
 			if (has360) {
 				Point(dome, look.sphere);
 				Point(flash, look.flash);
+			} else if (StrangeWardsLook().installed) {
+				Point(dome, nullptr);  // Strange Wards' own dome, whatever the color pick
 			} else {
 				// his call: Vanilla blue wears OUR dome too - the vanilla look, reading our own copies of its
 				// textures, so no other mod's loose textures reach it
 				Point(dome, look.dome);
 			}
-			Point(hand, look.hand);
+			Point(hand, has360 ? look.sphereHand : StrangeWardsLook().installed ? nullptr :
+																				  look.hand);
 			// the worn wards: their own hand always (its graph has the same fault on 360), their own dome unless 360 Ward's
 			// sphere - already on BeginLoopEnd - is the dome
 			if (!gWornDome) {
@@ -211,7 +279,7 @@ namespace Plugin
 			}
 			if (gWornDome && gWornHand) {
 				gWornDome->SetModel(look.wornDome);
-				gWornHand->SetModel(look.wornHand);
+				gWornHand->SetModel(has360 ? look.sphereWornHand : look.wornHand);
 				std::size_t worn = 0;
 				for (const auto& r : kWorn) {
 					if (auto* e = dh->LookupForm<RE::EffectSetting>(r.id, r.plugin)) {
@@ -227,7 +295,13 @@ namespace Plugin
 				if (!gWardLightColor) {
 					gWardLightColor = light->data.color;
 				}
-				light->data.color = white ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
+				if (const auto& strange = StrangeWardsLook(); strange.installed && strange.color && !has360) {
+					const auto byte = [](float a_value) { return static_cast<std::uint8_t>(std::lround(std::clamp(a_value, 0.0f, 1.0f) * 255.0f)); };
+					light->data.color = RE::Color{ byte(strange.color->red), byte(strange.color->green), byte(strange.color->blue), 0 };
+				} else {
+					// Strange Wards' Blue pick keeps its own blue dome, so its light stays the game's blue whatever the look
+					light->data.color = white && !(strange.installed && !has360) ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
+				}
 			}
 			SKSE::log::info("wards: {} {} ({}), hand {}", has360 ? "360 sphere" : "dome", white ? "white" : "vanilla blue",
 				dome && dome->GetModel() ? dome->GetModel() : "no art form", hand && hand->GetModel() ? hand->GetModel() : "no art form");
@@ -235,6 +309,18 @@ namespace Plugin
 	}
 
 	bool WardsSteppedDown() { return DynamicWardsLoaded(); }
+
+	bool StrangeWardsHandShows()
+	{
+		static const bool shows = [] {
+			auto*      dh = RE::TESDataHandler::GetSingleton();
+			const bool has360 = dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
+			return !has360 && StrangeWardsLook().installed;
+		}();
+		return shows;
+	}
+
+	std::optional<RE::NiColor> StrangeWardsPick() { return StrangeWardsLook().color; }
 
 	void ApplyWards(const char* a_why)
 	{

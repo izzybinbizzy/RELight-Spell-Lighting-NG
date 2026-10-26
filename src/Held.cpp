@@ -35,6 +35,7 @@ namespace Plugin
 			RE::NiPointer<RE::BSLight>      bs;
 			RE::NiPointer<RE::NiPointLight> light;
 			float                           written{ -1.0f }, wroteReach{ -1.0f };
+			bool                            shadow{ false };  // a shadow caster (her own, "Shadow-casting lights" on)
 		};
 
 		std::vector<Live> gLive;
@@ -209,7 +210,7 @@ namespace Plugin
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
 	// lights (BodyLights.cpp) are both made here
 	RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent, RE::ShadowSceneNode* a_scene,
-		const char* a_name, RE::NiPointLight*& a_made)
+		const char* a_name, RE::NiPointLight*& a_made, bool a_shadow)
 	{
 		auto* light = LightKit::CloneLight();
 		if (!light) {
@@ -240,7 +241,7 @@ namespace Plugin
 		a_parent->AttachChild(light, true);
 		RE::NiUpdateData update{};
 		light->Update(update);
-		auto* bs = LightKit::AddToScene(a_scene, light);
+		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true, a_shadow);
 		if (!bs) {
 			a_parent->DetachChild(light);
 			return nullptr;
@@ -287,9 +288,13 @@ namespace Plugin
 				}
 			}
 		}
-		// what is no longer wanted, or hangs on a node the actor no longer has (a view switch rebuilds it), comes off
+		// her own held lights cast shadows with "Shadow-casting lights" on, as Illuminated's weapon lights (ArtLights.cpp)
+		const bool shadows = ShadowLights();
+		const auto shadowFor = [&](RE::FormID a_actor) { return shadows && a_actor == player->GetFormID(); };
+		// what is no longer wanted, or hangs on a node the actor no longer has (a view switch rebuilds it), or must change kind
+		// (a light cannot become a shadow caster once in the scene: remade), comes off
 		std::erase_if(gLive, [&](Live& v) {
-			const bool keep = std::ranges::any_of(want, [&v](const Want& w) {
+			const bool keep = v.shadow == shadowFor(v.actor) && std::ranges::any_of(want, [&v](const Want& w) {
 				return w.actor->GetFormID() == v.actor && w.left == v.left && w.firstPerson == v.firstPerson && w.held == v.held &&
 				       w.node == v.node.get();
 			});
@@ -320,7 +325,8 @@ namespace Plugin
 			const float       fade = ownFade(*w.held, w.actor->GetFormID()) * scale;
 			const float       reach = w.held->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
-			auto*             bs = MakeOwnLight(*w.held, fade, reach, w.node, scene, kLightName, light);
+			const bool        shadow = shadowFor(w.actor->GetFormID());
+			auto*             bs = MakeOwnLight(*w.held, fade, reach, w.node, scene, kLightName, light, shadow);
 			if (!bs) {
 				if (const auto failed = std::ranges::find_if(gFailed, [&w](const Failed& f) { return f.Is(w); }); failed != gFailed.end()) {
 					failed->retryAt = gUpdate + kRetryUpdates;
@@ -333,7 +339,7 @@ namespace Plugin
 			}
 			std::erase_if(gFailed, [&w](const Failed& f) { return f.Is(w); });  // made at last: a later failure warns again
 			gLive.push_back({ w.actor->GetFormID(), w.left, w.firstPerson, w.held, RE::NiPointer<RE::NiNode>(w.node),
-				RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach });
+				RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, shadow });
 			if (gTold < 16) {
 				++gTold;
 				SKSE::log::info("[HELD] {} | {:08X} {} hand, {} person | fade {:.2f} | radius {:.0f}", w.held->key, w.actor->GetFormID(),

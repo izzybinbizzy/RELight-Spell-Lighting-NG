@@ -532,6 +532,15 @@ namespace Fade::Items
 		return gHolding.load(std::memory_order_relaxed);
 	}
 
+	std::optional<RE::NiColor> ChoiceColor(RE::FormID a_id)
+	{
+		const auto it = gApplied.find(a_id);
+		if (it == gApplied.end() || it->second.Auto()) {
+			return std::nullopt;
+		}
+		return it->second.off ? RE::NiColor{ 0.0f, 0.0f, 0.0f } : it->second.color;
+	}
+
 	void Release()
 	{
 		SaveIfSettled(true);
