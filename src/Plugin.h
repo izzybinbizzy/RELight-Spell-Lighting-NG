@@ -33,8 +33,9 @@ namespace Plugin
 	using LightKit::SameText;  // and the one case-blind compare
 
 	// the mod's own values in the advanced settings file (his rule, Fade::Tuning; registered in main.cpp)
-	inline std::atomic<float> gNearby{ 2800.0f };       // [Lights] NearbyDistance: Hand lights for - Everyone nearby
-	inline std::atomic<float> gGroundLightsOn{ 1.0f };  // [Vanilla and ENB] GroundLights
+	inline std::atomic<float> gNearby{ 2800.0f };          // [Lights] NearbyDistance: Hand lights for - Everyone nearby
+	inline std::atomic<float> gGroundLightsOn{ 1.0f };     // [Vanilla and ENB] GroundLights
+	inline std::atomic<float> gGroundLightVRHand{ 0.0f };  // [Vanilla and ENB] GroundLightAtVRHand - VR only (Illuminated's)
 
 	struct Option
 	{
@@ -294,7 +295,7 @@ namespace Plugin
 	[[nodiscard]] std::size_t LiveHeldLights();
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
-		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made);
+		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
 	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
 	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community
