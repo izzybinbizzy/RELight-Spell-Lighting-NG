@@ -9,6 +9,7 @@
 //   Reach=100                   percent, 50 to 150 - the peak is held
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
+//   FadeWhileInvisible=1        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
@@ -46,6 +47,7 @@ namespace Plugin
 		std::atomic<int>                gReach{ 100 };
 		std::atomic<bool>               gSneak{ false };
 		std::atomic<int>                gSneakBrightness{ 0 };
+		std::atomic<bool>               gInvisible{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
@@ -60,7 +62,6 @@ namespace Plugin
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
 		std::atomic<bool> gPerformance{ false };
-		std::atomic<bool> gShadows{ false };  // Performance > Shadow-casting lights
 
 		[[nodiscard]] std::string_view Trim(std::string_view a_s) noexcept
 		{
@@ -99,6 +100,7 @@ namespace Plugin
 			{ "Reach", [] { return gReach.load(); }, [](int v) { gReach = std::clamp(v, kReachMin, kReachMax); } },
 			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
+			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
@@ -112,7 +114,6 @@ namespace Plugin
 			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
-			{ "ShadowLights", [] { return gShadows ? 1 : 0; }, [](int v) { gShadows = v != 0; } },
 		};
 
 		// [Switches] lines for options that are not installed now, as read: written back unchanged, so an option taken out
@@ -337,6 +338,15 @@ namespace Plugin
 
 	int SneakBrightness() { return gSneakBrightness; }
 
+	bool InvisibleFadeOn() { return gInvisible; }
+
+	void SetInvisibleFadeOn(bool a_on)
+	{
+		if (gInvisible.exchange(a_on) != a_on) {
+			SKSE::log::info("lights fade while invisible or in shadow turned {}", a_on ? "on" : "off");
+		}
+	}
+
 	void SetSneakBrightness(int a_percent)
 	{
 		a_percent = std::clamp(a_percent, 0, 100);
@@ -426,9 +436,6 @@ namespace Plugin
 	void SetDynamicLighting(bool a_on) { gDynamic = a_on; }
 	bool PerformanceMode() { return gPerformance; }
 	void SetPerformanceMode(bool a_on) { gPerformance = a_on; }
-	bool ShadowLightsPicked() { return gShadows; }
-	void SetShadowLights(bool a_on) { gShadows = a_on; }
-	bool ShadowLights() { return gShadows && !gPerformance && !gAllOff; }
 
 	// his call: a pack the build split across the downloads is ONE switch - its files share a `file` line, so
 	// every option with that id turns together
