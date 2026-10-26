@@ -202,6 +202,8 @@ namespace Plugin
 	void                SetSneakOn(bool a_on);
 	[[nodiscard]] int   SneakBrightness();  // percent, 0 to 100
 	void                SetSneakBrightness(int a_percent);
+	[[nodiscard]] bool  RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
+	void                SetRunesFadeOn(bool a_on);
 	[[nodiscard]] bool  InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
 	void                SetInvisibleFadeOn(bool a_on);
 	[[nodiscard]] bool  HandLightsOn();
