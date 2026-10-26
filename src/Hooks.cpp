@@ -733,7 +733,11 @@ namespace Plugin
 {
 	void FindSpellBases() { FindSpellBasesOnce(); }
 	void InstallSpellLightHooks() { InstallCallSites(); }
-	void InstallLateHooks() { InstallLoadHooks(); }
+	void InstallLateHooks()
+	{
+		InstallLoadHooks();
+		static_cast<void>(Signs());  // the perks and abilities that need the dark, found once here - never on the first frame of play
+	}
 }
 
 bool Plugin::WantedDark(RE::NiLight* a_light)

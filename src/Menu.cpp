@@ -547,10 +547,7 @@ namespace Plugin
 				SetInvisibleFadeOn(hidden == 0);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T(
-				"Lights fade out: while you are invisible (the Shadow Stone, Invisibility, a potion or scroll), or while you have a sign "
-				"or perk that only works in the dark (a Shadow birthsign), your lights fade out so they never give you away or cancel it, "
-				"and come back after. Lights stay on: neither changes your lights."));
+			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
 
 			// the old installer's Dynamic Lighting question, in Illuminated's place for it (its Flicker group)
 			GlowHeading("Flicker", Icon::kBulb);
