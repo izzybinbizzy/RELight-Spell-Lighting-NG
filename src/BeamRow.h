@@ -44,6 +44,11 @@ namespace BeamRow
 	inline constexpr float  kHeadroom = 0.55f;  // a capped light's steady strength, as a share of its cap
 	static_assert(kHeadroom * (1.0f + kFlicker) <= 1.0f, "the flicker's peak must stay under the cap");
 
+	// a cone that leaves a cloud (a wind spell's world-space particles): its one light sits this far along the cone's path, from
+	// where it was launched to where it is now, and once the cone ends it stays there and fades out over kCloudLife
+	inline constexpr float kCloudAlong = 0.5f;
+	inline constexpr float kCloudLife = 3.0f;  // seconds; not measured yet - a game run of the cloud sets it
+
 	// a row light's steady strength where its lighting caps it at a_top (Community Shaders: a light's strength for its reach):
 	// a light held at its cap cannot swing up and burns white in the middle. No cap (a_top 0): what was asked
 	[[nodiscard]] inline float Steady(float a_want, float a_top)
@@ -60,6 +65,23 @@ namespace BeamRow
 		const double shared = 0.6 * std::sin(a_seconds * 43.0) + 0.4 * std::sin(a_seconds * 71.0 + 1.3);
 		const double own = 0.6 * std::sin(a_seconds * 47.0 + phase) + 0.4 * std::sin(a_seconds * 83.0 + phase * 1.7);
 		return 1.0f + kFlicker * static_cast<float>(kTogether * shared + (1.0 - kTogether) * own);
+	}
+
+	// the share of a cloud light's strength a_sinceEnd seconds after its cone ended (below 0: the cone still flies), easing out
+	// to 0 at a_life; 0 for a time that is not a number
+	[[nodiscard]] inline float CloudFade(float a_sinceEnd, float a_life)
+	{
+		if (std::isnan(a_sinceEnd)) {
+			return 0.0f;
+		}
+		if (a_sinceEnd < 0.0f) {
+			return 1.0f;
+		}
+		if (!(a_life > 0.0f)) {
+			return 0.0f;
+		}
+		const float t = (std::min)(a_sinceEnd / a_life, 1.0f);
+		return 1.0f - t * t * (3.0f - 2.0f * t);
 	}
 
 	// the light a ground point at (a_x along the beam, a_side across it) gets from the row, the beam a_height above the
@@ -87,9 +109,11 @@ namespace BeamRow
 		if (!(a_length > 1.0f) || !std::isfinite(a_length) || a_most < 1 || !(a_reach > 0.0f)) {
 			return row;
 		}
-		const int   n = std::clamp((std::max)(static_cast<int>(std::ceil(a_length / kSpacing)), kFewest), 1, a_most);
-		const float spacing = a_length / static_cast<float>(n);
-		const float reach = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
+		// clamped in double before it becomes an int: a mod's range can be any float, and a huge one must not overflow it
+		const double needed = (std::min)(std::ceil(static_cast<double>(a_length) / kSpacing), static_cast<double>(a_most));
+		const int    n = std::clamp((std::max)(static_cast<int>(needed), kFewest), 1, a_most);
+		const float  spacing = a_length / static_cast<float>(n);
+		const float  reach = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
 		row.reserve(static_cast<std::size_t>(n));
 		for (int i = 0; i < n; ++i) {
 			const bool end = n >= kHalveFrom && (i == 0 || i == n - 1);

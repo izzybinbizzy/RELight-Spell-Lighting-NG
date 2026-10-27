@@ -27,8 +27,8 @@ namespace Plugin
 	{
 		struct Target
 		{
-			RE::EffectSetting* effect;
-			RE::TESObjectLIGH* own;  // the light its plugin gave it
+			RE::EffectSetting* effect{ nullptr };
+			RE::TESObjectLIGH* own{ nullptr };  // the light its plugin gave it
 			std::string        key;
 			bool               automatic{ false };  // no layer lights its art: key names an automatic hand (gAutoHands)
 		};
@@ -42,7 +42,7 @@ namespace Plugin
 		// "i have to dispel the spell then re-cast")
 		struct Live
 		{
-			RE::NiLight* light;  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
+			RE::NiLight* light{ nullptr };  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
 			std::string  key;
 			bool         heldOut{ false };  // put out because nothing lights its key any more
 		};
@@ -386,7 +386,7 @@ namespace Plugin
 						live.heldOut = false;
 					}
 					DressHandLight(live.light, *h);
-					RememberLight(live.light, HandFxOf(h->key));
+					RememberLight(live.light, HandFxOf(h->key), Pulse::Kind::kNone, true);
 				} else if (!live.heldOut) {
 					live.light->SetAppCulled(true);
 					live.heldOut = true;

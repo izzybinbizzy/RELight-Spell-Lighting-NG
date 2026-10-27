@@ -309,7 +309,7 @@ namespace Plugin
 			if (have || std::ranges::any_of(gFailed, [&w](const Failed& f) { return f.Is(w) && gUpdate < f.retryAt; })) {
 				continue;
 			}
-			if (gLive.size() >= kMaxLive) {
+			if (gLive.size() >= kMaxLive && w.actor != player) {  // her own weapon is never the one left dark
 				if (!gCapLogged) {
 					gCapLogged = true;
 					SKSE::log::info("[HELD] {} held weapon lights are lit at once, the most there may be: the rest wait for one to go out",
@@ -350,6 +350,16 @@ namespace Plugin
 				v.wroteReach = reach;
 			}
 		}
+	}
+
+	void DropHeldLights()
+	{
+		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		for (auto& v : gLive) {
+			TakeOff(v, scene);
+		}
+		gLive.clear();
+		gFailed.clear();
 	}
 
 	std::size_t LiveHeldLights() { return gLive.size(); }

@@ -36,11 +36,13 @@ namespace Plugin
 		struct Seen
 		{
 			const HandFx*        fx{ nullptr };
+			Pulse::Kind          kind{ Pulse::Kind::kNone };  // its spell's kind, for Realistic
 			const RE::NiColor*   tint{ nullptr };
 			float                base{ 0.0f };        // the fade RE::Light last gave it
 			float                peak{ 0.0f };        // the most it gave: held while Dynamic Lighting is off, if it flickers
 			float                rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
 			bool                 flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
+			bool                 ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
 			float                written{ -1.0f };    // the fade we last wrote
 			float                baseRadius{ 0.0f };  // the reach RE::Light last gave it
 			float                wroteRadius{ -1.0f };
@@ -70,6 +72,11 @@ namespace Plugin
 			constexpr float                              tau = std::numbers::pi_v<float> * 2.0f;
 			constexpr float                              kRatePerHz = 1.2566f;  // gen.RELIGHT_RATE_PER_HZ: perSecond back to cycles a second
 			const auto&                                  fx = *a_s.fx;
+			if (a_s.kind != Pulse::Kind::kNone && PulseRealistic()) {
+				static const auto start = std::chrono::steady_clock::now();
+				const double      seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+				return Pulse::Factor(a_s.kind, seconds, static_cast<std::uint32_t>(std::hash<const void*>{}(&a_s)));
+			}
 			if (!fx.flicker) {
 				a_s.phase[0] = std::fmod(a_s.phase[0] + fx.perSecond * a_dt * 5.0f, tau);
 				return (std::sin(a_s.phase[0]) + 1.0f) / 2.0f * fx.intensity + 1.0f - fx.intensity;
@@ -93,6 +100,8 @@ namespace Plugin
 		{
 			RE::NiLight*  light;
 			const HandFx* fx;
+			Pulse::Kind   kind;
+			bool          hand;
 		};
 		std::vector<Made> gNew;  // lights made since the last frame
 
@@ -165,7 +174,7 @@ namespace Plugin
 			// so a phase that moved marks it; a one-shot fade (an explosion's or a rune's burst - 2.5's plain configs carry 349)
 			// keeps fading as RE::Light draws it, never held at its brightest
 			if (const auto* point = netimmerse_cast<RE::NiPointLight*>(a_light)) {
-				if (a_s.rlPhase >= 0.0f && point->constAttenuation != a_s.rlPhase) {
+				if (!a_s.ours && a_s.rlPhase >= 0.0f && point->constAttenuation != a_s.rlPhase) {
 					a_s.flickers = true;
 				}
 				a_s.rlPhase = point->constAttenuation;
@@ -210,12 +219,12 @@ namespace Plugin
 		}
 	}
 
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx)
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx, Pulse::Kind a_kind, bool a_hand)
 	{
 		if (a_light) {
 			KeepLight(a_light);
 			std::lock_guard l{ gNewLock };
-			gNew.push_back({ a_light, a_fx });
+			gNew.push_back({ a_light, a_fx, a_kind, a_hand });
 		}
 	}
 
@@ -267,6 +276,13 @@ namespace Plugin
 			for (const auto& m : made) {
 				auto& s = gSeen[m.light];
 				s.fx = m.fx;
+				if (m.hand) {
+					s.ours = true;
+					s.flickers = false;
+				}
+				if (m.kind != Pulse::Kind::kNone) {
+					s.kind = m.kind;
+				}
 				// the walk may have met a hand light before its task handed it here, and cached it as not ours for good
 				gNotOurs.erase(m.light);
 			}

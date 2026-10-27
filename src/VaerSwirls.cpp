@@ -225,7 +225,7 @@ namespace Plugin
 			return;
 		}
 		// 2. Thaumaturgy's own copies
-		std::size_t set = 0, missing = 0;
+		std::size_t set = 0, missing = 0, kept = 0;
 		for (const auto& c : kSwirlCopies) {
 			auto* effect = dh->LookupForm<RE::EffectSetting>(c.effect, c.effectPlugin);
 			auto* art = dh->LookupForm<RE::BGSArtObject>(c.art, c.artPlugin);
@@ -236,13 +236,19 @@ namespace Plugin
 					effect != nullptr, art != nullptr, shader != nullptr);
 				continue;
 			}
+			// a plugin that masters VAER (and so Thaumaturgy, whose record it changes) set this one on purpose, as VaerOwnBack keeps
+			if (const auto* patch = VaerAwareChange(effect)) {
+				++kept;
+				SKSE::log::info("[VAER] {} was changed by {}, a patch made for VAER: left as it set it", c.name, patch->fileName);
+				continue;
+			}
 			effect->data.enchantEffectArt = art;
 			effect->data.enchantShader = shader;
 			++set;
 			SKSE::log::info("[VAER] {} now wears VAER's swirl {:08X} and shader {:08X}", c.name, art->GetFormID(),
 				shader->GetFormID());
 		}
-		SKSE::log::info("VAER on Thaumaturgy: {} of {} effect(s) given VAER's swirl, {} not found", set, std::size(kSwirlCopies),
-			missing);
+		SKSE::log::info("VAER on Thaumaturgy: {} of {} effect(s) given VAER's swirl, {} left to a VAER patch, {} not found", set, std::size(kSwirlCopies),
+			kept, missing);
 	}
 }

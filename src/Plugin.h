@@ -166,6 +166,10 @@ namespace Plugin
 	[[nodiscard]] const Stream* HeldOf(const RE::TESObjectWEAP* a_weapon, bool a_firstPerson);
 	// nullptr unless a `body` line lights this art model on an actor (BodyLights.cpp): its full path key, then its bare name
 	[[nodiscard]] const Stream* BodyOf(const RE::BGSArtObject* a_art);
+	// nullptr unless a `body` line names this effect shader by its form ("0xID~Plugin" - Frozen Electrocuted Combustion's bodies)
+	[[nodiscard]] const Stream* BodyOf(const RE::TESEffectShader* a_shader);
+	// nullptr unless a `cloud` line lights this cone: one light held where its cloud is (Rows.cpp), matched exactly, as `body`
+	[[nodiscard]] const Stream* CloudOf(const RE::BGSProjectile* a_projectile);
 
 	// ------------------------------------------------------------------ Keep.cpp: the one place a game light is held
 	using GoneLights = std::unordered_set<const RE::NiLight*>;
@@ -206,6 +210,8 @@ namespace Plugin
 	void                SetRunesFadeOn(bool a_on);
 	[[nodiscard]] bool  InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
 	void                SetInvisibleFadeOn(bool a_on);
+	[[nodiscard]] bool  FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
+	void                SetFecFrozenFadesOut(bool a_on);
 	[[nodiscard]] bool  HandLightsOn();
 	void                SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool  WeaponLightsOn();
@@ -229,7 +235,10 @@ namespace Plugin
 	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
 	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
 	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
-	[[nodiscard]] bool PerformanceMode();             // the Performance page's Quality pick on Performance (his 2026-10-20 order)
+	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
+	void               SetPulseShapes(bool a_on);
+	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights pulse in their kind's shape (Pulse.h)
+	[[nodiscard]] bool PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
 	void               SetPerformanceMode(bool a_on);
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
@@ -260,7 +269,8 @@ namespace Plugin
 	// the fading module wrote this light's reach (radius x and y): the same handshake as the fade, so the Reach slider and
 	// the fading's "reach follows" never take each other's write for a new base and compound (the audit, 2026-10-14)
 	void NoteReachWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr);
+	// a_hand: a hand light this plugin made (never one of RE::Light's flickering lights)
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false);
 	// what this pass gives every light of ours, for the lights another file scales (Held.cpp): the daylight factor (looked
 	// at every two seconds, main thread)
 	[[nodiscard]] float DaylightFactor();
@@ -284,6 +294,7 @@ namespace Plugin
 		float       fade{ 1.0f }, reach{ 300.0f };  // the projectile's own light: the row's middle glows as it would right under it
 		bool        beam{ true };                   // a bolt (along its model) - else a flame spray or cone (along its aim)
 		std::size_t option{ kNone };                // its switch
+		bool        cloud{ false };                 // a cone's cloud: one light on its path, held where the cloud is after the cone ends
 	};
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
 	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
@@ -295,6 +306,7 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ Held.cpp: a weapon's own light while it is drawn
 	void                      UpdateHeldLights();  // every frame, after UpdateOptionLights
+	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
 	[[nodiscard]] std::size_t LiveHeldLights();
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,

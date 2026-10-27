@@ -103,6 +103,14 @@ namespace
 		DimAll(gSneakLevel.load(std::memory_order_relaxed));
 	}
 
+	// the fading pass after an effect update writes only under a weapon enchantment's own actor, and only her lights are dimmed:
+	// any other effect leaves the dimmed list alone
+	[[nodiscard]] bool OnHerWeapon(const RE::ReferenceEffect* a_effect)
+	{
+		const auto* ctrl = a_effect ? skyrim_cast<const RE::WeaponEnchantmentController*>(a_effect->controller) : nullptr;
+		return ctrl && ctrl->target && ctrl->target->IsPlayerRef();
+	}
+
 	// a perk or ability that only pays off in the dark (a Shadow birthsign: spells cheaper and quieter "in shadows") reads the
 	// light level, which her lights raise - so while she carries one her lights fade out (his pick). Found once: every perk whose
 	// conditions, or an entry point's, ask for a LOW light level, and every ability with such an effect
@@ -343,7 +351,8 @@ namespace
 			const auto* ref = Plugin::ReferenceOf(a_light);
 			const bool  hers = CastByHer(ref);
 			const bool  made = gMagicLights.contains(a_light);
-			const bool  spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)));
+			// RE::Light's enchantment light on her weapon too: the setting's tip promises her weapon lights fade
+			const bool spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)) || (Plugin::IsEnchantLight(a_light) && ref && ref->As<RE::Actor>()));
 			if (!spell && hers && ref && ref->As<RE::Actor>()) {
 				// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again
 				// next frame, never remembered as "not a spell light"
@@ -401,7 +410,7 @@ namespace
 
 	// on the main thread only (an SKSE task from the hook below): a new spell light goes into our lists. The last
 	// reference to a light is only ever dropped on the main thread (here, or in Keep.cpp's sweep)
-	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours)
+	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind)
 	{
 		if (!a_light || a_light->GetRefCount() <= 1) {
 			return;  // the game let go of it before the main thread came round: nothing to note (freed right here)
@@ -414,7 +423,7 @@ namespace
 		// a hand light of ours, a spray light RE::Light made from our config, and the light of a beam or breath
 		// projectile our data names (RE::Light lights it; Streams.cpp) are ours for the sliders
 		if (a_ours) {
-			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey));
+			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey), a_kind, !a_handKey.empty());
 		}
 		// a light made while her lights were dimmed was put out at once and comes here through AdoptSneakCulled; one made
 		// just before she crouched is dimmed by the next player update's sneaking pass, which reads gMagicLights
@@ -429,6 +438,17 @@ namespace
 	}
 
 	void AdoptSneakCulled(const Plugin::LightList& a_lights);
+
+	// the kind of spell a hand holds now (its costliest effect), for Dynamic Lighting's Realistic; main thread
+	[[nodiscard]] Pulse::Kind HandKind(const RE::ObjectRefHandle& a_ref, bool a_left)
+	{
+		const auto  ref = a_ref.get();
+		auto*       actor = ref ? ref->As<RE::Actor>() : nullptr;
+		auto*       caster = actor ? actor->GetMagicCaster(a_left ? RE::MagicSystem::CastingSource::kLeftHand : RE::MagicSystem::CastingSource::kRightHand) : nullptr;
+		const auto* spell = caster ? caster->currentSpell : nullptr;
+		const auto* item = spell ? spell->GetCostliestEffectItem() : nullptr;
+		return LightKit::PulseKindOf(item ? item->baseEffect : nullptr);
+	}
 
 	using MagicLightFn = RE::NiPointLight*(RE::TESObjectLIGH*, RE::TESObjectREFR*, RE::NiNode*, bool, bool, bool);
 
@@ -473,8 +493,10 @@ namespace
 					made->SetAppCulled(true);
 				}
 				if (auto* tasks = SKSE::GetTaskInterface()) {
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking]() {
-						NoteMagicLight(light, key, ours);
+					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking,
+									   ref = a_ref ? a_ref->GetHandle() : RE::ObjectRefHandle{}, left]() {
+						NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : HandKind(ref, left));
 						if (sneaking) {
 							AdoptSneakCulled({ light });
 						}
@@ -575,11 +597,12 @@ namespace
 	{
 		static void thunk(RE::PlayerCharacter* a_this, float a_delta)
 		{
+			// the dimmed lights get the others' numbers back BEFORE the update: RE::Light writes this frame's fades inside it
+			LightKit::Guarded("player update undim", []() { UndimForFrame(); });
 			func(a_this, a_delta);
 			LightKit::Guarded("player update", [a_this, a_delta]() {
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
-				UndimForFrame();
 				const float sneak = StepSneakLevel(a_this, a_delta);
 				Plugin::UpdateOptionLights();
 				Plugin::UpdateHeldLights();
@@ -606,9 +629,14 @@ namespace
 		{
 			func(a_this);
 			LightKit::Guarded("effect update", [a_this]() {
-				UndimmedFor([a_this]() {
+				const auto pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
-				});
+				};
+				if (OnHerWeapon(a_this)) {
+					UndimmedFor(pass);
+				} else {
+					pass();
+				}
 			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;

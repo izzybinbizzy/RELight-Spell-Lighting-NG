@@ -56,6 +56,24 @@ namespace Plugin
 		// cap): hung again when the rows come back, or a held stream stays bare until the next cast (main thread)
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> gParked;
 
+		// a cone's cloud (his checklist 235): its art leaves world-space particles along the path, so its one light hangs in the
+		// node the cone hangs in - which stays when the cone's 3D goes - and is moved there every frame (main thread)
+		struct Cloud
+		{
+			RE::NiPointer<RE::NiAVObject>    root;  // the cone's 3D, while it flies
+			RE::NiPointer<RE::TESObjectREFR> ref;
+			RE::NiPointer<RE::NiNode>        holder;  // the node the cone hung in, which holds the light
+			RE::NiPointer<RE::BSLight>       light;
+			const RowRecipe*                 recipe{ nullptr };
+			RE::FormID                       spell{ 0 };  // its Lights by Item color, read after the cone is gone too
+			RE::NiPoint3                     launch;
+			RE::NiPoint3                     spot;
+			float                            sinceEnd{ -1.0f };  // seconds since the cone ended; below 0 while it flies
+			bool                             hers{ false };
+		};
+		std::vector<Cloud>    gClouds;
+		constexpr std::size_t kMostClouds = 8;
+
 		// Illuminated's row, the same numbers (its 1.4: the row came off its cap, so Vanilla and ENB were trimmed to Community
 		// Shaders' lift)
 		[[nodiscard]] float RowStrengthFor(Lighting a_lighting)
@@ -207,6 +225,115 @@ namespace Plugin
 			gLive.erase(it);
 		}
 
+		// a cloud's light is the spell's one light: on Performance too, off with All lights off, its patch's switch and - hers -
+		// once the sneak fade has her lights out
+		[[nodiscard]] bool CloudOn(const RowRecipe& a_rec, bool a_hers)
+		{
+			return !AllLightsOff() && (a_rec.option == kNone || OptionLit(a_rec.option)) && (SneakLevel() > 0.0f || !a_hers);
+		}
+
+		[[nodiscard]] const RowRecipe* CloudRecipe(const RE::TESObjectREFR* a_ref)
+		{
+			const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+			const auto  it = base ? gRecipes.find(base->GetFormID()) : gRecipes.end();
+			return it != gRecipes.end() && it->second.cloud ? &it->second : nullptr;
+		}
+
+		void DropCloud(Cloud& a_cloud, RE::ShadowSceneNode* a_scene)
+		{
+			if (!a_cloud.light) {
+				return;
+			}
+			if (a_scene) {
+				a_scene->RemoveLight(a_cloud.light);
+			}
+			if (auto* light = a_cloud.light->light.get(); light && light->parent) {
+				light->parent->DetachChild(light);
+			}
+		}
+
+		// one light where a cone's cloud is, hung beside the cone and dark until MoveClouds places it
+		void HangCloud(RE::TESObjectREFR* a_ref, RE::ShadowSceneNode* a_scene)
+		{
+			auto*       root = a_ref ? a_ref->Get3D() : nullptr;
+			auto*       holder = root ? root->parent : nullptr;
+			const auto* rec = CloudRecipe(a_ref);
+			const bool  hers = CastByPlayer(a_ref);
+			const bool  listed = std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
+			if (!a_scene || !holder || !rec || listed || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
+				return;
+			}
+			auto* light = LightKit::CloneLight();
+			if (!light) {
+				return;
+			}
+			light->name = kRowName;                // a row light to every pass that walks the scene (IsRowLight)
+			light->fadeAmount = kMovingLightMark;  // so RE::Light's flicker prevention lets a moving light reach every surface
+			Dress(light, rec->color, 0.0f, 1.0f, InverseSquare());
+			light->local.translate = holder->world.Invert() * a_ref->GetPosition();
+			light->local.scale = 1.0f;
+			const RE::NiPointer<RE::NiPointLight> hold(light);  // freed here if it is never registered
+			holder->AttachChild(light, true);
+			RE::NiUpdateData update{};
+			light->Update(update);
+			auto* bs = LightKit::AddToScene(a_scene, light, 2.0f);
+			if (!bs) {
+				holder->DetachChild(light);
+				return;
+			}
+			const auto* proj = a_ref->As<RE::Projectile>();
+			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
+			gClouds.push_back({ RE::NiPointer<RE::NiAVObject>(root), RE::NiPointer<RE::TESObjectREFR>(a_ref), RE::NiPointer<RE::NiNode>(holder),
+				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f, hers });
+		}
+
+		// one cloud's light this frame: on its cone's path while the cone flies, then where it was, fading out over the cloud's
+		// life; false once it has faded, its switch is off or the node holding it left the world
+		[[nodiscard]] bool MoveCloud(Cloud& a_c, float a_delta)
+		{
+			if (a_c.root && a_c.root->parent && a_c.ref && a_c.ref->Get3D() == a_c.root.get()) {
+				a_c.spot = a_c.launch + (a_c.ref->GetPosition() - a_c.launch) * BeamRow::kCloudAlong;
+			} else if (a_c.sinceEnd < 0.0f) {
+				a_c.sinceEnd = 0.0f;
+				a_c.root.reset();  // the cone is let go: only where its cloud is stays
+				a_c.ref.reset();
+			} else {
+				a_c.sinceEnd += a_delta;
+			}
+			auto*       light = a_c.light ? netimmerse_cast<RE::NiPointLight*>(a_c.light->light.get()) : nullptr;
+			const float left = BeamRow::CloudFade(a_c.sinceEnd, BeamRow::kCloudLife);
+			if (!light || !a_c.holder || !a_c.holder->parent || !a_c.recipe || left <= 0.0f || !CloudOn(*a_c.recipe, a_c.hers)) {
+				return false;
+			}
+			const auto& rec = *a_c.recipe;
+			const bool  isl = InverseSquare();
+			const float brightNow = Brightness() * DaylightFactor();
+			const float reach = rec.reach * Reach() * RowReachFor(LightingFound());
+			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
+			RE::NiColor color = rec.color;
+			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
+				color = *own;  // the spell's Lights by Item color
+			}
+			Dress(light, color, steady * left * (a_c.hers ? SneakLevel() : 1.0f), reach, isl);
+			light->local.translate = a_c.holder->world.Invert() * a_c.spot;
+			RE::NiUpdateData update{};
+			light->Update(update);
+			return true;
+		}
+
+		void MoveClouds(RE::ShadowSceneNode* a_scene)
+		{
+			const float delta = std::clamp(RE::GetSecondsSinceLastFrame(), 0.0f, 0.25f);
+			for (auto it = gClouds.begin(); it != gClouds.end();) {
+				if (MoveCloud(*it, delta)) {
+					++it;
+				} else {
+					DropCloud(*it, a_scene);
+					it = gClouds.erase(it);
+				}
+			}
+		}
+
 		// its spell set to Off in Lights by Item (the choice reads black; a chosen black lights nothing either): no row, so it
 		// holds none of the scene's row lights a lit row could use
 		bool SpellRowOff(const RE::TESObjectREFR* a_ref)
@@ -274,6 +401,27 @@ namespace Plugin
 			return true;
 		}
 
+		// a concentration stream whose caster no longer casts it (a weapon equipped mid-cast leaves the spray behind): its row
+		// rests dark. A fire-and-forget bolt outlives its cast and is never cut. Main thread.
+		[[nodiscard]] bool CasterStopped(RE::TESObjectREFR* a_ref)
+		{
+			auto* proj = a_ref ? a_ref->As<RE::Projectile>() : nullptr;
+			if (!proj) {
+				return false;
+			}
+			auto& rt = proj->GetProjectileRuntimeData();
+			if (!rt.spell || rt.spell->GetCastingType() != RE::MagicSystem::CastingType::kConcentration) {
+				return false;
+			}
+			const auto shooter = rt.shooter.get();
+			auto*      actor = shooter ? shooter->As<RE::Actor>() : nullptr;
+			if (!actor) {
+				return false;
+			}
+			auto* caster = actor->GetMagicCaster(rt.castingSource);
+			return !caster || caster->state.get() == RE::MagicCaster::State::kNone || caster->currentSpell != rt.spell;
+		}
+
 		void Move()
 		{
 			const bool isl = InverseSquare();
@@ -292,7 +440,12 @@ namespace Plugin
 				const auto  path = PathOf(live.ref.get(), live.root.get(), rec.beam);
 				const auto& axis = path.axis;
 				const float length = path.length;
-				if (length <= 1.0f) {
+				if (length <= 1.0f || CasterStopped(live.ref.get())) {  // nothing drawn, or no one casting it: the row rests dark
+					for (auto& bs : live.lights) {
+						if (auto* light = bs ? netimmerse_cast<RE::NiPointLight*>(bs->light.get()) : nullptr) {
+							Dress(light, rec.color, 0.0f, 1.0f, isl);
+						}
+					}
 					continue;
 				}
 				const auto  toLocal = live.root->world.Invert();
@@ -363,6 +516,14 @@ namespace Plugin
 			std::lock_guard l{ gQueueLock };
 			queued.swap(gQueue);
 		}
+		// a cone's cloud light is the spell's one light: hung on Performance too (CloudOn), never parked
+		std::erase_if(queued, [scene](const auto& a_ref) {
+			if (!CloudRecipe(a_ref.get())) {
+				return false;
+			}
+			HangCloud(a_ref.get(), scene);
+			return true;
+		});
 		const bool on = RowsOn();
 		// gone (its 3D out of the world or rebuilt), switched off, or every row off: taken off the scene now
 		std::vector<const RE::NiAVObject*> drop;
@@ -394,6 +555,9 @@ namespace Plugin
 			const auto* root = a_ref ? a_ref->Get3D() : nullptr;
 			return !root || !root->parent;
 		});
+		if (!gClouds.empty()) {
+			MoveClouds(scene);
+		}
 		if (!gLive.empty()) {
 			Move();
 		}
@@ -409,6 +573,10 @@ namespace Plugin
 		for (const auto* root : all) {
 			Forget(root, scene);
 		}
+		for (auto& cloud : gClouds) {
+			DropCloud(cloud, scene);
+		}
+		gClouds.clear();
 		gParked.clear();
 		std::lock_guard l{ gQueueLock };
 		gQueue.clear();

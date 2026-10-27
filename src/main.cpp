@@ -128,6 +128,7 @@ namespace
 		case SKSE::MessagingInterface::kPreLoadGame:
 			Plugin::DropGroundLights();  // the hands and casting lights they follow are the old game's
 			Plugin::DropBodyLights();    // and the art the body lights hang on
+			Plugin::DropHeldLights();    // and the weapons the held lights hang on
 			Plugin::DropRows();          // and the projectiles the rows hang on
 			Fade::OnGameLoading();
 			break;
@@ -137,6 +138,7 @@ namespace
 				// no kPreLoadGame comes before a new game: the last game's twins and fading go here
 				Plugin::DropGroundLights();
 				Plugin::DropBodyLights();
+				Plugin::DropHeldLights();
 				Plugin::DropRows();
 				Fade::OnGameLoading();
 			}

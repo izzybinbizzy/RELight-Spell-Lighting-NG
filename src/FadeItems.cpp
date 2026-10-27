@@ -23,6 +23,7 @@
 
 #include "Fade.h"
 #include "FadeFormText.h"
+#include "LightKit.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #	define WIN32_LEAN_AND_MEAN
@@ -246,19 +247,21 @@ namespace Fade::Items
 			// a failed write is tried again after kSaveQuietMs, up to kSaveRetries times, then at the next change. A copy that a
 			// newer change or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
 			tasks->AddTask([c = std::move(copy), generation]() {
-				if (Save(c)) {
-					gSaveFailures.store(0, std::memory_order_relaxed);
-					return;
-				}
-				if (generation != gGeneration.load(std::memory_order_relaxed)) {
-					return;
-				}
-				if (gSaveFailures.fetch_add(1, std::memory_order_relaxed) < kSaveRetries) {
-					gChangedAt.store(NowMs(), std::memory_order_relaxed);
-					gDirty.store(true, std::memory_order_release);
-				} else {
-					SKSE::log::warn("lights by item: {} still not written - the next change tries again", Mod::kItemsPath);
-				}
+				LightKit::Guarded("lights by item save", [&c, generation]() {
+					if (Save(c)) {
+						gSaveFailures.store(0, std::memory_order_relaxed);
+						return;
+					}
+					if (generation != gGeneration.load(std::memory_order_relaxed)) {
+						return;
+					}
+					if (gSaveFailures.fetch_add(1, std::memory_order_relaxed) < kSaveRetries) {
+						gChangedAt.store(NowMs(), std::memory_order_relaxed);
+						gDirty.store(true, std::memory_order_release);
+					} else {
+						SKSE::log::warn("lights by item: {} still not written - the next change tries again", Mod::kItemsPath);
+					}
+				});
 			});
 		}
 

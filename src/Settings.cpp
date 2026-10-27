@@ -11,6 +11,7 @@
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
 //   FadeWhileInvisible=1        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
+//   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
@@ -50,6 +51,7 @@ namespace Plugin
 		std::atomic<int>                gSneakBrightness{ 0 };
 		std::atomic<bool>               gRunes{ true };
 		std::atomic<bool>               gInvisible{ true };
+		std::atomic<bool>               gFecFrozenFades{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
@@ -60,6 +62,7 @@ namespace Plugin
 		std::array<std::atomic<int>, 4> gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
 		std::atomic<bool>               gDynamic{ true };
 		std::atomic<bool>               gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		std::atomic<bool>               gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
 
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
@@ -104,6 +107,7 @@ namespace Plugin
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
 			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
+			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
@@ -116,6 +120,7 @@ namespace Plugin
 			{ "ShockArt", [] { return gArt[2].load(); }, [](int v) { gArt[2] = ClampPick(2, v); } },
 			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
+			{ "PulseShapes", [] { return gPulse ? 1 : 0; }, [](int v) { gPulse = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
 		};
 
@@ -220,8 +225,11 @@ namespace Plugin
 		std::size_t              read = 0;
 		std::vector<std::string> problems;
 		std::vector<std::string> unknown;  // each unknown section named once
-		bool                     picksRead = false;
-		while (in && std::getline(in, line)) {
+		bool                     picksRead = false, pulseRead = false, dynamicRead = false;
+		for (bool first = true; in && std::getline(in, line); first = false) {
+			if (first && line.starts_with("\xEF\xBB\xBF")) {
+				line.erase(0, 3);  // a file saved "UTF-8 with BOM" would lose its first section
+			}
 			const auto l = Trim(line);
 			if (l.empty() || l.front() == ';' || l.front() == '#') {
 				continue;
@@ -252,6 +260,8 @@ namespace Plugin
 			++read;
 			if (settings) {
 				picksRead = picksRead || IsPickKey(key);
+				pulseRead = pulseRead || SameText(key, "PulseShapes");
+				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
 				if (!ApplySetting(key, *v)) {
 					problems.push_back(std::format("{}: not a setting", key));
 				}
@@ -270,6 +280,9 @@ namespace Plugin
 		}
 		if (!picksRead) {
 			CarryOldPicks(a_log);
+		}
+		if (!pulseRead) {
+			gPulse = !dynamicRead;  // a new player starts on Realistic; one who saved Dynamic Lighting keeps it (On = Regular)
 		}
 		if (!a_log) {
 			return;  // the early read before the data (main.cpp): the read after it says what it found
@@ -299,7 +312,7 @@ namespace Plugin
 		}
 		const auto write = [] {
 			queued = false;
-			WriteSettingsFile();
+			LightKit::Guarded("settings save", []() { WriteSettingsFile(); });
 		};
 		if (auto* tasks = SKSE::GetTaskInterface()) {
 			tasks->AddTask(write);
@@ -351,6 +364,21 @@ namespace Plugin
 	}
 
 	bool InvisibleFadeOn() { return gInvisible; }
+
+	bool PulseShapes() { return gPulse; }
+
+	void SetPulseShapes(bool a_on) { gPulse = a_on; }
+
+	bool PulseRealistic() { return gPulse && DynamicLightingThisSession(); }
+
+	bool FecFrozenFadesOut() { return gFecFrozenFades; }
+
+	void SetFecFrozenFadesOut(bool a_on)
+	{
+		if (gFecFrozenFades.exchange(a_on) != a_on) {
+			SKSE::log::info("frozen bodies' glow {}", a_on ? "fades out" : "stays while frozen");
+		}
+	}
 
 	void SetInvisibleFadeOn(bool a_on)
 	{

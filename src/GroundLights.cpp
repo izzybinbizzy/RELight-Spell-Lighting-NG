@@ -48,6 +48,9 @@ namespace Plugin
 		std::uint64_t                                    gTick{ 0 };  // TickGroundLights calls; 64 bits, so a retry deadline never wraps
 		constexpr std::uint64_t                          kRetryTicks = 60;
 
+		// the game's casting lights left hidden when their hands went down (a twin dropped with handsDown); main thread only
+		std::unordered_map<std::uint64_t, RE::NiPointer<RE::NiPointLight>> gLeftHidden;
+
 		void Drop(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
 			if (a_scene && a_twin.bs) {
@@ -71,6 +74,32 @@ namespace Plugin
 			gTwins.clear();
 			gRefused.clear();
 			gLive.store(0, std::memory_order_relaxed);
+		}
+
+		// a casting light left hidden is shown again once its hands are up: with ground lights off no twin takes it over, and
+		// nothing else would. Forgotten once its actor or its hand's light is gone; never shown while the hands are still down,
+		// as the game keeps it hidden then (Visit's "light that's not going away")
+		void ShowLeftHidden()
+		{
+			std::erase_if(gLeftHidden, [](const auto& a_entry) {
+				auto* actor = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(a_entry.first >> 1));
+				if (!actor || !actor->Is3DLoaded()) {
+					return true;
+				}
+				auto* caster = actor->GetActorRuntimeData().magicCasters[a_entry.first & 1];
+				auto* bs = caster ? caster->light.get() : nullptr;
+				if (!bs || bs->light.get() != a_entry.second.get()) {
+					return true;
+				}
+				const auto* state = actor->AsActorState();
+				if (!state || !state->IsWeaponDrawn()) {
+					return false;
+				}
+				if (!WantedDark(a_entry.second.get())) {
+					a_entry.second->SetAppCulled(false);  // a light wanted dark stays as Drop leaves it
+				}
+				return true;
+			});
 		}
 
 		// the twin made and hung on the hand node; it joins the scene in Visit, once Follow has given it its numbers and its place
@@ -263,6 +292,7 @@ namespace Plugin
 		if (InverseSquare()) {
 			return;  // Community Shaders: the casting light lights the ground itself
 		}
+		ShowLeftHidden();  // before Visit: a twin made this tick hides its light again (Follow)
 		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
 		if (!scene || gGroundLightsOn.load(std::memory_order_relaxed) < 0.5f || AllLightsOff()) {  // switched off (advanced settings file, or all lights off)
 			// no scene to light, or switched off: let every twin go and give each source light back (with a scene, each twin
@@ -286,6 +316,9 @@ namespace Plugin
 		}
 		std::erase_if(gTwins, [&](auto& a_entry) {
 			if (!a_entry.second.seen) {
+				if (a_entry.second.handsDown && a_entry.second.source) {
+					gLeftHidden.insert_or_assign(a_entry.first, a_entry.second.source);
+				}
 				Drop(a_entry.second, scene);
 				return true;
 			}
@@ -294,7 +327,11 @@ namespace Plugin
 		gLive.store(gTwins.size(), std::memory_order_relaxed);
 	}
 
-	void DropGroundLights() { DropAll(RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]); }
+	void DropGroundLights()
+	{
+		DropAll(RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]);
+		gLeftHidden.clear();  // a load: the lights left hidden went with the old game's 3D
+	}
 
 	std::size_t GroundLightCount() { return gLive.load(std::memory_order_relaxed); }
 	std::size_t GroundLightsMade() { return gMade.load(std::memory_order_relaxed); }

@@ -46,9 +46,9 @@ namespace Fade
 		// belongs to, and another can be made at the same address.
 		struct PairKey
 		{
-			const void* weapon;
-			const void* ench;
-			RE::FormID  weaponID, enchID;
+			const void* weapon{ nullptr };
+			const void* ench{ nullptr };
+			RE::FormID  weaponID{ 0 }, enchID{ 0 };
 			bool        operator==(const PairKey&) const = default;
 		};
 		struct PairHash

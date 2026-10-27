@@ -21,6 +21,7 @@
 #include "PCH.h"
 
 #include "LightMath.h"
+#include "Pulse.h"
 
 namespace LightKit
 {
@@ -336,5 +337,51 @@ namespace LightKit
 			it->second = RE::Color((*rgb)[0], (*rgb)[1], (*rgb)[2], 0);
 		}
 		return it->second;
+	}
+
+	// which pulse shape a spell's light takes under Realistic, read off its magic effect, so a spell nobody patched gets one too
+	[[nodiscard]] inline Pulse::Kind PulseKindOf(const RE::EffectSetting* a_effect)
+	{
+		using AV = RE::ActorValue;
+		using Arch = RE::EffectArchetypes::ArchetypeID;
+		if (!a_effect) {
+			return Pulse::Kind::kNone;
+		}
+		const auto& d = a_effect->data;
+		if (d.archetype == Arch::kAbsorb) {
+			return d.primaryAV == AV::kMagicka ? Pulse::Kind::kAbsorbMagicka :
+			       d.primaryAV == AV::kStamina ? Pulse::Kind::kAbsorbStamina :
+			                                     Pulse::Kind::kAbsorbHealth;
+		}
+		if (d.primaryAV == AV::kWardPower) {
+			return Pulse::Kind::kWard;
+		}
+		if (d.archetype == Arch::kLight) {
+			return Pulse::Kind::kMagelight;
+		}
+		switch (d.resistVariable) {
+		case AV::kResistFire:
+			return Pulse::Kind::kFire;
+		case AV::kResistFrost:
+			return Pulse::Kind::kFrost;
+		case AV::kResistShock:
+			return Pulse::Kind::kShock;
+		case AV::kPoisonResist:
+			return Pulse::Kind::kPoison;
+		default:
+			break;
+		}
+		switch (d.associatedSkill) {
+		case AV::kRestoration:
+			return Pulse::Kind::kHealing;
+		case AV::kIllusion:
+			return Pulse::Kind::kIllusion;
+		case AV::kConjuration:
+			return Pulse::Kind::kConjuration;
+		case AV::kAlteration:
+			return Pulse::Kind::kAlteration;
+		default:
+			return Pulse::Kind::kNone;
+		}
 	}
 }

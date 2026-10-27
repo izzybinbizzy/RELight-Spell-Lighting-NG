@@ -511,8 +511,9 @@ namespace Fade
 			if (MenusHideHud()) {
 				return true;
 			}
+			// the game's own HUD hidden (the tm toggle and the HUD-hiding keys that use it) hides our gems too
 			auto* ui = RE::UI::GetSingleton();
-			return ui && ui->GameIsPaused();
+			return ui && (ui->GameIsPaused() || !ui->IsShowingMenus());
 		}
 
 		// THE 3D SOUL GEM (his order: "I want a blender made 3d soul gem in super high detail (but optimized well so as to not
