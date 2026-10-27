@@ -218,7 +218,9 @@ namespace Plugin
 			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FrozenFade(art);
 			const float       reach = body->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
-			auto*             bs = MakeOwnLight(*body, fade, reach, node, scene, kLightName, light);
+			// her Candlelight casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
+			const bool shadow = hers && ShadowPatch() && body->key == "lightspellactorfx";
+			auto*      bs = MakeOwnLight(*body, fade, reach, node, scene, kLightName, light, shadow);
 			if (!bs) {
 				if (failed != gFailed.end()) {
 					failed->retryAt = gUpdate + kRetryUpdates;

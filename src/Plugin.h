@@ -309,8 +309,12 @@ namespace Plugin
 	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
 	[[nodiscard]] std::size_t LiveHeldLights();
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
-	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
-		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made);
+	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
+	[[nodiscard]] bool ShadowPatch();
+	// a hand light record's twin that casts a shadow (her own lights, with ShadowPatch), else the record itself; any thread
+	[[nodiscard]] RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light);
+	[[nodiscard]] RE::BSLight*       MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
+		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
 	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
 	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community

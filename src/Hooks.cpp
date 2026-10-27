@@ -465,8 +465,9 @@ namespace
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
 		RE::NiPointLight*   made = nullptr;
 		if (hand) {
-			made = netimmerse_cast<RE::NiPointLight*>(
-				a_light->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
+			// her own hand lights cast a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
+			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
+			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 		} else if (Plugin::IsOurLight(a_light)) {
 			// 2.3: a spray's / bolt's raised copy, or a beam record's other users' plain copy (Streams.cpp) - the game's own

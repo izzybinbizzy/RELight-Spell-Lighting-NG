@@ -173,16 +173,16 @@ namespace LightKit
 	// a_portalStrict false: a row that lets its light through portals. nullptr when the scene refused it - the caller then
 	// detaches it. Main thread.
 	[[nodiscard]] inline RE::BSLight* AddToScene(RE::ShadowSceneNode* a_scene, RE::NiPointLight* a_light, float a_falloff = 1.0f,
-		bool a_portalStrict = true)
+		bool a_portalStrict = true, bool a_shadow = false)
 	{
 		RE::ShadowSceneNode::LIGHT_CREATE_PARAMS params{};
 		params.dynamic = true;
-		params.shadowLight = false;
+		params.shadowLight = a_shadow;  // only RELight's optional Bottled Shaders shadow patch asks
 		params.portalStrict = a_portalStrict;
 		params.affectLand = true;
 		params.affectWater = true;
 		params.neverFades = true;
-		params.fov = 90.0f;
+		params.fov = a_shadow ? 6.2831855f : 90.0f;  // an omni shadow caster sees all round
 		params.falloff = a_falloff;
 		params.nearDistance = 5.0f;
 		params.depthBias = 1.0f;

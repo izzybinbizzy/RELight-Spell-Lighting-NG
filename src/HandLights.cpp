@@ -47,14 +47,15 @@ namespace Plugin
 			bool         heldOut{ false };  // put out because nothing lights its key any more
 		};
 
-		std::mutex                                                gLock;
-		std::vector<Target>                                       gTargets;
-		std::vector<Live>                                         gLive;
-		std::unordered_map<std::string, RE::TESObjectLIGH*>       gCopies;
-		std::unordered_map<const RE::TESObjectLIGH*, const Hand*> gInUse;
-		std::size_t                                               gLit = 0, gAutoLit = 0;
-		std::map<std::string, Hand, std::less<>>                  gAutoHands;   // "auto r,g,b" -> its hand (stable: a map's nodes never move)
-		std::unordered_map<std::string, RE::TESObjectLIGH*>       gAutoCopies;  // the same key -> its light record
+		std::mutex                                                       gLock;
+		std::vector<Target>                                              gTargets;
+		std::vector<Live>                                                gLive;
+		std::unordered_map<std::string, RE::TESObjectLIGH*>              gCopies;
+		std::unordered_map<const RE::TESObjectLIGH*, const Hand*>        gInUse;
+		std::size_t                                                      gLit = 0, gAutoLit = 0;
+		std::map<std::string, Hand, std::less<>>                         gAutoHands;    // "auto r,g,b" -> its hand (stable: a map's nodes never move)
+		std::unordered_map<std::string, RE::TESObjectLIGH*>              gAutoCopies;   // the same key -> its light record
+		std::unordered_map<const RE::TESObjectLIGH*, RE::TESObjectLIGH*> gShadowTwins;  // a copy -> its shadow-casting twin (ShadowPatch)
 
 		[[nodiscard]] bool AutoKey(std::string_view a_key) { return a_key.starts_with(kAutoPrefix); }
 
@@ -318,6 +319,17 @@ namespace Plugin
 				++made;
 			}
 			byPath = FindTargets(true);  // data load: no game thread runs a light hook yet
+			gShadowTwins.clear();
+			if (ShadowPatch()) {
+				for (const auto* copies : { &gCopies, &gAutoCopies }) {
+					for (auto* copy : *copies | std::views::values) {
+						if (auto* twin = LightKit::NewForm<RE::TESObjectLIGH>()) {
+							gShadowTwins.emplace(copy, twin);
+						}
+					}
+				}
+				SKSE::log::info("hand lights: the Bottled Shaders shadow download is installed - {} shadow twin(s) for her hands", gShadowTwins.size());
+			}
 		}
 		SKSE::log::info(
 			"hand lights: {} light(s) made in memory, {} failed; {} magic effect(s) wear one of their meshes ({} by "
@@ -396,6 +408,31 @@ namespace Plugin
 		if (a_log) {
 			SKSE::log::info("hand lights: {} magic effect(s) lit by this mod, {} left with their own light", lit, given);
 		}
+	}
+
+	bool ShadowPatch()
+	{
+		static const bool on = [] {
+			std::error_code ec;
+			return std::filesystem::exists("Data/SKSE/Plugins/RELightSpellLightingNG/Bottled Shaders Shadows.ini", ec);
+		}();
+		return on;
+	}
+
+	RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light)
+	{
+		std::lock_guard l{ gLock };
+		const auto      it = a_light ? gShadowTwins.find(a_light) : gShadowTwins.end();
+		if (it == gShadowTwins.end()) {
+			return a_light;
+		}
+		// the copy's numbers as the menu last set them, plus the engine's omni shadow flag
+		auto* twin = it->second;
+		twin->data = a_light->data;
+		twin->data.flags = static_cast<RE::TES_LIGHT_FLAGS>(static_cast<std::uint32_t>(a_light->data.flags) |
+															static_cast<std::uint32_t>(RE::TES_LIGHT_FLAGS::kOmniShadow));
+		twin->fade = a_light->fade;
+		return twin;
 	}
 
 	const Hand* HandOfLight(const RE::TESObjectLIGH* a_light)

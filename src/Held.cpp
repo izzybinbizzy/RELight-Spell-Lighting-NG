@@ -209,7 +209,7 @@ namespace Plugin
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
 	// lights (BodyLights.cpp) are both made here
 	RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent, RE::ShadowSceneNode* a_scene,
-		const char* a_name, RE::NiPointLight*& a_made)
+		const char* a_name, RE::NiPointLight*& a_made, bool a_shadow)
 	{
 		auto* light = LightKit::CloneLight();
 		if (!light) {
@@ -240,7 +240,7 @@ namespace Plugin
 		a_parent->AttachChild(light, true);
 		RE::NiUpdateData update{};
 		light->Update(update);
-		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true);
+		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true, a_shadow);
 		if (!bs) {
 			a_parent->DetachChild(light);
 			return nullptr;
