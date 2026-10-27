@@ -429,8 +429,7 @@ namespace Plugin
 		// the copy's numbers as the menu last set them, plus the engine's omni shadow flag
 		auto* twin = it->second;
 		twin->data = a_light->data;
-		twin->data.flags = static_cast<RE::TES_LIGHT_FLAGS>(static_cast<std::uint32_t>(a_light->data.flags) |
-															static_cast<std::uint32_t>(RE::TES_LIGHT_FLAGS::kOmniShadow));
+		twin->data.flags.set(RE::TES_LIGHT_FLAGS::kOmniShadow);
 		twin->fade = a_light->fade;
 		return twin;
 	}
