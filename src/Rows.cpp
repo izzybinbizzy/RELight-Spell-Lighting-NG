@@ -456,15 +456,15 @@ namespace Plugin
 				const auto  toLocal = live.root->world.Invert();
 				const auto  row = BeamRow::Lay(length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
 				RE::NiColor color = live.tint ? *live.tint : rec.color;
-				if (auto* fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr; fired && fired->GetProjectileRuntimeData().spell) {
-					if (const auto own = Fade::Items::ChoiceColor(fired->GetProjectileRuntimeData().spell->GetFormID())) {
+				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
+				auto*       spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
+				if (spell) {
+					if (const auto own = Fade::Items::ChoiceColor(spell->GetFormID())) {
 						color = *own;  // the spell's Lights by Item color reaches its row too
 					}
 				}
 				// under Realistic the row pulses in its spell's shape, as the hand casting it does (BeamRow::Pulsing)
-				auto*      shot = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
-				const auto kind = flickers && shot && PulseRealistic() ? LightKit::PulseKindOfSpell(shot->GetProjectileRuntimeData().spell) :
-				                                                         Pulse::Kind::kNone;
+				const auto kind = flickers && PulseRealistic() ? LightKit::PulseKindOfSpell(spell) : Pulse::Kind::kNone;
 				const auto seed = static_cast<std::uint32_t>(std::hash<const void*>{}(live.root.get()));
 				for (std::size_t i = 0; i < live.lights.size(); ++i) {
 					auto* light = live.lights[i] ? netimmerse_cast<RE::NiPointLight*>(live.lights[i]->light.get()) : nullptr;

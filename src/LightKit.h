@@ -396,8 +396,9 @@ namespace LightKit
 	// before any cast)
 	[[nodiscard]] inline Pulse::Kind PulseKindOfHand(RE::Actor* a_actor, bool a_left)
 	{
-		const auto  source = a_left ? RE::MagicSystem::CastingSource::kLeftHand : RE::MagicSystem::CastingSource::kRightHand;
-		auto*       caster = a_actor ? a_actor->GetMagicCaster(source) : nullptr;
+		// read straight off the actor: GetMagicCaster may make a missing caster, and the light hooks also run off the main thread
+		const auto* caster = a_actor ? a_actor->GetActorRuntimeData().magicCasters[a_left ? RE::Actor::SlotTypes::kLeftHand : RE::Actor::SlotTypes::kRightHand] :
+		                               nullptr;
 		const auto* spell = caster ? caster->currentSpell : nullptr;
 		if (!spell) {
 			auto* equipped = a_actor ? a_actor->GetEquippedObject(a_left) : nullptr;

@@ -237,6 +237,6 @@ namespace Plugin
 
 	bool IsStreamObject(const RE::TESObjectREFR* a_ref)
 	{
-		return a_ref && StreamOf(a_ref->GetBaseObject()) != nullptr;
+		return a_ref && gReady.load(std::memory_order_acquire) && StreamOf(a_ref->GetBaseObject()) != nullptr;
 	}
 }

@@ -113,10 +113,13 @@ namespace
 			// SKSE refuses a listener for a plugin that is not, and CommonLib logs that as an error players report (2.1)
 			if (Plugin::WardsSteppedDown()) {
 				SKSE::GetMessagingInterface()->RegisterListener("DynamicWards", [](SKSE::MessagingInterface::Message* a_m) {
-					if (a_m && a_m->type == 'DWAC') {
-						LightKit::Guarded("Dynamic Wards message", []() {
-							Plugin::RefindHandLights();
-							Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+					// handled on the main thread, whichever thread Dynamic Wards sends from
+					if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
+						tasks->AddTask([]() {
+							LightKit::Guarded("Dynamic Wards message", []() {
+								Plugin::RefindHandLights();
+								Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+							});
 						});
 					}
 				});
