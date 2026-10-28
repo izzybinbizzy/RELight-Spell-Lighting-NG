@@ -225,7 +225,7 @@ namespace Fade
 			if (a_seen.color.touched && !ColorKeep::Same(d.diffuse, a_seen.color.written)) {
 				return false;
 			}
-			const float cutoff = LightKit::Isl::On(light) ? LightKit::Isl::Cutoff(light) : 0.0f;
+			const float cutoff = Plugin::InverseSquare() && LightKit::Isl::On(light) ? LightKit::Isl::Cutoff(light) : 0.0f;
 			return !(cutoff > 0.0f && std::isfinite(cutoff)) || (a_seen.cutoff.Written() && cutoff == a_seen.cutoff.written);
 		}
 
@@ -257,7 +257,7 @@ namespace Fade
 			}
 			// on Community Shaders the reach comes from the fade and the cutoff, never the radius above: the cutoff moves with the
 			// fade (x brightness / reach^2) so the light reaches what "Reach follows" asks
-			if (const float cutoffBefore = LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
+			if (const float cutoffBefore = Plugin::InverseSquare() && LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
 				const float q = (std::max)(a_hand.out.reach, 0.05f);
 				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, a_hand.out.brightness / (q * q)));
 				seen.cutoff.written = LightKit::Isl::Cutoff(a_light);  // as clamped: our own write, never read back as another's
@@ -289,7 +289,7 @@ namespace Fade
 				data.radius.y = r;
 				Plugin::NoteReachWrite(a_seen.light.get(), reachBefore, r);
 			}
-			if (a_seen.cutoff.Written() && LightKit::Isl::On(a_seen.light.get())) {
+			if (a_seen.cutoff.Written() && Plugin::InverseSquare() && LightKit::Isl::On(a_seen.light.get())) {
 				const float cutoffBefore = LightKit::Isl::Cutoff(a_seen.light.get());
 				LightKit::Isl::SetCutoff(a_seen.light.get(), a_seen.cutoff.Restore(cutoffBefore));
 				Plugin::NoteCutoffWrite(a_seen.light.get(), cutoffBefore, LightKit::Isl::Cutoff(a_seen.light.get()));

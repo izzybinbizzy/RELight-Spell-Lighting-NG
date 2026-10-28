@@ -69,12 +69,36 @@ namespace Translation
 			return out;
 		}
 
-		// the file's lines, or false with what is wrong. As the reader before it: what follows the closing brace is not read,
-		// and a comma after the last line is forgiven (translators leave one; the parser itself refuses both); anything but one
+		// where the file's top object closes - braces inside quoted text don't count - or npos
+		inline std::size_t RootClose(std::string_view a_text)
+		{
+			int  depth = 0;
+			bool quoted = false;
+			for (std::size_t i = 0; i < a_text.size(); ++i) {
+				const char c = a_text[i];
+				if (quoted) {
+					if (c == '\\') {
+						++i;
+					} else if (c == '"') {
+						quoted = false;
+					}
+				} else if (c == '"') {
+					quoted = true;
+				} else if (c == '{' || c == '[') {
+					++depth;
+				} else if ((c == '}' || c == ']') && --depth <= 0) {
+					return depth == 0 && c == '}' ? i : std::string_view::npos;
+				}
+			}
+			return std::string_view::npos;
+		}
+
+		// the file's lines, or false with what is wrong. As the reader before it: what follows the top object is not read, and
+		// a comma after the last line is forgiven (translators leave one; the parser itself refuses both); anything but one
 		// object of text lines is refused whole.
 		inline bool Read(std::string a_text, std::unordered_map<std::string, std::string>& a_out, std::string& a_error)
 		{
-			if (const auto close = a_text.find_last_of('}'); close != std::string::npos && close > 0) {
+			if (const auto close = RootClose(a_text); close != std::string::npos && close > 0) {
 				a_text.resize(close + 1);
 				const auto comma = a_text.find_last_not_of(" \t\r\n", close - 1);
 				const auto before = comma != std::string::npos && comma > 0 ? a_text.find_last_not_of(" \t\r\n", comma - 1) : std::string::npos;

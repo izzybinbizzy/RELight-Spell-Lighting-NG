@@ -221,6 +221,9 @@ namespace LightKit
 	[[nodiscard]] inline RE::BSLight* Hang(RE::NiNode* a_parent, RE::NiPointLight* a_light, RE::ShadowSceneNode* a_scene, float a_falloff = 1.0f,
 		bool a_portalStrict = true, bool a_shadow = false)
 	{
+		if (!a_parent || !a_light || !a_scene) {
+			return nullptr;
+		}
 		const RE::NiPointer<RE::NiPointLight> hold(a_light);
 		a_parent->AttachChild(a_light, true);
 		RE::NiUpdateData update{};
