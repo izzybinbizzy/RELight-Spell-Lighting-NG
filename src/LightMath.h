@@ -7,6 +7,7 @@
 // by PC Runner\fade copies check.py, as LightKit.h is.
 //
 //   Lower, SameText    the one lower-casing helper and the one case-blind compare every file uses
+//   StringMap          std::string keys looked up by std::string_view without a temporary string
 //   CutoffFor          the cutoff of an inverse-square light (the build's K, as gen.py and relightgen.py write every config)
 //   IslReach, PlainOf  how far such a light reaches, and the same light drawn by the game's own lighting (ENB, Vanilla);
 //                      PlainAt, the same from a reach already worked out; LightPlacerSize, a record's size as Light Placer reads it;
@@ -25,15 +26,26 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace LightKit
 {
+	// std::string keys looked up by std::string_view without a temporary string
+	struct StringHash
+	{
+		using is_transparent = void;
+		[[nodiscard]] std::size_t operator()(std::string_view a_text) const noexcept { return std::hash<std::string_view>{}(a_text); }
+	};
+	template <class T>
+	using StringMap = std::unordered_map<std::string, T, StringHash, std::equal_to<>>;
+
 	// a lower-case copy (ASCII: editor IDs, keys, file names)
 	[[nodiscard]] inline std::string Lower(std::string_view a_text)
 	{

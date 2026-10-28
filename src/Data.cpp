@@ -359,9 +359,11 @@ namespace Plugin
 					gShaderOwner.emplace(shader->GetFormID(), it->second);
 				}
 			}
+			const bool tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks") != nullptr;
 			SKSE::log::info("enchantment lights: {} effect shader(s) are ours, {} of {} had an editor ID (powerofthree's Tweaks {})",
 				gShaderOwner.size(), named, dh->GetFormArray<RE::TESEffectShader>().size(),
-				REX::W32::GetModuleHandleW(L"po3_Tweaks") ? "loaded" : "NOT loaded");
+				!tweaks ? "NOT loaded" : named ? "loaded" :
+												 "loaded, but it keeps no editor IDs - its Load EditorIDs setting may be off");
 		}
 
 		// a per-form answer, worked out once and cached. A form made while the game runs (its ID starts FF) is never cached:

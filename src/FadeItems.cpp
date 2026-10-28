@@ -273,6 +273,7 @@ namespace Fade::Items
 			if (!a_light) {
 				return;
 			}
+			const auto turn = LightKit::Turn();  // the choice and its handshake in one turn (LightKit.h)
 			auto [it, added] = gHeld.try_emplace(a_light);
 			auto& h = it->second;
 			if (added) {
@@ -352,6 +353,9 @@ namespace Fade::Items
 						TouchUnder(node, choice);
 					}
 					Touch(caster, choice);
+					for (auto* light : NotedLightsOf(a_actor, left)) {
+						TouchUnder(light, choice);
+					}
 				};
 				if (form->As<RE::SpellItem>()) {
 					magicHand();
@@ -367,6 +371,9 @@ namespace Fade::Items
 					// game's own list of that hand's enchantment effects (FadeLights.cpp EffectRootsOf; CodeRabbit on RELight #16)
 					for (auto* root : EffectRootsOf(a_actor, left)) {
 						TouchUnder(root, choice);
+					}
+					for (auto* light : NotedLightsOf(a_actor, left)) {  // a plugin's light for this hand off its 3D (NoteHandLight)
+						TouchUnder(light, choice);
 					}
 				}
 			}

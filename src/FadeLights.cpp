@@ -66,14 +66,25 @@ namespace Fade
 			}
 		};
 
+		// the hand's numbers a light's last write was made with (ApplyLight)
+		struct LightInputs
+		{
+			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f };
+			bool  fire{ false }, reachFollows{ false };
+
+			[[nodiscard]] bool operator==(const LightInputs&) const = default;
+		};
+
 		struct LightSeen
 		{
 			RE::NiPointer<RE::NiPointLight> light;
-			Glow::Scaled                    fade, radius;
+			Glow::Scaled                    fade, radius, cutoff;  // cutoff: an inverse-square light's, on Community Shaders
 			ColorKeep                       color;
 			std::uint32_t                   frame{ 0 };
 			std::uint64_t                   hand{ 0 };                               // the hand whose numbers it last took, for ReapplyAll
 			float                           shownFade{ 0.0f }, shownRadius{ 0.0f };  // what it held after our last write
+			LightInputs                     from{};                                  // the hand's numbers that write was made with
+			bool                            fromKnown{ false };                      // cleared by a write not ours (an item, a re-base)
 		};
 
 		struct ShaderSeen
@@ -146,6 +157,9 @@ namespace Fade
 		// effect hooks: every art and shader effect in the world calls them each frame, and with no enchanted weapon out they need
 		// not look up (RTTI) whose effect it is
 		std::atomic<std::size_t> gActiveHands{ 0 };
+		// the same hands, in gHands' order, for ActiveHand: rebuilt with gActiveHands under gLock (a map's nodes never move, so
+		// the pointers hold until the next rebuild or RestoreAll)
+		std::vector<HandTrack*> gActiveList;
 		// this frame's switches, for the effect hooks, which run for every effect in the world and must not lock and copy
 		// the settings each time
 		std::atomic<bool> gEnabled{ false }, gDimShader{ false };
@@ -156,6 +170,8 @@ namespace Fade
 		// round (RELight 2.2's code review: a freeze)
 		std::unordered_map<std::uint64_t, std::vector<Root>> gItemRoots;
 		std::atomic<bool>                                    gItemRootsWanted{ false };
+		// the lights a plugin hung for a hand away from that hand's 3D (NoteHandLight), by ItemKey, under gLock
+		std::unordered_map<std::uint64_t, std::vector<Root>> gNotedLights;
 		// the HUD's copy (Fade.h HudState): written at the end of each UpdateHands, read by the render thread. Its own small
 		// lock, held only while a few dozen bytes are copied - the render thread never waits on the per-frame pass (gLock)
 		std::mutex gHudLock;
@@ -185,6 +201,33 @@ namespace Fade
 			}
 		}
 
+		[[nodiscard]] LightInputs InputsOf(const HandTrack& a_hand)
+		{
+			return { a_hand.out.brightness, a_hand.out.reach, a_hand.out.cool, a_hand.fire, a_hand.verdict.tuning.reachFollows > 0.0f };
+		}
+
+		// the light still holds every value ApplyLight last wrote, with the hand's numbers it has now: ApplyLight would write the
+		// same values again (Glow::Scaled / ColorKeep write base x factor when the value read is their own). Read under the turn
+		[[nodiscard]] bool HoldsOurWrite(const LightSeen& a_seen, const HandTrack& a_hand)
+		{
+			if (!a_seen.fromKnown || !(a_seen.from == InputsOf(a_hand))) {
+				return false;
+			}
+			auto*       light = a_seen.light.get();
+			const auto& d = light->GetLightRuntimeData();
+			if (!a_seen.fade.Written() || d.fade != a_seen.fade.written || d.radius.x != a_seen.shownRadius) {
+				return false;
+			}
+			if (a_seen.radius.Written() && (d.radius.x != a_seen.radius.written || d.radius.y != a_seen.radius.written)) {
+				return false;
+			}
+			if (a_seen.color.touched && !ColorKeep::Same(d.diffuse, a_seen.color.written)) {
+				return false;
+			}
+			const float cutoff = LightKit::Isl::On(light) ? LightKit::Isl::Cutoff(light) : 0.0f;
+			return !(cutoff > 0.0f && std::isfinite(cutoff)) || (a_seen.cutoff.Written() && cutoff == a_seen.cutoff.written);
+		}
+
 		// a_found: the light was found under the hand this frame (a re-apply of this frame's numbers does not count, or a
 		// light that has left the weapon would never be let go)
 		void ApplyLight(RE::NiPointLight* a_light, const HandTrack& a_hand, bool a_found = true)
@@ -197,7 +240,8 @@ namespace Fade
 			if (a_found) {
 				seen.frame = gFrame;
 			}
-			seen.hand = a_hand.key;  // a spell hand's own key: ReapplyAll must find the hand that scaled it, not the weapon hand
+			seen.hand = a_hand.key;               // a spell hand's own key: ReapplyAll must find the hand that scaled it, not the weapon hand
+			const auto  turn = LightKit::Turn();  // its fields and the handshakes below in one turn (LightKit.h)
 			auto&       data = a_light->GetLightRuntimeData();
 			const auto& t = a_hand.verdict.tuning;
 			const float before = data.fade;
@@ -210,11 +254,21 @@ namespace Fade
 				data.radius.y = r;
 				Plugin::NoteReachWrite(a_light, reachBefore, r);  // the reach handshake, as the fade's (a plugin's Reach slider)
 			}
+			// on Community Shaders the reach comes from the fade and the cutoff, never the radius above: the cutoff moves with the
+			// fade (x brightness / reach^2) so the light reaches what "Reach follows" asks
+			if (const float cutoffBefore = LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
+				const float q = (std::max)(a_hand.out.reach, 0.05f);
+				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, a_hand.out.brightness / (q * q)));
+				seen.cutoff.written = LightKit::Isl::Cutoff(a_light);  // as clamped: our own write, never read back as another's
+				Plugin::NoteCutoffWrite(a_light, cutoffBefore, seen.cutoff.written);
+			}
 			if (a_hand.out.cool > 0.0f || seen.color.touched) {
 				data.diffuse = seen.color.Apply(data.diffuse, a_hand.fire, a_hand.out.cool);
 			}
 			seen.shownFade = data.fade;  // for LightsNow, which must not read the game's light off the main thread
 			seen.shownRadius = data.radius.x;
+			seen.from = InputsOf(a_hand);
+			seen.fromKnown = true;
 		}
 
 		void RestoreLight(LightSeen& a_seen)
@@ -222,6 +276,7 @@ namespace Fade
 			if (!a_seen.light) {
 				return;
 			}
+			const auto  turn = LightKit::Turn();
 			auto&       data = a_seen.light->GetLightRuntimeData();
 			const float before = data.fade;
 			data.fade = a_seen.fade.Restore(before);
@@ -232,6 +287,11 @@ namespace Fade
 				data.radius.x = r;
 				data.radius.y = r;
 				Plugin::NoteReachWrite(a_seen.light.get(), reachBefore, r);
+			}
+			if (a_seen.cutoff.Written() && LightKit::Isl::On(a_seen.light.get())) {
+				const float cutoffBefore = LightKit::Isl::Cutoff(a_seen.light.get());
+				LightKit::Isl::SetCutoff(a_seen.light.get(), a_seen.cutoff.Restore(cutoffBefore));
+				Plugin::NoteCutoffWrite(a_seen.light.get(), cutoffBefore, LightKit::Isl::Cutoff(a_seen.light.get()));
 			}
 			data.diffuse = a_seen.color.Restore(data.diffuse);
 		}
@@ -315,6 +375,21 @@ namespace Fade
 			return false;
 		}
 
+		// the lights a plugin noted for this hand (NoteHandLight, before the pass): this frame's or last, still in the scene
+		void ApplyNoted(const RE::Actor* a_actor, HandTrack& a_hand)
+		{
+			const auto it = gNotedLights.find(ItemKey(a_actor, a_hand.left));
+			if (it == gNotedLights.end()) {
+				return;
+			}
+			for (const auto& root : it->second) {
+				if (root.node && root.node->parent && gFrame - root.frame <= 1) {
+					++a_hand.roots;
+					a_hand.lights += ApplyUnder(root.node.get(), a_hand);
+				}
+			}
+		}
+
 		void ApplyHand(RE::Actor* a_actor, HandTrack& a_hand)
 		{
 			a_hand.lights = a_hand.roots = 0;
@@ -336,6 +411,7 @@ namespace Fade
 					a_hand.lights += ApplyUnder(root.node.get(), a_hand);
 				}
 			}
+			ApplyNoted(a_actor, a_hand);
 		}
 
 		// the actors whose hands are read this frame, in a list kept from frame to frame (no allocation once it has grown)
@@ -396,24 +472,37 @@ namespace Fade
 		}
 
 		// by the actor's address, not its handle: this runs on any thread (the effect hooks), and making or reading a handle is
-		// the main thread's to do. A walk of the tracked hands (two per tracked actor). Under gLock.
+		// the main thread's to do. A walk of this frame's active weapon hands only (gActiveList). Under gLock.
 		HandTrack* ActiveHand(const RE::Actor* a_actor, bool a_left)
 		{
 			if (!a_actor) {
 				return nullptr;
 			}
-			for (auto& [key, h] : gHands) {
-				if (h.active && !h.spell && h.left == a_left && h.actorSeen == a_actor) {
-					return &h;
+			for (auto* h : gActiveList) {
+				if (h->left == a_left && h->actorSeen == a_actor) {
+					return h;
 				}
 			}
 			return nullptr;
 		}
 
+		// the effect's weapon-enchantment controller by its vtable, no RTTI cast (the hooks ask this of every effect in the world);
+		// no class of the game derives from it (its own type info), so it matches exactly what skyrim_cast matched
+		[[nodiscard]] RE::WeaponEnchantmentController* WeaponEnchantmentOf(RE::ReferenceEffectController* a_ctrl)
+		{
+			if (!a_ctrl) {
+				return nullptr;
+			}
+			static const REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_WeaponEnchantmentController[0] };
+			std::uintptr_t                               first = 0;
+			std::memcpy(&first, static_cast<const void*>(a_ctrl), sizeof(first));  // its vtable pointer, read as plain bytes
+			return first == vtbl.address() ? static_cast<RE::WeaponEnchantmentController*>(a_ctrl) : nullptr;
+		}
+
 		// the hand an enchantment effect belongs to, and its actor; false when it is not a weapon enchantment's
 		bool HandOfEffect(RE::ReferenceEffect* a_effect, RE::Actor*& a_actor, bool& a_left, RE::NiAVObject*& a_root)
 		{
-			auto* ctrl = a_effect ? skyrim_cast<RE::WeaponEnchantmentController*>(a_effect->controller) : nullptr;
+			auto* ctrl = a_effect ? WeaponEnchantmentOf(a_effect->controller) : nullptr;
 			if (!ctrl || !ctrl->target || !ctrl->caster) {
 				return false;
 			}
@@ -466,6 +555,7 @@ namespace Fade
 			gShaders.clear();
 			gArt.clear();
 			gHands.clear();
+			gActiveList.clear();
 			gActiveHands = 0;
 		}
 
@@ -552,6 +642,7 @@ namespace Fade
 				}
 				ApplyLight(sp.casterLight, h);
 			}
+			ApplyNoted(a_actor, h);
 		}
 
 		// a hand's color as its lights are made (before any cooling): the brightest light the pass scaled for that hand this
@@ -671,6 +762,16 @@ namespace Fade
 
 	void UpdateHands(float a_delta)
 	{
+		// every weapon hand read BEFORE the lock: ReadHand walks a bound weapon's active effects, which the game locks, and the
+		// effect hooks hold that lock when they ask for gLock - read under gLock it could freeze (the outside review's threads M3)
+		const Settings                             s = Config();  // one copy for the frame
+		static std::vector<std::array<Reading, 2>> readings;      // main thread; its storage kept between frames
+		readings.clear();
+		if (s.enabled) {
+			for (auto& actor : Actors(s.who)) {
+				readings.push_back({ ReadHand(actor.get(), false), ReadHand(actor.get(), true) });
+			}
+		}
 		std::lock_guard lock(gLock);
 		++gFrame;
 		// Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen for a
@@ -681,8 +782,11 @@ namespace Fade
 				std::erase_if(it->second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
 				it = it->second.empty() ? gItemRoots.erase(it) : std::next(it);
 			}
+			std::erase_if(gNotedLights, [](auto& a_kv) {
+				std::erase_if(a_kv.second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
+				return a_kv.second.empty();
+			});
 		}
-		const Settings s = Config();  // one copy for the frame
 		gEnabled = s.enabled;
 		gDimShader = s.dimShader;
 		if (!s.enabled) {
@@ -698,7 +802,8 @@ namespace Fade
 		const bool  previewToggled = previewOn != previewWas;
 		previewWas = previewOn;
 		const bool flareNow = preview.flare.exchange(false);
-		for (auto& actor : Actors(s.who)) {
+		for (std::size_t i = 0; i < gActors.size() && i < readings.size(); ++i) {
+			auto& actor = gActors[i];
 			for (const bool left : { false, true }) {
 				auto& h = gHands[Key(actor->GetHandle(), left)];
 				h.actor = actor->GetHandle();
@@ -706,7 +811,7 @@ namespace Fade
 				h.actorSeen = actor.get();
 				h.left = left;
 				h.frame = gFrame;
-				h.reading = ReadHand(actor.get(), left);
+				h.reading = readings[i][left ? 1 : 0];
 				if (!h.reading.tracked) {
 					h.active = false;
 					h.weapon = nullptr;
@@ -796,7 +901,13 @@ namespace Fade
 			}
 		}
 		Sweep();
-		gActiveHands = static_cast<std::size_t>(std::ranges::count_if(gHands, [](const auto& kv) { return kv.second.active && !kv.second.spell; }));
+		gActiveList.clear();
+		for (auto& [key, hand] : gHands) {
+			if (hand.active && !hand.spell) {
+				gActiveList.push_back(&hand);
+			}
+		}
+		gActiveHands = gActiveList.size();
 		PublishHud(s);
 		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
 	}
@@ -893,14 +1004,21 @@ namespace Fade
 	{
 		std::lock_guard lock(gLock);
 		if (gEnabled) {
+			std::optional<std::unique_lock<std::recursive_mutex>> turn;  // one turn for the walk, taken at its first light
 			for (auto& [light, seen] : gLights) {
 				if (!seen.light || gFrame - seen.frame > 1) {
 					continue;
 				}
-				// every cell's pass re-applies every hand: a light may be animated in a cell its actor has since left, and a write
-				// that changes nothing costs nothing (Glow::Scaled)
+				// every cell's pass re-applies every hand: a light may be animated in a cell its actor has since left. One that still
+				// holds the write made with its hand's numbers now is left alone: the write would put back the same values
 				const auto it = gHands.find(seen.hand);
-				if (it != gHands.end() && it->second.active) {
+				if (it == gHands.end() || !it->second.active) {
+					continue;
+				}
+				if (!turn) {
+					turn.emplace(LightKit::Turn());
+				}
+				if (!HoldsOurWrite(seen, it->second)) {
 					ApplyLight(light, it->second, false);
 				}
 			}
@@ -917,6 +1035,7 @@ namespace Fade
 			return;
 		}
 		auto& seen = it->second;
+		seen.fromKnown = false;  // an item's write: the next pass writes this light again
 		if (seen.fade.touched && seen.fade.written == a_fadeBefore) {
 			seen.fade.written = a_fadeAfter;  // its base stays the light's own: the next pass scales that, not the item's write
 			seen.shownFade = a_fadeAfter;
@@ -934,6 +1053,7 @@ namespace Fade
 			return;
 		}
 		auto& seen = it->second;
+		seen.fromKnown = false;     // a new base: the next pass writes this light again
 		seen.fade.base *= a_ratio;  // the Brightness slider moved the light's own value, not ours
 		seen.fade.written = a_now;
 		seen.shownFade = a_now;
@@ -946,6 +1066,31 @@ namespace Fade
 		Items::Release();
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
+		gNotedLights.clear();
+	}
+
+	// a plugin's light for a hand that hangs away from the hand's 3D: the fading pass and Lights by Item take it as the hand's
+	// (Illuminated's first-person weapon and art lights, ArtLights.cpp). Main thread, before the pass
+	void NoteHandLight(const RE::Actor* a_actor, bool a_left, RE::NiPointLight* a_light)
+	{
+		if (!a_actor || !a_light) {
+			return;
+		}
+		std::lock_guard lock(gLock);
+		NoteRoot(gNotedLights[ItemKey(a_actor, a_left)], a_light);
+	}
+
+	std::vector<RE::NiAVObject*> NotedLightsOf(const RE::Actor* a_actor, bool a_left)
+	{
+		std::vector<RE::NiAVObject*> out;
+		if (const auto it = gNotedLights.find(ItemKey(a_actor, a_left)); it != gNotedLights.end()) {
+			for (const auto& root : it->second) {
+				if (root.node && root.node->parent && gFrame - root.frame <= 1) {
+					out.push_back(root.node.get());
+				}
+			}
+		}
+		return out;
 	}
 
 	RE::NiAVObject* WeaponPart(RE::Actor* a_actor, bool a_firstPerson, bool a_left, const RE::TESForm* a_weapon)

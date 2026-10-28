@@ -37,13 +37,13 @@ namespace Plugin
 			std::size_t  option{ 0 };
 			bool         enchant{ false };
 		};
-		std::vector<Held>                                       gHeldOut;
-		std::unordered_set<const RE::NiLight*>                  gHeldSet;  // the same lights, to answer "is it held out" without a walk
-		std::vector<std::pair<const RE::NiLight*, std::size_t>> gEnchant;  // this frame's enchantment lights -> option
+		std::vector<Held>                                   gHeldOut;
+		std::unordered_set<const RE::NiLight*>              gHeldSet;  // the same lights, to answer "is it held out" without a walk
+		std::unordered_map<const RE::NiLight*, std::size_t> gEnchant;  // this frame's enchantment lights -> option
 		// this frame's flesh-spell lights under FleshFX -> the hue they are drawn in (LightKit.h FleshFx; Brightness.cpp)
-		std::vector<std::pair<const RE::NiLight*, const RE::NiColor*>> gFlesh;
-		std::unordered_set<const RE::TESEffectShader*>                 gFleshMissLogged;  // flesh shaders whose light was not found, said once each
-		std::vector<RE::NiLight*>                                      gSheathedOut;      // held in Keep.cpp; put out by the sheathed net below
+		std::unordered_map<const RE::NiLight*, const RE::NiColor*> gFlesh;
+		std::unordered_set<const RE::TESEffectShader*>             gFleshMissLogged;  // flesh shaders whose light was not found, said once each
+		std::vector<RE::NiLight*>                                  gSheathedOut;      // held in Keep.cpp; put out by the sheathed net below
 
 		// what the per-frame walk worked out about a light, with what identifies it (a freed light's address can be reused)
 		struct Known
@@ -75,7 +75,7 @@ namespace Plugin
 			return root;
 		}
 
-		// this frame's enchantment lights of ours: a handful, kept in a vector whose storage is reused from frame to frame.
+		// this frame's enchantment lights of ours, by light: each pass looks a light up once, not along a list (a big fight has hundreds).
 		// A flesh spell's shader (FleshFX's look winning on it) hangs on the caster's body: RE::Light puts a config with no
 		// attach path straight under the effect's root (found the way RE::Light finds it, EnchantRootOf), so only a light
 		// hanging DIRECTLY on that root is its light - an enchanted weapon's light deeper under the same actor keeps its color.
@@ -97,19 +97,14 @@ namespace Plugin
 					RE::BSVisit::TraverseScenegraphLights(root, [opt, hue, root, &direct, &deeper](RE::NiPointLight* a_light) {
 						if (hue && IsEnchantLight(a_light)) {
 							if (a_light->parent == root) {
-								gFlesh.emplace_back(a_light, hue);
+								gFlesh.try_emplace(a_light, hue);  // the first effect's hue stays, as the list's first match did
 								++direct;
 							} else {
 								++deeper;
 							}
 						}
 						if (IsEnchantLight(a_light)) {
-							const auto it = std::ranges::find(gEnchant, static_cast<const RE::NiLight*>(a_light), &std::pair<const RE::NiLight*, std::size_t>::first);
-							if (it == gEnchant.end()) {
-								gEnchant.emplace_back(a_light, opt);
-							} else {
-								it->second = opt;
-							}
+							gEnchant.insert_or_assign(a_light, opt);  // the last effect over it decides, as before
 						}
 						return RE::BSVisit::BSVisitControl::kContinue;
 					});
@@ -221,13 +216,13 @@ namespace Plugin
 
 	std::size_t EnchantOptionOf(const RE::NiLight* a_light)
 	{
-		const auto it = std::ranges::find(gEnchant, a_light, &std::pair<const RE::NiLight*, std::size_t>::first);
+		const auto it = gEnchant.find(a_light);
 		return it != gEnchant.end() ? it->second : kNone;
 	}
 
 	const RE::NiColor* FleshHueOf(const RE::NiLight* a_light)
 	{
-		const auto it = std::ranges::find(gFlesh, a_light, &std::pair<const RE::NiLight*, const RE::NiColor*>::first);
+		const auto it = gFlesh.find(a_light);
 		return it != gFlesh.end() ? it->second : nullptr;
 	}
 
@@ -277,7 +272,7 @@ namespace Plugin
 			return false;
 		});
 		GiveBackDrawn();
-		auto* ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* ssn = LightKit::Scene();
 		if (!ssn) {
 			return;
 		}
