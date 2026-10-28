@@ -143,7 +143,7 @@ namespace Plugin
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: how far the sneak fade has her lights now, 1 = full, down to "Sneaking brightness" (any thread)
 	[[nodiscard]] float SneakLevel();
-	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (any thread)
+	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (main thread: it resolves handles)
 	[[nodiscard]] bool CastByPlayer(const RE::TESObjectREFR* a_ref);
 
 	void                                                LoadData();
@@ -177,7 +177,7 @@ namespace Plugin
 	void                      KeepLight(RE::NiLight* a_light);  // any thread: alive for our lists while the game has it
 	void                      SweepKeptLights();                // main thread, first each frame: what left the game is forgotten, then freed
 	[[nodiscard]] std::size_t KeptLights();
-	void                      ForgetSpellLights(const GoneLights& a_gone);   // main.cpp (it calls Options.cpp's too)
+	void                      ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
 	void                      ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
 	void                      ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
 	void                      ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
@@ -252,7 +252,7 @@ namespace Plugin
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);
 
-	// main.cpp: "Hand lights for" (the light budget for big fights) leaves this actor out - no hand light, no held light
+	// Hooks.cpp: "Hand lights for" (the light budget for big fights) leaves this actor out - no hand light, no held light
 	[[nodiscard]] bool LeftOutByBudget(const RE::Actor* a_actor);
 
 	// ------------------------------------------------------------------ Options.cpp: the switches
@@ -271,7 +271,7 @@ namespace Plugin
 	[[nodiscard]] const RE::NiColor* FleshHueOf(const RE::NiLight* a_light);
 
 	// ------------------------------------------------------------------ Brightness.cpp: our own sliders
-	void UpdateBrightness(float a_delta);  // every frame, last; a_delta is the game's frame time
+	void UpdateBrightness(float a_delta);  // every frame, before the fading module; a_delta is the game's frame time
 	// the fading module (Fade*.cpp) wrote this light's fade: taken only when it started from our value (never scaled twice)
 	void NoteFadeWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
 	// the fading module wrote this light's reach (radius x and y): the same handshake as the fade, so the Reach slider and
@@ -285,7 +285,7 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ Streams.cpp: sprays, beams, breath shouts
 	void RaiseStreamLights();  // once, after the data is read and the lighting found, BEFORE MakeHandLights
-	// a light record of ours (a spray's / bolt's raised copy, a beam record's other users' plain copy): made by the game's own
+	// a light record of ours (a spray's / bolt's plain copy, a beam record's other users' plain copy): made by the game's own
 	// function, never RE::Light's (Hooks.cpp), and dressed by DressStreamLight - any thread
 	[[nodiscard]] bool        IsOurLight(const RE::TESObjectLIGH* a_light);
 	void                      DressStreamLight(RE::NiLight* a_light, const RE::TESObjectLIGH* a_record);

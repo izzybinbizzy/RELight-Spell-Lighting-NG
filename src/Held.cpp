@@ -37,8 +37,9 @@ namespace Plugin
 			float                           written{ -1.0f }, wroteReach{ -1.0f };
 		};
 
-		std::vector<Live> gLive;
-		std::size_t       gTold = 0;
+		std::vector<Live>        gLive;
+		std::atomic<std::size_t> gLiveCount{ 0 };  // the testing DLL's pages read it from the render thread
+		std::size_t              gTold = 0;
 
 		struct Want
 		{
@@ -350,6 +351,7 @@ namespace Plugin
 				v.wroteReach = reach;
 			}
 		}
+		gLiveCount = gLive.size();
 	}
 
 	void DropHeldLights()
@@ -359,8 +361,9 @@ namespace Plugin
 			TakeOff(v, scene);
 		}
 		gLive.clear();
+		gLiveCount = 0;
 		gFailed.clear();
 	}
 
-	std::size_t LiveHeldLights() { return gLive.size(); }
+	std::size_t LiveHeldLights() { return gLiveCount.load(); }
 }

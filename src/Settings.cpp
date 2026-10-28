@@ -16,7 +16,7 @@
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
 //   DimInDaylight=1             0 off, 1 a little, 2 more (Brightness.cpp)
-//   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (main.cpp)
+//   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (Hooks.cpp)
 //   FireArtAuto=1               1 = the art pack the game's own files are is found at start and used; the FireArt pick is the
 //                               backup (FrostArtAuto, ShockArtAuto, HealingArtAuto the same - ArtPacks.cpp)
 //   AutoLights=1                spells from mods with no patch get a hand light too (HandLights.cpp)
@@ -32,6 +32,7 @@
 // beside itself and moved over it, so a crash or a full disk mid-write leaves the old settings, never half a file.
 
 #include "DataText.h"
+#include "Fade.h"
 #include "FadeSettingsText.h"
 #include "Plugin.h"
 
@@ -171,7 +172,7 @@ namespace Plugin
 			std::vector<std::string> names;
 			std::error_code          ec;
 			for (std::filesystem::directory_iterator it{ kOldFolder, ec }, end; !ec && it != end; it.increment(ec)) {
-				names.push_back(it->path().filename().string());
+				names.push_back(Fade::PathText(it->path().filename()));  // never path::string(): it throws on a name the code page cannot show
 			}
 			const auto old = DataText::PicksFromOldFiles(names);
 			if (!old.found) {
@@ -253,7 +254,11 @@ namespace Plugin
 				continue;
 			}
 			const auto key = Trim(l.substr(0, eq));
-			const auto val = Trim(l.substr(eq + 1));
+			auto       rest = l.substr(eq + 1);
+			if (const auto c = rest.find_first_of(";#"); c != std::string_view::npos) {
+				rest = rest.substr(0, c);  // a comment after the value, as the fading module's file allows
+			}
+			const auto val = Trim(rest);
 			const bool settings = SameText(section, "Settings"), switches = SameText(section, "Switches");
 			if (!settings && !switches) {
 				if (!SameText(section, "Brightness") && std::ranges::find(unknown, section) == unknown.end()) {

@@ -144,7 +144,8 @@ namespace
 					const auto* point = a_entry && a_entry->GetType() == RE::PERK_ENTRY_TYPE::kEntryPoint ?
 					                        static_cast<const RE::BGSEntryPointPerkEntry*>(a_entry) :
 					                        nullptr;
-					return point && std::ranges::any_of(point->conditions, ReadsLightLevel);
+					// the perk owner's own tab only (the first): an entry point's other tabs ask about a target or a weapon
+					return point && point->conditions.size() > 0 && ReadsLightLevel(point->conditions[0]);
 				}));
 				if (reads) {
 					found.perks.push_back(perk);
@@ -485,10 +486,12 @@ namespace
 					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
 					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind]() {
-						NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind);
-						if (sneaking) {
-							AdoptSneakCulled({ light });
-						}
+						LightKit::Guarded("spell light task", [&]() {
+							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind);
+							if (sneaking) {
+								AdoptSneakCulled({ light });
+							}
+						});
 					});
 				}
 			});
@@ -560,13 +563,13 @@ namespace
 				// RE::Light has already hung its light here; a switched-off option's goes out before its first frame
 				std::size_t option = Plugin::kNone;
 				if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
-					tasks->AddTask([lights = std::move(culled), option]() { Plugin::AdoptOptionLights(option, lights); });
+					tasks->AddTask([lights = std::move(culled), option]() { LightKit::Guarded("option lights task", [&]() { Plugin::AdoptOptionLights(option, lights); }); });
 				}
 				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them, or gives them
 				// back when another caster made it (an arrow, a trap's explosion or an oil fire keeps its light - IsSpellObject)
 				if (SneakDimsNow() && MaybeSneakDarkens(a_this)) {
 					if (auto culled = CullTree(root); !culled.empty()) {
-						tasks->AddTask([lights = std::move(culled)]() { AdoptSneakCulled(lights); });
+						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
 				if constexpr (std::is_base_of_v<RE::Projectile, T>) {
@@ -621,7 +624,7 @@ namespace
 				const auto pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
 				};
-				if (OnHerWeapon(a_this)) {
+				if (gDimming.load(std::memory_order_acquire) && OnHerWeapon(a_this)) {  // the cast only while something is dimmed
 					UndimmedFor(pass);
 				} else {
 					pass();

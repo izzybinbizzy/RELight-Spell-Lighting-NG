@@ -60,11 +60,17 @@ namespace Fade
 		}
 	}
 
-	void RememberEditorID(const RE::TESForm* a_form, const char* a_id)
+	// called from the game's loader (the recorder hook): out of memory there, the name is not kept and nothing leaves into the game
+	void RememberEditorID(const RE::TESForm* a_form, const char* a_id) noexcept
 	{
-		if (a_form && a_id && *a_id) {
+		if (!a_form || !a_id || !*a_id) {
+			return;
+		}
+		try {
 			RE::BSSpinLockGuard guard(gLock);
 			gEditorIDs[a_form] = a_id;
+		} catch (...) {
+			return;
 		}
 	}
 

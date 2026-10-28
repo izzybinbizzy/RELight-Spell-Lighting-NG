@@ -7,7 +7,7 @@
 // to this as a backup plan" (one stretched light cannot be drawn inside our mods), then "Looks good. Do the flame sprays and
 // cones in Illuminated first, then RELight", and 146 / 147 closed: "for now its the 12 or however many point lights you ended
 // up using". The projectile wears its own light at its own size (Streams.cpp); the row lights its length - lights no farther
-// apart than 80 units, laid again every frame to where its art ends, where it hit something, or its range (BeamRow.h, the
+// apart than BeamRow::kSpacing, laid again every frame to where its art ends, where it hit something, or its range (BeamRow.h, the
 // same file as Illuminated's). Off on Performance (his Quality / Performance order of 2026-10-20), with All lights off, with
 // its option switched off, and once the sneak fade has her lights out (Hooks.cpp). With Dynamic Lighting on the row
 // flickers (BeamRow::Flicker; under Realistic in its spell's shape, BeamRow::Pulsing), held under its cap so the peak can
@@ -74,6 +74,16 @@ namespace Plugin
 		};
 		std::vector<Cloud>    gClouds;
 		constexpr std::size_t kMostClouds = 8;
+
+		// a cone whose cloud light could not hang yet (its 3D not in the world yet, her lights faded out while she sneaks, the
+		// cap): tried again every frame for a while (UpdateRows)
+		struct CloudWait
+		{
+			RE::NiPointer<RE::TESObjectREFR> ref;
+			std::uint32_t                    frames{ 0 };
+		};
+		std::vector<CloudWait>  gCloudWait;
+		constexpr std::uint32_t kCloudTries = 600;  // about ten seconds of frames: a cone's cast and its cloud's life
 
 		// Illuminated's row, the same numbers (its 1.4: the row came off its cap, so Vanilla and ENB were trimmed to Community
 		// Shaders' lift)
@@ -253,20 +263,23 @@ namespace Plugin
 			}
 		}
 
-		// one light where a cone's cloud is, hung beside the cone and dark until MoveClouds places it
-		void HangCloud(RE::TESObjectREFR* a_ref, RE::ShadowSceneNode* a_scene)
+		// one light where a cone's cloud is, hung beside the cone and dark until MoveClouds places it; false: not now, try again
+		[[nodiscard]] bool HangCloud(RE::TESObjectREFR* a_ref, RE::ShadowSceneNode* a_scene)
 		{
 			auto*       root = a_ref ? a_ref->Get3D() : nullptr;
 			auto*       holder = root ? root->parent : nullptr;
 			const auto* rec = CloudRecipe(a_ref);
 			const bool  hers = CastByPlayer(a_ref);
 			const bool  listed = std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
-			if (!a_scene || !holder || !rec || listed || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
-				return;
+			if (!rec || listed) {
+				return true;  // not a cloud of ours, or lit already
+			}
+			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
+				return false;
 			}
 			auto* light = LightKit::CloneLight();
 			if (!light) {
-				return;
+				return false;
 			}
 			light->name = kRowName;                // a row light to every pass that walks the scene (IsRowLight)
 			light->fadeAmount = kMovingLightMark;  // so RE::Light's flicker prevention lets a moving light reach every surface
@@ -280,12 +293,13 @@ namespace Plugin
 			auto* bs = LightKit::AddToScene(a_scene, light, 2.0f);
 			if (!bs) {
 				holder->DetachChild(light);
-				return;
+				return false;
 			}
 			const auto* proj = a_ref->As<RE::Projectile>();
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			gClouds.push_back({ RE::NiPointer<RE::NiAVObject>(root), RE::NiPointer<RE::TESObjectREFR>(a_ref), RE::NiPointer<RE::NiNode>(holder),
 				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f, hers });
+			return true;
 		}
 
 		// one cloud's light this frame: on its cone's path while the cone flies, then where it was, fading out over the cloud's
@@ -526,14 +540,15 @@ namespace Plugin
 			std::lock_guard l{ gQueueLock };
 			queued.swap(gQueue);
 		}
-		// a cone's cloud light is the spell's one light: hung on Performance too (CloudOn), never parked
-		std::erase_if(queued, [scene](const auto& a_ref) {
+		// a cone's cloud light is the spell's one light: hung on Performance too (CloudOn), never parked - tried again while it waits
+		std::erase_if(queued, [](const auto& a_ref) {
 			if (!CloudRecipe(a_ref.get())) {
 				return false;
 			}
-			HangCloud(a_ref.get(), scene);
+			gCloudWait.push_back({ a_ref });
 			return true;
 		});
+		std::erase_if(gCloudWait, [scene](CloudWait& a_w) { return HangCloud(a_w.ref.get(), scene) || ++a_w.frames >= kCloudTries; });
 		const bool on = RowsOn();
 		// gone (its 3D out of the world or rebuilt), switched off, or every row off: taken off the scene now
 		std::vector<const RE::NiAVObject*> drop;
@@ -549,9 +564,9 @@ namespace Plugin
 		for (const auto* root : drop) {
 			Forget(root, scene);
 		}
-		if (!on) {
-			gParked.insert(gParked.end(), queued.begin(), queued.end());
-		} else if (scene) {
+		if (!on || !scene) {
+			gParked.insert(gParked.end(), queued.begin(), queued.end());  // kept: tried again once rows are on and the scene is there
+		} else {
 			// kept while its option or the light cap still holds it back, so it is tried again
 			std::erase_if(gParked, [scene](const auto& a_ref) { return RowOn(a_ref.get()) && Hang(a_ref.get(), scene); });
 			for (const auto& ref : queued) {
@@ -587,6 +602,7 @@ namespace Plugin
 			DropCloud(cloud, scene);
 		}
 		gClouds.clear();
+		gCloudWait.clear();
 		gParked.clear();
 		std::lock_guard l{ gQueueLock };
 		gQueue.clear();

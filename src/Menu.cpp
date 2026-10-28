@@ -704,13 +704,14 @@ namespace Plugin
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
 		// Club, the single-mod patches (Other Mods), then each author's mods under the author's name
+		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
+
 		void __stdcall RenderConfigs()
 		{
 			const GlowStyle style;
 			DrawSwitches(Page::kConfigs);
 			// a frozen body stays frozen: whether its glow fades out is the player's pick
-			auto* data = RE::TESDataHandler::GetSingleton();
-			if (data && (data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp"))) {
+			if (gFecLoaded) {
 				GlowHeading("Frozen Electrocuted Combustion");
 				const char* const kFrozen[] = { T("Glow fades out"), T("Glow stays while frozen") };
 				int               frozen = FecFrozenFadesOut() ? 0 : 1;
@@ -785,6 +786,9 @@ namespace Plugin
 	void RegisterMenu()
 	{
 		FindCSLight();
+		if (auto* data = RE::TESDataHandler::GetSingleton()) {
+			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
+		}
 		// the old folder's file read only while the new one is not there (CodeRabbit on #29; never written)
 		SKSE::log::info("{}", Translation::Load(Fade::SettingsText::ReadFrom("Data/SKSE/Plugins/RELightSpellLightingNG/Translation.json",
 								  "Data/SKSE/Plugins/RelightSpellAddon/Translation.json")));

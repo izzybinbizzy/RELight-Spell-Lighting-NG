@@ -9,7 +9,7 @@
 //   version 1 | file <download> <option> | order <n> | menu <n> | switch <0|1> | mesh <key> | base <0xID~Plugin>
 //   stream <key> <node> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>
 //   hand <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <inverse square 0|1> <portal strict 0|1>
-//   spraylight <0xID~Plugin> [<r> <g> <b>]   a light record a spray makes; since 2.3 each spray wears a raised copy of it
+//   spraylight <0xID~Plugin> [<r> <g> <b>]   a light record a spray makes; each spray wears a plain copy of it
 //                              (Streams.cpp); the color only where his eye set one, else the record's own
 //   beamlight <0xID~Plugin> [<r> <g> <b>]    the same for a beam our data lights (the bolts)
 //   handfx <key> <pulse|flicker> <per second> <intensity>   a hand light's Dynamic Lighting (installed with it)
@@ -447,7 +447,7 @@ namespace Plugin
 		std::vector<fs::path> files;
 		std::error_code       ec;
 		for (fs::directory_iterator it{ fs::path(kFolder), ec }, end; !ec && it != end; it.increment(ec)) {
-			if (it->is_regular_file() && it->path().extension() == ".txt") {
+			if (std::error_code fileEc; it->is_regular_file(fileEc) && it->path().extension() == ".txt") {
 				files.push_back(it->path());
 			}
 		}

@@ -10,7 +10,7 @@
 // RE::Light rewrites fade every frame on a light that flickers or pulses, so each light remembers the fade we last
 // wrote; anything else it carries is a new base, so no slider ever scales a value we wrote. A hand light with Dynamic
 // Lighting breathes or crackles here (Oscillate), and a light on an object an art pick recolors (`tint`) takes that
-// color. Runs last in the player update.
+// color. Runs in the player update after the switches and before the fading module, the sneak dim and the ground twins.
 //
 // Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister mods" -
 // RE::Light lights the objects; what it has no setting for is done here, on the lights this pass already looks after):
@@ -71,12 +71,15 @@ namespace Plugin
 			static std::uniform_real_distribution<float> unit{ 0.0f, 1.0f };
 			constexpr float                              tau = std::numbers::pi_v<float> * 2.0f;
 			constexpr float                              kRatePerHz = 1.2566f;  // gen.RELIGHT_RATE_PER_HZ: perSecond back to cycles a second
-			const auto&                                  fx = *a_s.fx;
 			if (a_s.kind != Pulse::Kind::kNone && PulseRealistic()) {
 				static const auto start = std::chrono::steady_clock::now();
 				const double      seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 				return Pulse::Factor(a_s.kind, seconds, static_cast<std::uint32_t>(std::hash<const void*>{}(&a_s)));
 			}
+			if (!a_s.fx) {
+				return 1.0f;  // no handfx line (an automatic hand light): steady unless Realistic gives its kind a shape
+			}
+			const auto& fx = *a_s.fx;
 			if (!fx.flicker) {
 				a_s.phase[0] = std::fmod(a_s.phase[0] + fx.perSecond * a_dt * 5.0f, tau);
 				return (std::sin(a_s.phase[0]) + 1.0f) / 2.0f * fx.intensity + 1.0f - fx.intensity;
@@ -181,13 +184,23 @@ namespace Plugin
 			}
 			const bool  dynamic = DynamicLightingThisSession();
 			const float held = dynamic || !a_s.flickers ? a_s.base : a_s.peak;
-			const float fade = held * a_scale * (a_s.fx && dynamic ? Oscillate(a_s, a_dt) : 1.0f);
+			const float fade = held * a_scale * (dynamic && (a_s.fx || a_s.kind != Pulse::Kind::kNone) ? Oscillate(a_s, a_dt) : 1.0f);
 			data.fade = fade;
 			a_s.written = fade;
 			const float radius = a_s.baseRadius * a_reach;
+			const bool  moved = data.radius.x != radius;
 			data.radius.x = radius;
 			data.radius.y = radius;
 			a_s.wroteRadius = radius;
+			// off Community Shaders the drawn reach is the point light's attenuation, which the stated radius alone never moved
+			// (Held.cpp SetPlainReach, measured): a steady RE::Light light is attenuated again; a flickering one is left alone - its
+			// attenuation holds RE::Light's flicker phases - and so is a hand light of ours, which DressHandLight attenuates
+			if (auto* point = moved && !InverseSquare() && !a_s.flickers && !a_s.ours ? netimmerse_cast<RE::NiPointLight*>(a_light) : nullptr) {
+				const auto ambient = LightKit::Isl::Read(point);  // the call writes these two words, the ambient color off Community Shaders
+				point->SetLightAttenuation(radius);
+				LightKit::Isl::Write(point, ambient);
+				a_s.rlPhase = point->constAttenuation;  // our write, never read as RE::Light's flicker
+			}
 			if (!SameColor(data.diffuse, a_s.wroteDiffuse)) {
 				a_s.baseDiffuse = data.diffuse;  // RE::Light (or the hand light) gave it this color: the new base
 			}

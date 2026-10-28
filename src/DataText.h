@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -325,6 +326,7 @@ namespace DataText
 			if (!Number(p[3], f.perSecond) || !Number(p[4], f.intensity)) {
 				return false;
 			}
+			f.intensity = std::clamp(f.intensity, 0.0f, 1.0f);  // above 1 the swing would go below no light at all
 			a_file.fx.push_back(std::move(f));
 			return true;
 		}

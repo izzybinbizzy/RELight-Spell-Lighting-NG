@@ -81,7 +81,7 @@ namespace
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
 		Plugin::RegisterMenu();
-		Fade::OnDataLoaded();  // after the menu: its two pages go under the Spell Addon's section, after ours
+		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
 		SKSE::log::info("done in {:.1f} ms",
 			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStarted).count());

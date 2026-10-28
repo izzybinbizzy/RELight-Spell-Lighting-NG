@@ -4,7 +4,8 @@
 //
 // The one place a light the GAME made is held. The spell lights, the lights put out while sneaking, the hand lights,
 // the lights the sliders scale and the lights a switch holds out are lists of plain pointers; the one reference that
-// keeps such a light alive for them is here. A light has left the game exactly when this reference is its last, and then
+// keeps such a light alive for them is here (the fading module, Lights by Item and the ground twins hold some too, so a light
+// can stay a few frames past its last use). A light has left the game when this reference is its last, and then
 // every list forgets it before it is freed, on the main thread.
 // (Each list used to hold a reference of its own and call a light gone at "one reference left". A hand light sat in three
 // of them, so that was never true: it was never let go.)
@@ -49,7 +50,7 @@ namespace Plugin
 		for (const auto& light : gone) {
 			set.insert(light.get());
 		}
-		ForgetSpellLights(set);  // main.cpp's lists, then the switches' (Options.cpp) - all on the main thread
+		ForgetSpellLights(set);  // Hooks.cpp's lists, then the switches' (Options.cpp) - all on the main thread
 		ForgetHandLights(set);
 		ForgetSliderLights(set);
 	}

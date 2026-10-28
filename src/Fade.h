@@ -54,7 +54,7 @@ namespace Fade
 
 	// ------------------------------------------------------------------ FadeEditorIDs.cpp: names the game throws away
 	// (weapons and enchantments for the rule files, magic effects for the soul trap test and the plugins' own readers)
-	void                      RememberEditorID(const RE::TESForm* a_form, const char* a_id);
+	void                      RememberEditorID(const RE::TESForm* a_form, const char* a_id) noexcept;
 	void                      InstallEditorIDHooks();               // weapons, enchantments, magic effects: before the game reads its plugins
 	void                      ForgetPassEditorIDs();                // after data load: only weapons, enchantments and magic effects are kept
 	[[nodiscard]] std::string EditorID(const RE::TESForm* a_form);  // "" when unknown (a copy: the table may be rewritten)

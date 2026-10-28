@@ -124,7 +124,7 @@ namespace Plugin
 		{
 			auto& d = a_light->data;
 			d.time = -1;
-			d.radius = static_cast<std::uint32_t>(std::lround((std::max)(a_hand.radius, 0.0f)));
+			d.radius = static_cast<std::uint32_t>(std::lround(std::clamp(a_hand.radius, 0.0f, 100000.0f)));
 			d.color.red = a_hand.rgb[0];
 			d.color.green = a_hand.rgb[1];
 			d.color.blue = a_hand.rgb[2];
