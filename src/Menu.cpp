@@ -698,8 +698,8 @@ namespace Plugin
 			}
 			MenuStyle::Tip(T(
 				"This mod's lights go out - every switch's lights and the hand, weapon and ground lights (sprays and bolts keep their own "
-				"light) - to compare, or when every frame counts. A spell already in your hand changes the next time you ready it. Off "
-				"again brings them all back."));
+				"light) - to compare, or when every frame counts. Most go out at once; a spell already in your hand may keep its glow "
+				"until you ready it again. Off again brings them all back."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation

@@ -129,7 +129,9 @@ namespace Fade::Items
 				return 0;
 			}
 			auto*       dh = RE::TESDataHandler::GetSingleton();
-			const auto* form = dh ? dh->LookupForm(spec.id, spec.plugin) : nullptr;
+			const auto* file = dh ? dh->LookupModByName(spec.plugin) : nullptr;
+			// the plugin's own part of the id: a load-order prefix copied from a record editor named another form (L11)
+			const auto* form = file ? dh->LookupForm(FormText::LocalID(spec.id, file->IsLight()), spec.plugin) : nullptr;
 			return form ? form->GetFormID() : 0;
 		}
 
