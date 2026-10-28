@@ -165,6 +165,14 @@ namespace LightKit
 		}
 	}
 
+	// An SKSE Menu Framework page or HUD element, registered as GuardedDraw<Draw>: it is drawn inside that DLL on the render
+	// thread, where no exception of ours may land (each instance's lambda is its own type, so each page has its own flag)
+	template <void (*Draw)()>
+	void __stdcall GuardedDraw() noexcept
+	{
+		Guarded("menu draw", [] { Draw(); });
+	}
+
 	// A new light for the scene, cloned from one master light made once: ReLight found that a freshly made light, attached
 	// straight away, crashes. nullptr when the game could not make one. Main thread.
 	[[nodiscard]] inline RE::NiPointLight* CloneLight()

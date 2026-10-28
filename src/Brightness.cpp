@@ -216,7 +216,8 @@ namespace Plugin
 			data.diffuse = color;
 			a_s.wroteDiffuse = color;
 			// the cutoff follows the same rule, so an edit in RE::Light's editor sticks: a cutoff we did not write is the
-			// new base, both sliders at 100% leave it alone, otherwise the reach it implies is scaled by Reach only.
+			// new base; the reach it gives this frame's own fade is scaled by Reach, so a flickering light's reach flickers
+			// with it at every setting, as at 100 % / 100 % (his checklist 337, "flicker with reach").
 			// Without Community Shaders' inverse square lighting these words are the ambient color (Plugin.h), so they are
 			// neither read nor written - as Held.cpp and Streams.cpp
 			if (!InverseSquare() || !Isl::On(a_light)) {
@@ -227,9 +228,9 @@ namespace Plugin
 				a_s.baseCutoff = current;
 			}
 			float cutoff = a_s.baseCutoff;
-			if ((a_scale != 1.0f || a_reach != 1.0f) && a_s.baseCutoff > 0.0f && a_s.base > 0.0f) {
+			if ((a_scale != 1.0f || a_reach != 1.0f) && a_s.baseCutoff > 0.0f && a_scale > 0.0f && fade > 0.0f) {
 				const float size = data.radius.z;
-				const float reach = std::sqrt((std::max)(kK * a_s.base / a_s.baseCutoff - size * size, 1.0f)) * a_reach;
+				const float reach = std::sqrt((std::max)(kK * (fade / a_scale) / a_s.baseCutoff - size * size, 1.0f)) * a_reach;
 				cutoff = CutoffFor(fade, reach, size);
 			}
 			if (cutoff != current) {

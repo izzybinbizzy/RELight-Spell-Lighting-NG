@@ -804,12 +804,12 @@ namespace Fade
 		// his answer 2026-10-13: "HUD right below Configs, Lights by Item after Fading" - the mod's own pages (up to Configs)
 		// are added before these, its later pages (Lights by Item / Spell - Items::Render under the mod's own settings for that
 		// page -, then the rest) after them (its RegisterMenuTail)
-		SKSEMenuFramework::AddSectionItem(T("HUD"), RenderHudSettings);
-		SKSEMenuFramework::AddSectionItem(T("Fading"), RenderSettings);
+		SKSEMenuFramework::AddSectionItem(T("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
+		SKSEMenuFramework::AddSectionItem(T("Fading"), LightKit::GuardedDraw<RenderSettings>);
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Fading - debug"), RenderDebug);
+		SKSEMenuFramework::AddSectionItem(T("Fading - debug"), LightKit::GuardedDraw<RenderDebug>);
 #endif
-		SKSEMenuFramework::AddHudElement(RenderHud);
+		SKSEMenuFramework::AddHudElement(LightKit::GuardedDraw<RenderHud>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
 	}
 }
