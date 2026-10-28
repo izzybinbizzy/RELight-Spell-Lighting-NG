@@ -10,14 +10,15 @@
 #pragma once
 
 #include <algorithm>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace Translation
 {
@@ -68,189 +69,38 @@ namespace Translation
 			return out;
 		}
 
-		inline void Utf8(std::string& a_out, std::uint32_t a_cp)
+		// the file's lines, or false with what is wrong. As the reader before it: what follows the closing brace is not read,
+		// and a comma after the last line is forgiven (translators leave one; the parser itself refuses both); anything but one
+		// object of text lines is refused whole.
+		inline bool Read(std::string a_text, std::unordered_map<std::string, std::string>& a_out, std::string& a_error)
 		{
-			if (a_cp < 0x80) {
-				a_out += static_cast<char>(a_cp);
-			} else if (a_cp < 0x800) {
-				a_out += static_cast<char>(0xC0 | (a_cp >> 6));
-				a_out += static_cast<char>(0x80 | (a_cp & 0x3F));
-			} else if (a_cp < 0x10000) {
-				a_out += static_cast<char>(0xE0 | (a_cp >> 12));
-				a_out += static_cast<char>(0x80 | ((a_cp >> 6) & 0x3F));
-				a_out += static_cast<char>(0x80 | (a_cp & 0x3F));
-			} else {
-				a_out += static_cast<char>(0xF0 | (a_cp >> 18));
-				a_out += static_cast<char>(0x80 | ((a_cp >> 12) & 0x3F));
-				a_out += static_cast<char>(0x80 | ((a_cp >> 6) & 0x3F));
-				a_out += static_cast<char>(0x80 | (a_cp & 0x3F));
-			}
-		}
-
-		// a minimal reader for exactly this file: one JSON object of string values. False on anything else.
-		class Reader
-		{
-		public:
-			explicit Reader(std::string_view a_text) :
-				s(a_text) {}
-
-			bool Object(std::unordered_map<std::string, std::string>& a_out, std::string& a_error)
-			{
-				Space();
-				if (!Eat('{')) {
-					return Fail(a_error, "the file must start with {");
-				}
-				Space();
-				if (Eat('}')) {
-					return true;
-				}
-				while (true) {
-					std::string key, value;
-					Space();
-					if (!String(key)) {
-						return Fail(a_error, "expected a quoted English line");
-					}
-					Space();
-					if (!Eat(':')) {
-						return Fail(a_error, "expected : after \"" + key + "\"");
-					}
-					Space();
-					if (!String(value)) {
-						return Fail(a_error, "expected a quoted translation for \"" + key + "\"");
-					}
-					a_out[key] = value;
-					Space();
-					if (Eat(',')) {
-						Space();
-						if (Eat('}')) {
-							return true;  // a trailing comma is forgiven
-						}
-						continue;
-					}
-					if (Eat('}')) {
-						return true;
-					}
-					return Fail(a_error, "expected , or } after \"" + key + "\"");
+			if (const auto close = a_text.find_last_of('}'); close != std::string::npos && close > 0) {
+				a_text.resize(close + 1);
+				const auto comma = a_text.find_last_not_of(" \t\r\n", close - 1);
+				const auto before = comma != std::string::npos && comma > 0 ? a_text.find_last_not_of(" \t\r\n", comma - 1) : std::string::npos;
+				if (before != std::string::npos && a_text[comma] == ',' && a_text[before] != '{') {
+					a_text.erase(comma, 1);
 				}
 			}
-
-		private:
-			bool Fail(std::string& a_error, const std::string& a_what)
-			{
-				std::size_t line = 1;
-				for (std::size_t k = 0; k < i && k < s.size(); ++k) {
-					line += s[k] == '\n' ? 1 : 0;
-				}
-				a_error = "line " + std::to_string(line) + ": " + a_what;
-				return false;
-			}
-			void Space()
-			{
-				while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) {
-					++i;
-				}
-			}
-			bool Eat(char a_c)
-			{
-				if (i < s.size() && s[i] == a_c) {
-					++i;
-					return true;
-				}
-				return false;
-			}
-			bool Hex4(std::uint32_t& a_v)
-			{
-				if (i + 4 > s.size()) {
+			try {
+				const auto json = nlohmann::json::parse(a_text);
+				if (!json.is_object()) {
+					a_error = "the file must be one { } of \"English\": \"translation\" lines";
 					return false;
 				}
-				a_v = 0;
-				for (int k = 0; k < 4; ++k) {
-					const char c = s[i++];
-					a_v <<= 4;
-					if (c >= '0' && c <= '9') {
-						a_v |= static_cast<std::uint32_t>(c - '0');
-					} else if (c >= 'a' && c <= 'f') {
-						a_v |= static_cast<std::uint32_t>(c - 'a' + 10);
-					} else if (c >= 'A' && c <= 'F') {
-						a_v |= static_cast<std::uint32_t>(c - 'A' + 10);
-					} else {
+				for (const auto& [key, value] : json.items()) {
+					if (!value.is_string()) {
+						a_error = "expected a quoted translation for \"" + key + "\"";
 						return false;
 					}
+					a_out[key] = value.get<std::string>();
 				}
 				return true;
-			}
-			bool String(std::string& a_out)
-			{
-				if (!Eat('"')) {
-					return false;
-				}
-				while (i < s.size()) {
-					const char c = s[i++];
-					if (c == '"') {
-						return true;
-					}
-					if (c != '\\') {
-						a_out += c;
-						continue;
-					}
-					if (i >= s.size()) {
-						return false;
-					}
-					switch (const char e = s[i++]) {
-					case '"':
-					case '\\':
-					case '/':
-						a_out += e;
-						break;
-					case 'n':
-						a_out += '\n';
-						break;
-					case 't':
-						a_out += '\t';
-						break;
-					case 'r':
-						a_out += '\r';
-						break;
-					case 'b':
-						a_out += '\b';
-						break;
-					case 'f':
-						a_out += '\f';
-						break;
-					case 'u':
-						{
-							std::uint32_t cp = 0;
-							if (!Hex4(cp)) {
-								return false;
-							}
-							if (cp >= 0xDC00 && cp <= 0xDFFF) {
-								return false;  // a low surrogate with no high one before it
-							}
-							if (cp >= 0xD800 && cp <= 0xDBFF) {
-								// a high surrogate is only half a character: a low one must follow
-								if (i + 6 > s.size() || s[i] != '\\' || s[i + 1] != 'u') {
-									return false;
-								}
-								i += 2;
-								std::uint32_t lo = 0;
-								if (!Hex4(lo) || lo < 0xDC00 || lo > 0xDFFF) {
-									return false;
-								}
-								cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-							}
-							Utf8(a_out, cp);
-							break;
-						}
-					default:
-						return false;
-					}
-				}
+			} catch (const nlohmann::json::exception& e) {
+				a_error = e.what();
 				return false;
 			}
-
-			std::string_view s;
-			std::size_t      i{ 0 };
-		};
+		}
 	}
 
 	// Reads the file (call once, at data load, before the menu is registered). Returns what to log.
@@ -264,15 +114,13 @@ namespace Translation
 			const auto name = a_file.filename().generic_u8string();
 			return "no translation file (" + std::string(name.begin(), name.end()) + "): the pages are in English";
 		}
-		std::stringstream ss;
-		ss << in.rdbuf();
-		std::string text = ss.str();
+		std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
 		if (text.starts_with("\xEF\xBB\xBF")) {
 			text.erase(0, 3);
 		}
 		std::unordered_map<std::string, std::string> read;
 		std::string                                  error;
-		if (!Detail::Reader(text).Object(read, error)) {
+		if (!Detail::Read(std::move(text), read, error)) {
 			return "translation file not used - " + error;
 		}
 		std::size_t used = 0, same = 0, bad = 0;
