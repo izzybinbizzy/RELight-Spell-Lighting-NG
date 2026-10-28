@@ -2,9 +2,7 @@
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
-// The hooks, and spell lights fading while you sneak - out of main.cpp since 2.2 (his order "make sure relight is
-// structurally up to par with illuminated": main.cpp holds the order of work and the SKSE messages, as Illuminated's does;
-// Illuminated keeps its update hooks in LightCopies.cpp):
+// The hooks, and spell lights fading while you sneak (main.cpp holds the order of work and the SKSE messages):
 //   the spell-light call (up to four call sites, each before RE::Light's hook there): our hand lights made, the light
 //                 budget ("Hand lights for"), sneaking;
 //   3D loads      of projectiles, explosions and hazards: a switched-off option's light out before its first frame, sneaking;
@@ -214,8 +212,7 @@ namespace
 	// The projectiles, explosions and hazards that are MAGIC: what a magic effect fires or sets off (its projectile, its
 	// explosion, its projectile's explosion, the hazard such an explosion leaves), worked out once at data load before
 	// the hooks go in, read-only after (the 3D-load hooks ask from loader threads). An arrow, a trap's explosion or a
-	// burning oil slick is none of these, so "Lights off while sneaking" leaves its light alone (the audit, 2026-10-14:
-	// every arrow, explosion and hazard used to count as a spell)
+	// burning oil slick is none of these, so "Lights off while sneaking" leaves its light alone
 	std::unordered_set<const void*> gSpellBases;
 	std::atomic<bool>               gSpellBasesReady{ false };  // set once gSpellBases is built (release), read before it (acquire)
 
@@ -277,7 +274,10 @@ namespace
 		bool          spell{ false };
 		bool          rune{ false };  // the Runes setting itself is read every frame, so a change reaches a known light
 		std::uint32_t frame{ 0 };
+		std::uint8_t  asks{ 0 };  // frames a light on a caster was asked again before it counts as no spell light
+		bool          settled{ false };
 	};
+	constexpr std::uint8_t                             kSneakAsks = 30;  // about half a second: a cast's SKSE task notes its light a frame or two later
 	std::unordered_map<const RE::NiLight*, SneakKnown> gSneakKnown;
 	std::uint32_t                                      gSneakFrame = 0;
 
@@ -347,19 +347,17 @@ namespace
 		auto&       k = gSneakKnown[a_light];
 		const void* name = a_light->name.c_str();
 		const void* parent = a_light->parent;
-		if (k.frame == 0 || k.name != name || k.parent != parent) {
+		if (!k.settled || k.name != name || k.parent != parent) {
 			const auto* ref = Plugin::ReferenceOf(a_light);
 			const bool  hers = CastByHer(ref);
 			const bool  made = gMagicLights.contains(a_light);
 			// RE::Light's enchantment light on her weapon too: the setting's tip promises her weapon lights fade
 			const bool spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)) || (Plugin::IsEnchantLight(a_light) && ref && ref->As<RE::Actor>()));
-			if (!spell && hers && ref && ref->As<RE::Actor>()) {
-				// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again
-				// next frame, never remembered as "not a spell light"
-				gSneakKnown.erase(a_light);
-				return false;
-			}
-			k = { name, parent, spell, IsRune(ref), gSneakFrame };
+			// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again the next
+			// frames, then remembered as no spell light
+			const bool         unsure = !spell && hers && ref && ref->As<RE::Actor>();
+			const std::uint8_t asks = unsure && k.name == name && k.parent == parent ? static_cast<std::uint8_t>(k.asks + 1) : 0;
+			k = { name, parent, spell, IsRune(ref), gSneakFrame, asks, !unsure || asks >= kSneakAsks };
 		}
 		k.frame = gSneakFrame;
 		return k.spell && !(k.rune && !Plugin::RunesFadeOn());
@@ -784,7 +782,7 @@ bool Plugin::CastByPlayer(const RE::TESObjectREFR* a_ref) { return CastByHer(a_r
 
 bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 {
-	// Performance (his order 2026-10-20): the player and followers at most
+	// Performance: the player and followers at most
 	const int who = PerformanceMode() ? (std::max)(HandLightsFor(), 2) : HandLightsFor();
 	if (!who || !a_actor || a_actor->IsPlayerRef()) {
 		return false;

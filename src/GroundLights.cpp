@@ -219,6 +219,15 @@ namespace Plugin
 			return same && same->parent ? same : a_magic;
 		}
 
+		[[nodiscard]] bool InBody(RE::Actor* a_actor, const RE::NiAVObject* a_node)
+		{
+			const auto* body = a_actor->Get3D(false);
+			while (a_node && a_node != body) {
+				a_node = a_node->parent;
+			}
+			return a_node && body;
+		}
+
 		void Visit(RE::Actor* a_actor, RE::ShadowSceneNode* a_scene)
 		{
 			if (!a_actor || !a_actor->Is3DLoaded()) {
@@ -245,7 +254,10 @@ namespace Plugin
 					continue;  // no casting light in this hand, or the hands are down: a twin it had is dropped with the unseen ones
 				}
 				auto* magic = MagicNodeAbove(source);
-				auto* anchor = ThirdPersonTwin(a_actor, magic);
+				// last frame's node while the hand's node is the same and it still hangs in the body: the search walks the skeleton
+				auto* anchor = it != gTwins.end() && it->second.magic.get() == magic && InBody(a_actor, it->second.anchor.get()) ?
+				                   it->second.anchor.get() :
+				                   ThirdPersonTwin(a_actor, magic);
 				auto* parent = anchor ? anchor->parent : nullptr;
 				if (!parent) {
 					continue;
