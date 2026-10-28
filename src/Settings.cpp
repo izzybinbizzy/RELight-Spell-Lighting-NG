@@ -17,6 +17,8 @@
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
 //   DimInDaylight=1             0 off, 1 a little, 2 more (Brightness.cpp)
 //   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (main.cpp)
+//   FireArtAuto=1               1 = the art pack the game's own files are is found at start and used; the FireArt pick is the
+//                               backup (FrostArtAuto, ShockArtAuto, HealingArtAuto the same - ArtPacks.cpp)
 //   AutoLights=1                spells from mods with no patch get a hand light too (HandLights.cpp)
 //   Quality=0                   0 quality, 1 performance: hand, weapon and body lights for the player and followers only (Hooks.cpp)
 //   [Switches]
@@ -60,9 +62,12 @@ namespace Plugin
 		std::atomic<bool>               gAuto{ true };
 		std::atomic<bool>               gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
 		std::array<std::atomic<int>, 4> gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
-		std::atomic<bool>               gDynamic{ true };
-		std::atomic<bool>               gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
-		std::atomic<bool>               gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
+		// the Auto art picks (his checklist 298): each pick's "Find my art pack" switch, and the pack found at data load (never saved)
+		std::array<std::atomic<bool>, 4> gArtAuto{ true, true, true, true };
+		std::array<std::atomic<int>, 4>  gArtFound{ -1, -1, -1, -1 };
+		std::atomic<bool>                gDynamic{ true };
+		std::atomic<bool>                gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		std::atomic<bool>                gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
 
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
@@ -119,6 +124,10 @@ namespace Plugin
 			{ "FrostArt", [] { return gArt[1].load(); }, [](int v) { gArt[1] = ClampPick(1, v); } },
 			{ "ShockArt", [] { return gArt[2].load(); }, [](int v) { gArt[2] = ClampPick(2, v); } },
 			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
+			{ "FireArtAuto", [] { return gArtAuto[0] ? 1 : 0; }, [](int v) { gArtAuto[0] = v != 0; } },
+			{ "FrostArtAuto", [] { return gArtAuto[1] ? 1 : 0; }, [](int v) { gArtAuto[1] = v != 0; } },
+			{ "ShockArtAuto", [] { return gArtAuto[2] ? 1 : 0; }, [](int v) { gArtAuto[2] = v != 0; } },
+			{ "HealingArtAuto", [] { return gArtAuto[3] ? 1 : 0; }, [](int v) { gArtAuto[3] = v != 0; } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
 			{ "PulseShapes", [] { return gPulse ? 1 : 0; }, [](int v) { gPulse = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
@@ -146,7 +155,8 @@ namespace Plugin
 
 		[[nodiscard]] bool IsPickKey(std::string_view a_key)
 		{
-			for (const auto* k : { "FireArt", "FrostArt", "ShockArt", "HealingArt", "DynamicLighting" }) {
+			for (const auto* k : { "FireArt", "FrostArt", "ShockArt", "HealingArt", "FireArtAuto", "FrostArtAuto", "ShockArtAuto", "HealingArtAuto",
+					 "DynamicLighting" }) {
 				if (SameText(a_key, k)) {
 					return true;
 				}
@@ -463,11 +473,39 @@ namespace Plugin
 	void SetAutoLightsOn(bool a_on) { gAuto = a_on; }
 	bool AllLightsOff() { return gAllOff; }
 	void SetAllLightsOff(bool a_off) { gAllOff = a_off; }
-	int  ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
+	int  ManualArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
+	int  ArtFound(int a_group) { return a_group >= 0 && a_group < 4 ? gArtFound[static_cast<std::size_t>(a_group)].load() : -1; }
+	bool ArtAutoOn(int a_group) { return a_group >= 0 && a_group < 4 && gArtAuto[static_cast<std::size_t>(a_group)]; }
+
+	int ArtPick(int a_group)
+	{
+		const int found = ArtFound(a_group);
+		return found >= 0 && ArtAutoOn(a_group) ? found : ManualArtPick(a_group);
+	}
+
 	void SetArtPick(int a_group, int a_v)
 	{
 		if (a_group >= 0 && a_group < 4) {
 			gArt[static_cast<std::size_t>(a_group)] = ClampPick(a_group, a_v);
+		}
+	}
+
+	void SetArtAuto(int a_group, bool a_on)
+	{
+		if (a_group >= 0 && a_group < 4) {
+			gArtAuto[static_cast<std::size_t>(a_group)] = a_on;
+		}
+	}
+
+	void NoteArtPacks()
+	{
+		const auto found = FindArtPacks();
+		for (std::size_t g = 0; g < found.size(); ++g) {
+			const int f = found[g].pick.value_or(-1);
+			gArtFound[g] = f >= 0 && f < DataText::PickCount(static_cast<int>(g)) ? f : -1;
+			SKSE::log::info("art pack ({}): {} ({}) - in use: {}{}", DataText::kPickGroups[g],
+				gArtFound[g] >= 0 ? DataText::kPickNames[g][static_cast<std::size_t>(gArtFound[g].load())] : "not recognised", found[g].why,
+				DataText::kPickNames[g][static_cast<std::size_t>(ArtPick(static_cast<int>(g)))], ArtAutoOn(static_cast<int>(g)) ? "" : " (Find my art pack is off)");
 		}
 	}
 	bool DynamicLighting() { return gDynamic; }

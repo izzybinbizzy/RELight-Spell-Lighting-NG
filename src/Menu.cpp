@@ -283,12 +283,26 @@ namespace Plugin
 		// choices follow DataText::kPickNames (the game's own art first); a pick applies the next time the game starts
 		void DrawArtPick(int a_group, const char* a_label, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
 		{
-			int pick = std::clamp(ArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
+			// the Auto art picks (his checklist 298, "auto, manual backup"): the switch says what it found, the pick below greys
+			// while that pack is used and stays the backup
+			bool       on = ArtAutoOn(a_group);
+			const int  found = ArtFound(a_group);
+			const bool known = found >= 0 && found < static_cast<int>(a_items.size());
+			const auto label = std::format("{} ({})##artauto{}", T("Find my art pack"),
+				known ? std::string(T("found:")) + " " + a_items[static_cast<std::size_t>(found)] : std::string(T("not recognised")), a_group);
+			if (ImGuiMCP::Checkbox(label.c_str(), &on)) {
+				SetArtAuto(a_group, on);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("The art pack you have installed is found when the game starts, and the light takes its color - the pick below is then greyed out. Not recognised (a mix of packs, another pack, an updated one): the pick below is used. Off: always the pick below. Applies the next time the game starts."));
+			ImGuiMCP::BeginDisabled(on && known);
+			int pick = std::clamp(ManualArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
 			if (ImGuiMCP::Combo(a_label, &pick, a_items.data(), static_cast<int>(a_items.size()))) {
 				SetArtPick(a_group, pick);
 				SaveSettings();
 			}
 			MenuStyle::Tip(a_tips[static_cast<std::size_t>(pick)]);
+			ImGuiMCP::EndDisabled();
 		}
 
 		// ------------------------------------------------------------------ the player's own presets, one set per lighting

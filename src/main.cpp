@@ -68,6 +68,7 @@ namespace
 				"VR only - 1: a hand's ground light hangs at your VR hand; 0: at the body's hand (the default)", Plugin::gGroundLightVRHand);
 		}
 		Plugin::LoadSettings(false);  // the art picks and Dynamic Lighting decide which data files count
+		Plugin::NoteArtPacks();       // the art packs the game's own files are: "Find my art pack" picks before the data is read
 		Plugin::FixDynamicLighting();
 		Plugin::LoadData();
 		Plugin::LoadSettings();             // again: the option switches need the options the data made
