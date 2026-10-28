@@ -43,6 +43,7 @@ namespace Plugin
 			float                rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
 			bool                 flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
 			bool                 ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
+			bool                 rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
 			float                written{ -1.0f };    // the fade we last wrote
 			float                baseRadius{ 0.0f };  // the reach RE::Light last gave it
 			float                wroteRadius{ -1.0f };
@@ -101,10 +102,11 @@ namespace Plugin
 		std::mutex                                   gNewLock;
 		struct Made
 		{
-			RE::NiLight*  light;
-			const HandFx* fx;
-			Pulse::Kind   kind;
-			bool          hand;
+			RE::NiLight*  light{ nullptr };
+			const HandFx* fx{ nullptr };
+			Pulse::Kind   kind{ Pulse::Kind::kNone };
+			bool          hand{ false };
+			Dressed       dressed{};  // what its dress wrote (fade -1: none known)
 		};
 		std::vector<Made> gNew;  // lights made since the last frame
 
@@ -161,15 +163,20 @@ namespace Plugin
 		void Apply(RE::NiLight* a_light, Seen& a_s, float a_scale, float a_reach, float a_dt, const RE::NiColor* a_hue)
 		{
 			auto& data = a_light->GetLightRuntimeData();
-			if (data.fade != a_s.written) {
-				a_s.base = data.fade;  // written since we last touched it: that is the new base
+			// a hand light of ours has the bases DressHandLight gave it - fade, reach and cutoff - taken once: a later write (another
+			// pass scaling it each frame) never becomes its base, or the next frame scales that again - the 3.0 white-out on ENB, x1.6
+			// a frame; and readied at low magicka, the fading's first write would stay its reach for life
+			const bool rebase = a_s.ours && a_s.rebase;
+			a_s.rebase = false;
+			if (a_s.ours ? rebase : data.fade != a_s.written) {
+				a_s.base = data.fade;  // written since we last touched it (or ours, just dressed): that is the new base
 			}
 			// the peak follows a rise at once and sinks slowly (kPeakSink a second) toward a lower base, so a lasting change in what
 			// RE::Light gives (its own brightness slider, the reference's scale) is followed within seconds while a flicker's dips
 			// (a fraction of a second) barely move it
 			constexpr float kPeakSink = 0.02f;
 			a_s.peak = a_s.base >= a_s.peak ? a_s.base : (std::max)(a_s.base, a_s.peak * (1.0f - kPeakSink * a_dt));
-			if (data.radius.x != a_s.wroteRadius) {
+			if (a_s.ours ? rebase : data.radius.x != a_s.wroteRadius) {
 				a_s.baseRadius = data.radius.x;  // x and y are the reach, z is the size
 			}
 			// Dynamic Lighting off: an RE::Light light that flickers by its config is held at the most it reached. Only one that
@@ -209,20 +216,21 @@ namespace Plugin
 			data.diffuse = color;
 			a_s.wroteDiffuse = color;
 			// the cutoff follows the same rule, so an edit in RE::Light's editor sticks: a cutoff we did not write is the
-			// new base, both sliders at 100% leave it alone, otherwise the reach it implies is scaled by Reach only.
+			// new base; the reach it gives this frame's own fade is scaled by Reach, so a flickering light's reach flickers
+			// with it at every setting, as at 100 % / 100 % (his checklist 337, "flicker with reach").
 			// Without Community Shaders' inverse square lighting these words are the ambient color (Plugin.h), so they are
 			// neither read nor written - as Held.cpp and Streams.cpp
 			if (!InverseSquare() || !Isl::On(a_light)) {
 				return;
 			}
 			const float current = Isl::Cutoff(a_light);
-			if (current != a_s.wroteCutoff) {
+			if (a_s.ours ? rebase || a_s.baseCutoff < 0.0f : current != a_s.wroteCutoff) {
 				a_s.baseCutoff = current;
 			}
 			float cutoff = a_s.baseCutoff;
-			if ((a_scale != 1.0f || a_reach != 1.0f) && a_s.baseCutoff > 0.0f && a_s.base > 0.0f) {
+			if ((a_scale != 1.0f || a_reach != 1.0f) && a_s.baseCutoff > 0.0f && a_scale > 0.0f && fade > 0.0f) {
 				const float size = data.radius.z;
-				const float reach = std::sqrt((std::max)(kK * a_s.base / a_s.baseCutoff - size * size, 1.0f)) * a_reach;
+				const float reach = std::sqrt((std::max)(kK * (fade / a_scale) / a_s.baseCutoff - size * size, 1.0f)) * a_reach;
 				cutoff = CutoffFor(fade, reach, size);
 			}
 			if (cutoff != current) {
@@ -232,12 +240,12 @@ namespace Plugin
 		}
 	}
 
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx, Pulse::Kind a_kind, bool a_hand)
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx, Pulse::Kind a_kind, bool a_hand, Dressed a_dressed)
 	{
 		if (a_light) {
 			KeepLight(a_light);
 			std::lock_guard l{ gNewLock };
-			gNew.push_back({ a_light, a_fx, a_kind, a_hand });
+			gNew.push_back({ a_light, a_fx, a_kind, a_hand, a_dressed });
 		}
 	}
 
@@ -262,6 +270,15 @@ namespace Plugin
 		// hand with magicka spent), and the reach crept every frame until the fading's loop guard froze it
 		if (const auto it = gSeen.find(a_light); it != gSeen.end() && it->second.wroteRadius == a_before) {
 			it->second.wroteRadius = a_after;
+		}
+	}
+
+	void NoteCutoffWrite(const RE::NiPointLight* a_light, float a_before, float a_after)
+	{
+		std::lock_guard l{ gSeenLock };
+		// as NoteFadeWrite: the fading's cutoff is never taken here for the light's own (the cutoff block of Apply)
+		if (const auto it = gSeen.find(a_light); it != gSeen.end() && it->second.wroteCutoff == a_before) {
+			it->second.wroteCutoff = a_after;
 		}
 	}
 
@@ -292,6 +309,14 @@ namespace Plugin
 				if (m.hand) {
 					s.ours = true;
 					s.flickers = false;
+					// made or re-dressed: what its dress wrote is its base - a pass that scaled it before this list came round (the
+					// fading module, the frame it was made) is never baked in; nothing known: its values now (rebase)
+					s.rebase = !(m.dressed.fade >= 0.0f);
+					if (!s.rebase) {
+						s.base = m.dressed.fade;
+						s.baseRadius = m.dressed.radius;
+						s.baseCutoff = m.dressed.cutoff;
+					}
 				}
 				if (m.kind != Pulse::Kind::kNone) {
 					s.kind = m.kind;
@@ -300,7 +325,7 @@ namespace Plugin
 				gNotOurs.erase(m.light);
 			}
 		}
-		auto* ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* ssn = LightKit::Scene();
 		if (!ssn) {
 			return;
 		}
@@ -324,7 +349,8 @@ namespace Plugin
 				continue;
 			}
 			// gSeenLock is taken per light, not across the walk: the fading module's NoteFadeWrite (the effect updates)
-			// never waits for the whole pass (the re-score's RELight issue 2)
+			// never waits for the whole pass (the re-score's RELight issue 2); the turn first (LightKit.h's order)
+			const auto      turn = LightKit::Turn();
 			std::lock_guard l{ gSeenLock };
 			auto            it = gSeen.find(niLight);
 			if (it == gSeen.end()) {

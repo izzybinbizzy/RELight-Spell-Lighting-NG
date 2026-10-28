@@ -18,9 +18,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "Pulse.h"
@@ -50,7 +52,7 @@ namespace BeamRow
 	// a cone that leaves a cloud (a wind spell's world-space particles): its one light sits this far along the cone's path, from
 	// where it was launched to where it is now, and once the cone ends it stays there and fades out over kCloudLife
 	inline constexpr float kCloudAlong = 0.5f;
-	inline constexpr float kCloudLife = 3.0f;  // seconds; not measured yet - a game run of the cloud sets it
+	inline constexpr float kCloudLife = 0.5f;  // seconds: the cloud's art is gone about when its cone ends (measured)
 
 	// a row light's steady strength where its lighting caps it at a_top (Community Shaders: a light's strength for its reach):
 	// a light held at its cap cannot swing up and burns white in the middle. No cap (a_top 0): what was asked
@@ -102,7 +104,7 @@ namespace BeamRow
 
 	// the light a ground point at (a_x along the beam, a_side across it) gets from the row, the beam a_height above the
 	// ground: the game's smooth falloff and the ground's cosine (the research's model)
-	[[nodiscard]] inline float Ground(const std::vector<Spot>& a_row, float a_length, float a_x, float a_side, float a_height)
+	[[nodiscard]] inline float Ground(std::span<const Spot> a_row, float a_length, float a_x, float a_side, float a_height)
 	{
 		float total = 0.0f;
 		for (const auto& s : a_row) {
@@ -119,30 +121,38 @@ namespace BeamRow
 	// the row for a beam a_length long, at most a_most lights (a scene limit, or 4 on a setup that lets an object take only a
 	// few lights): evenly spaced, the ends halved, then all scaled so the middle of the beam, a_height above the ground, glows
 	// as one light of strength 1 and reach a_reach would right under it. An empty row for a beam with no length.
-	[[nodiscard]] inline std::vector<Spot> Lay(float a_length, int a_most, float a_reach, float a_height)
+	// Laid into a_row, emptied first: a pass laying rows every frame keeps one buffer and allocates nothing.
+	inline void Lay(std::vector<Spot>& a_row, float a_length, int a_most, float a_reach, float a_height)
 	{
-		std::vector<Spot> row;
+		a_row.clear();
 		if (!(a_length > 1.0f) || !std::isfinite(a_length) || a_most < 1 || !(a_reach > 0.0f)) {
-			return row;
+			return;
 		}
 		// clamped in double before it becomes an int: a mod's range can be any float, and a huge one must not overflow it
 		const double needed = (std::min)(std::ceil(static_cast<double>(a_length) / kSpacing), static_cast<double>(a_most));
 		const int    n = std::clamp((std::max)(static_cast<int>(needed), kFewest), 1, a_most);
 		const float  spacing = a_length / static_cast<float>(n);
 		const float  reach = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
-		row.reserve(static_cast<std::size_t>(n));
+		a_row.reserve(static_cast<std::size_t>(n));
 		for (int i = 0; i < n; ++i) {
 			const bool end = n >= kHalveFrom && (i == 0 || i == n - 1);
-			row.push_back({ (static_cast<float>(i) + 0.5f) / static_cast<float>(n), end ? kEndScale : 1.0f, reach });
+			a_row.push_back({ (static_cast<float>(i) + 0.5f) / static_cast<float>(n), end ? kEndScale : 1.0f, reach });
 		}
-		const std::vector<Spot> one{ { 0.5f, 1.0f, a_reach } };
-		const float             want = Ground(one, a_length, a_length * 0.5f, 0.0f, a_height);
-		const float             got = Ground(row, a_length, a_length * 0.5f, 0.0f, a_height);
+		const std::array one{ Spot{ 0.5f, 1.0f, a_reach } };
+		const float      want = Ground(one, a_length, a_length * 0.5f, 0.0f, a_height);
+		const float      got = Ground(a_row, a_length, a_length * 0.5f, 0.0f, a_height);
 		if (got > 0.0f && want > 0.0f) {
-			for (auto& s : row) {
+			for (auto& s : a_row) {
 				s.strength *= want / got;
 			}
 		}
+	}
+
+	// the same row, returned (the tests, and a row hung once)
+	[[nodiscard]] inline std::vector<Spot> Lay(float a_length, int a_most, float a_reach, float a_height)
+	{
+		std::vector<Spot> row;
+		Lay(row, a_length, a_most, a_reach, a_height);
 		return row;
 	}
 }

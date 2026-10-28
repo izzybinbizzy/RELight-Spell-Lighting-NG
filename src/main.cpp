@@ -50,6 +50,7 @@
 
 #include "Fade.h"
 #include "Plugin.h"
+#include "RuntimeGuard.h"
 
 namespace
 {
@@ -101,6 +102,17 @@ namespace
 		}
 	}
 
+	// the old game's twins, body, held and row lights and the fading let go: at a load, and at a new game (it has no
+	// kPreLoadGame)
+	void ForgetOldGame()
+	{
+		Plugin::DropGroundLights();
+		Plugin::DropBodyLights();
+		Plugin::DropHeldLights();
+		Plugin::DropRows();
+		Fade::OnGameLoading();
+	}
+
 	void Handle(SKSE::MessagingInterface::Message* a_msg)
 	{
 		switch (a_msg->type) {
@@ -130,21 +142,12 @@ namespace
 			OnDataLoaded();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
-			Plugin::DropGroundLights();  // the hands and casting lights they follow are the old game's
-			Plugin::DropBodyLights();    // and the art the body lights hang on
-			Plugin::DropHeldLights();    // and the weapons the held lights hang on
-			Plugin::DropRows();          // and the projectiles the rows hang on
-			Fade::OnGameLoading();
+			ForgetOldGame();
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
 			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
-				// no kPreLoadGame comes before a new game: the last game's twins and fading go here
-				Plugin::DropGroundLights();
-				Plugin::DropBodyLights();
-				Plugin::DropHeldLights();
-				Plugin::DropRows();
-				Fade::OnGameLoading();
+				ForgetOldGame();
 			}
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
@@ -169,6 +172,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	// module's two charge-bar calls, 14 bytes each, room to spare): a second SKSE::AllocTrampoline would replace the buffer
 	// under live hooks
 	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 160 });
+	// the wrong game: loaded but idle - a false here makes SKSE add its own "exit game?" box over the guard's
+	if (!RuntimeGuard::RightGame("RELight - Spell Lighting NG", "RELight - Spell Lighting NG", "RELight - Spell Lighting NG - VR")) {
+		return true;
+	}
 	// the spell-light hooks are installed at SKSE's post-load (OnMessage), after every plugin has loaded
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	SKSE::log::info("RELight - Spell Lighting NG plugin loaded; waiting for the game's data");

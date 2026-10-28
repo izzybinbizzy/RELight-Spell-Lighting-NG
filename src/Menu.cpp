@@ -698,8 +698,8 @@ namespace Plugin
 			}
 			MenuStyle::Tip(T(
 				"This mod's lights go out - every switch's lights and the hand, weapon and ground lights (sprays and bolts keep their own "
-				"light) - to compare, or when every frame counts. A spell already in your hand changes the next time you ready it. Off "
-				"again brings them all back."));
+				"light) - to compare, or when every frame counts. Most go out at once; a spell already in your hand may keep its glow "
+				"until you ready it again. Off again brings them all back."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
@@ -804,10 +804,10 @@ namespace Plugin
 		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
 		// Illuminated's order (Praedy's Staves right below Configs); the fading module adds HUD and Fading after these, then
 		// RegisterMenuTail adds Lights by Item and Performance
-		SKSEMenuFramework::AddSectionItem(T("Lights"), RenderLights);
-		SKSEMenuFramework::AddSectionItem(T("Spell & Enchantment Art"), RenderArt);
-		SKSEMenuFramework::AddSectionItem(T("Configs"), RenderConfigs);
-		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), RenderPraedys);
+		SKSEMenuFramework::AddSectionItem(T("Lights"), LightKit::GuardedDraw<RenderLights>);
+		SKSEMenuFramework::AddSectionItem(T("Spell & Enchantment Art"), LightKit::GuardedDraw<RenderArt>);
+		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
+		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
 	}
 
@@ -821,11 +821,11 @@ namespace Plugin
 		// Spell (Spells Without a Patch above the spell list) and the weapons' page
 		static const std::string kSpellPage = std::string(T("Lights by Item")) + "/" + T("Spell");
 		static const std::string kWeaponPage = std::string(T("Lights by Item")) + "/" + T("Weapons and Staves");
-		SKSEMenuFramework::AddSectionItem(kSpellPage.c_str(), RenderItems);
-		SKSEMenuFramework::AddSectionItem(kWeaponPage.c_str(), Fade::Items::RenderWeapons);
-		SKSEMenuFramework::AddSectionItem(T("Performance"), RenderPerformance);  // the last page (his order 2026-10-20)
+		SKSEMenuFramework::AddSectionItem(kSpellPage.c_str(), LightKit::GuardedDraw<RenderItems>);
+		SKSEMenuFramework::AddSectionItem(kWeaponPage.c_str(), LightKit::GuardedDraw<Fade::Items::RenderWeapons>);
+		SKSEMenuFramework::AddSectionItem(T("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), RenderDiagnostics);
+		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
 #endif
 	}
 }

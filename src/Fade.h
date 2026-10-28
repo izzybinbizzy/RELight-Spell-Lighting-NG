@@ -12,14 +12,8 @@
 
 namespace Fade
 {
-	// std::string keys looked up by std::string_view without a temporary string
-	struct StringHash
-	{
-		using is_transparent = void;
-		[[nodiscard]] std::size_t operator()(std::string_view a_text) const noexcept { return std::hash<std::string_view>{}(a_text); }
-	};
-	template <class T>
-	using StringMap = std::unordered_map<std::string, T, StringHash, std::equal_to<>>;
+	using LightKit::StringHash;  // LightMath.h: std::string keys looked up by std::string_view without a temporary string
+	using LightKit::StringMap;
 
 	using LightKit::Lower;  // LightMath.h: the one lower-casing helper
 
@@ -149,13 +143,17 @@ namespace Fade
 	// the roots an actor's weapon-hand enchantment effects hang their lights on - the fading pass's own, or (Fading off, the
 	// weapon exempt) Lights by Item's own record the effect hooks keep (under its lock: Lights by Item asks from inside the pass)
 	[[nodiscard]] std::vector<RE::NiAVObject*> EffectRootsOf(const RE::Actor* a_actor, bool a_left);
-	void                                       AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D);  // after the effect's own update; a_own3D: search
-																												   // the effect's own model too
-	void AfterCaster(RE::ActorMagicCaster* a_caster);                                                              // after a hand caster's update: Lights by Item's choices again on its lights
-	void AfterShaderEffect(RE::ShaderReferenceEffect* a_effect);                                                   // after the game animates an enchantment's shader
-	void ReapplyAll();                                                                                             // after a cell's light animation: this frame's numbers again, every hand's
-	void Rebase(RE::NiPointLight* a_light, float a_ratio, float a_now);                                            // the plugin's Brightness moved a steady light
-	void ReleaseAll();                                                                                             // every light back as we found it
+	// a light a plugin hangs for a hand away from that hand's own 3D (Illuminated's first-person weapon and art lights sit on the
+	// body node: the arms are not posed there) - the fading pass and Lights by Item reach it as the hand's this frame (main thread)
+	void                                              NoteHandLight(const RE::Actor* a_actor, bool a_left, RE::NiPointLight* a_light);
+	[[nodiscard]] const std::vector<RE::NiAVObject*>& NotedLightsOf(const RE::Actor* a_actor, bool a_left);               // this frame's, under gLock (Items::Apply)
+	void                                              AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D);  // after the effect's own update; a_own3D: search
+																														  // the effect's own model too
+	void AfterCaster(RE::ActorMagicCaster* a_caster);                                                                     // after a hand caster's update: Lights by Item's choices again on its lights
+	void AfterShaderEffect(RE::ShaderReferenceEffect* a_effect);                                                          // after the game animates an enchantment's shader
+	void ReapplyAll();                                                                                                    // after a cell's light animation: this frame's numbers again, every hand's
+	void Rebase(RE::NiPointLight* a_light, float a_ratio, float a_now);                                                   // the plugin's Brightness moved a steady light
+	void ReleaseAll();                                                                                                    // every light back as we found it
 	// Lights by Item wrote this light (FadeItems.cpp, under gLock): the fading pass and Brightness keep their own base
 	void NoteItemWrite(RE::NiPointLight* a_light, float a_fadeBefore, float a_fadeAfter, const RE::NiColor& a_colorBefore,
 		const RE::NiColor& a_colorAfter);

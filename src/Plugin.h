@@ -20,14 +20,8 @@ namespace Plugin
 	// the hand lights, the held lights, and the color an art pick gives the objects it recolors.
 	inline constexpr std::size_t kNone = static_cast<std::size_t>(-1);
 
-	// std::string keys looked up by std::string_view without a temporary string
-	struct StringHash
-	{
-		using is_transparent = void;
-		[[nodiscard]] std::size_t operator()(std::string_view a_text) const noexcept { return std::hash<std::string_view>{}(a_text); }
-	};
-	template <class T>
-	using StringMap = std::unordered_map<std::string, T, StringHash, std::equal_to<>>;
+	using LightKit::StringHash;  // LightMath.h: std::string keys looked up by std::string_view without a temporary string
+	using LightKit::StringMap;
 
 	using LightKit::Lower;     // LightMath.h: the one lower-casing helper
 	using LightKit::Relaxed;   // a value one thread writes and another reads (LightKit.h)
@@ -183,11 +177,18 @@ namespace Plugin
 	void                      ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
 
 	// ------------------------------------------------------------------ HandLights.cpp: lights on the caster's hands
-	void                      MakeHandLights();                               // once, after the data and the settings are read
-	void                      RefindHandLights();                             // when a save loads: casting art may have changed
-	void                      ApplyHandLights(bool a_log);                    // after any switch that decides who lights a hand
-	[[nodiscard]] const Hand* HandOfLight(const RE::TESObjectLIGH* a_light);  // nullptr unless it is one of ours, in use
-	void                      DressHandLight(RE::NiLight* a_light, const Hand& a_hand);
+	// what a hand light's dress wrote: Brightness's bases for it, so a pass that scaled it first is never baked in
+	struct Dressed
+	{
+		float fade{ -1.0f };  // -1: no light, nothing known
+		float radius{ -1.0f };
+		float cutoff{ -1.0f };  // -1: not an inverse-square light
+	};
+	void                      MakeHandLights();                                               // once, after the data and the settings are read
+	void                      RefindHandLights();                                             // when a save loads: casting art may have changed
+	void                      ApplyHandLights(bool a_log);                                    // after any switch that decides who lights a hand
+	[[nodiscard]] const Hand* HandOfLight(const RE::TESObjectLIGH* a_light);                  // nullptr unless it is one of ours, in use
+	Dressed                   DressHandLight(RE::NiLight* a_light, const Hand& a_hand);       // -> what it wrote (fade -1: no light)
 	void                      NoteHandLight(RE::NiLight* a_light, const std::string& a_key);  // a lit hand light, so a menu change reaches it (main thread)
 	[[nodiscard]] bool        HandLightHeldOut(const RE::NiLight* a_light);                   // put out by a switch until the next cast
 	[[nodiscard]] std::size_t HandLightsMade();
@@ -277,8 +278,12 @@ namespace Plugin
 	// the fading module wrote this light's reach (radius x and y): the same handshake as the fade, so the Reach slider and
 	// the fading's "reach follows" never take each other's write for a new base and compound (the audit, 2026-10-14)
 	void NoteReachWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
-	// a_hand: a hand light this plugin made (never one of RE::Light's flickering lights)
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false);
+	// the fading module moved this light's inverse-square cutoff ("Reach follows" on Community Shaders): the same handshake
+	void NoteCutoffWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
+	// a_hand: a hand light this plugin made (never one of RE::Light's flickering lights); a_dressed: what its dress wrote
+	// (DressHandLight), its Brightness bases - fade -1: none known, its values when this pass next meets it
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false,
+		Dressed a_dressed = {});
 	// what this pass gives every light of ours, for the lights another file scales (Held.cpp): the daylight factor (looked
 	// at every two seconds, main thread)
 	[[nodiscard]] float DaylightFactor();

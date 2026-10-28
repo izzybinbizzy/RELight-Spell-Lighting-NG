@@ -127,7 +127,7 @@ namespace Plugin
 
 	void UpdateBodyLights()
 	{
-		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* scene = LightKit::Scene();
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* lists = RE::ProcessLists::GetSingleton();
 		if (!scene || !player || !lists) {
@@ -261,7 +261,7 @@ namespace Plugin
 
 	void DropBodyLights()
 	{
-		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* scene = LightKit::Scene();
 		for (auto& v : gLive) {
 			TakeOff(v, scene);
 		}

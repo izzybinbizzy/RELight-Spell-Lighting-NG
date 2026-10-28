@@ -148,7 +148,9 @@ namespace Plugin
 					return other;
 				}
 			}
-			auto* node = root->GetObjectByName(RE::BSFixedString(hand.data()));
+			// pooled once: a string made from text is looked up in the game's string table each time
+			static const RE::BSFixedString kShield{ "SHIELD" }, kWeapon{ "WEAPON" };
+			auto*                          node = root->GetObjectByName(a_left ? kShield : kWeapon);
 			return node ? node->AsNode() : nullptr;
 		}
 
@@ -194,7 +196,7 @@ namespace Plugin
 		void SetPlainReach(RE::NiPointLight* a_light, float a_reach, const RE::NiColor& a_color)
 		{
 			a_light->SetLightAttenuation(a_reach);
-			a_light->GetLightRuntimeData().ambient = { a_color.red * 0.1f, a_color.green * 0.1f, a_color.blue * 0.1f };
+			a_light->GetLightRuntimeData().ambient = LightKit::Tenth(a_color);
 		}
 	}
 
@@ -237,13 +239,8 @@ namespace Plugin
 		}
 		light->local.translate = a_s.at;
 		light->local.scale = 1.0f;
-		const RE::NiPointer<RE::NiPointLight> hold(light);  // freed here if it is never registered
-		a_parent->AttachChild(light, true);
-		RE::NiUpdateData update{};
-		light->Update(update);
-		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true, a_shadow);
+		auto* bs = LightKit::Hang(a_parent, light, a_scene, 1.0f, true, a_shadow);
 		if (!bs) {
-			a_parent->DetachChild(light);
 			return nullptr;
 		}
 		a_made = light;
@@ -253,7 +250,9 @@ namespace Plugin
 	// the sliders and the daylight onto a light MakeOwnLight made: fade and reach as the caller worked them out
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved)
 	{
-		auto& d = a_light->GetLightRuntimeData();
+		// in a turn: the fading module's effect hooks write a held light too, from other threads (LightKit.h)
+		const auto turn = LightKit::Turn();
+		auto&      d = a_light->GetLightRuntimeData();
 		d.fade = a_fade;
 		d.radius.x = a_reach;
 		d.radius.y = a_reach;
@@ -266,7 +265,7 @@ namespace Plugin
 
 	void UpdateHeldLights()
 	{
-		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* scene = LightKit::Scene();
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		if (!scene || !player) {
 			return;
@@ -356,7 +355,7 @@ namespace Plugin
 
 	void DropHeldLights()
 	{
-		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* scene = LightKit::Scene();
 		for (auto& v : gLive) {
 			TakeOff(v, scene);
 		}

@@ -166,6 +166,8 @@ namespace Plugin
 		{
 			auto*       light = a_twin.light.get();
 			auto*       source = a_twin.source.get();
+			const bool  dark = WantedDark(source);  // before the turn: it asks the hand lights' own lock
+			const auto  turn = LightKit::Turn();
 			const auto* anchor = a_twin.anchor ? a_twin.anchor.get() : source->parent;
 			const auto& from = source->GetLightRuntimeData();
 			if (from.radius.x != light->GetLightRuntimeData().radius.x) {
@@ -175,7 +177,7 @@ namespace Plugin
 			}
 			auto& data = light->GetLightRuntimeData();
 			data = from;
-			if (WantedDark(source)) {
+			if (dark) {
 				data.fade = 0.0f;
 			}
 			// the casting light's place under its own magic node, put under the anchor (the third-person magic node of that name)
@@ -305,7 +307,7 @@ namespace Plugin
 			return;  // Community Shaders: the casting light lights the ground itself
 		}
 		ShowLeftHidden();  // before Visit: a twin made this tick hides its light again (Follow)
-		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* scene = LightKit::Scene();
 		if (!scene || gGroundLightsOn.load(std::memory_order_relaxed) < 0.5f || AllLightsOff()) {  // switched off (advanced settings file, or all lights off)
 			// no scene to light, or switched off: let every twin go and give each source light back (with a scene, each twin
 			// leaves its lists too - CodeRabbit, RELight #8)
@@ -341,7 +343,7 @@ namespace Plugin
 
 	void DropGroundLights()
 	{
-		DropAll(RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]);
+		DropAll(LightKit::Scene());
 		gLeftHidden.clear();  // a load: the lights left hidden went with the old game's 3D
 	}
 

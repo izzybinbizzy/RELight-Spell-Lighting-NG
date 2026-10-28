@@ -56,7 +56,8 @@ namespace
 
 	void DimOne(RE::NiLight* a_light, Dimmed& a_d, float a_level)
 	{
-		auto& fade = a_light->GetLightRuntimeData().fade;
+		const auto turn = LightKit::Turn();
+		auto&      fade = a_light->GetLightRuntimeData().fade;
 		if (a_d.down && fade == a_d.wrote) {
 			return;
 		}
@@ -79,7 +80,8 @@ namespace
 			if (!d.down) {
 				continue;
 			}
-			auto& fade = light->GetLightRuntimeData().fade;
+			const auto turn = LightKit::Turn();
+			auto&      fade = light->GetLightRuntimeData().fade;
 			if (fade == d.wrote) {
 				fade = d.pre;  // nobody wrote it since: back to what the others left it
 			}
@@ -378,7 +380,7 @@ namespace
 	// too: off Community Shaders a hand light is hidden and its ground twin copies its numbers
 	void DimSpellLights(float a_level)
 	{
-		auto* ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto* ssn = LightKit::Scene();
 		if (a_level >= 1.0f || !ssn) {
 			return;
 		}
@@ -409,7 +411,8 @@ namespace
 
 	// on the main thread only (an SKSE task from the hook below): a new spell light goes into our lists. The last
 	// reference to a light is only ever dropped on the main thread (here, or in Keep.cpp's sweep)
-	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind)
+	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind,
+		Plugin::Dressed a_dressed)
 	{
 		if (!a_light || a_light->GetRefCount() <= 1) {
 			return;  // the game let go of it before the main thread came round: nothing to note (freed right here)
@@ -422,7 +425,8 @@ namespace
 		// a hand light of ours, a spray light RE::Light made from our config, and the light of a beam or breath
 		// projectile our data names (RE::Light lights it; Streams.cpp) are ours for the sliders
 		if (a_ours) {
-			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey), a_kind, !a_handKey.empty());
+			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey), a_kind, !a_handKey.empty(),
+				a_dressed);
 		}
 		// a light made while her lights were dimmed was put out at once and comes here through AdoptSneakCulled; one made
 		// just before she crouched is dimmed by the next player update's sneaking pass, which reads gMagicLights
@@ -452,11 +456,12 @@ namespace
 		// a casting light it has no config for (an in-memory record can have none)
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
 		RE::NiPointLight*   made = nullptr;
+		Plugin::Dressed     dressed{};  // what a hand light's dress wrote: its Brightness bases (the task carries them)
 		if (hand) {
 			// her own hand lights cast a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
 			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
-			Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
+			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 		} else if (Plugin::IsOurLight(a_light)) {
 			// 2.3: a spray's / bolt's raised copy, or a beam record's other users' plain copy (Streams.cpp) - the game's own
 			// function too, so RE::Light set to switch off game lights it has no config for never switches these off
@@ -485,9 +490,9 @@ namespace
 					// the spell in the hand now, when its light is made - a spell swapped before the task runs is not this light's
 					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind]() {
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind, dressed]() {
 						LightKit::Guarded("spell light task", [&]() {
-							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind);
+							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
 							if (sneaking) {
 								AdoptSneakCulled({ light });
 							}

@@ -23,6 +23,8 @@
 #include "LightMath.h"
 #include "Pulse.h"
 
+#include <mutex>
+
 namespace LightKit
 {
 	// A value read and written on different threads (the menu's render thread, the main thread, the game's loader threads)
@@ -132,6 +134,17 @@ namespace LightKit
 		}
 	}
 
+	// THE TURN (his checklist 317, item 1 - one turn-taking rule for every light write): every pass that writes a light's
+	// fields does it inside a turn, so a game thread and the main thread never write one light at the same moment. Its order:
+	// the sneak / dim locks, then the fading module's, then the turn, then the small list locks (the handshakes, the flicker
+	// list). Inside a turn nothing waits on a game lock, and nothing after it asks for it or for an earlier lock - a turn can
+	// never close a freeze. Recursive: a writer may call another inside its own turn.
+	[[nodiscard]] inline std::unique_lock<std::recursive_mutex> Turn()
+	{
+		static std::recursive_mutex turn;
+		return std::unique_lock<std::recursive_mutex>{ turn };
+	}
+
 	// Runs a_work and lets no exception out: inside a hook, a game callback or per-frame code one would end the game (his C++
 	// rule). The first failure at each place is logged, later ones there are skipped quietly. One flag per call site - each
 	// a_work is a lambda of its own type, so each call site has its own instance of this function.
@@ -152,6 +165,14 @@ namespace LightKit
 		}
 	}
 
+	// An SKSE Menu Framework page or HUD element, registered as GuardedDraw<Draw>: it is drawn inside that DLL on the render
+	// thread, where no exception of ours may land (each instance's lambda is its own type, so each page has its own flag)
+	template <void (*Draw)()>
+	void __stdcall GuardedDraw() noexcept
+	{
+		Guarded("menu draw", [] { Draw(); });
+	}
+
 	// A new light for the scene, cloned from one master light made once: ReLight found that a freshly made light, attached
 	// straight away, crashes. nullptr when the game could not make one. Main thread.
 	[[nodiscard]] inline RE::NiPointLight* CloneLight()
@@ -167,6 +188,9 @@ namespace LightKit
 		}
 		return netimmerse_cast<RE::NiPointLight*>(master->Clone());
 	}
+
+	// the game's shadow scene node, which every light of ours is registered with (none before the world is up)
+	[[nodiscard]] inline RE::ShadowSceneNode* Scene() { return RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]; }
 
 	// Registers a light already attached under a node and updated once: a dynamic light, as ReLight registers its own (field of
 	// view 90, the one a shadowless light is given), never a shadow caster - shadows from lights are the shader mod's job.
@@ -191,6 +215,28 @@ namespace LightKit
 		params.lensFlareData = nullptr;
 		return a_scene && a_light ? a_scene->AddLight(a_light, params) : nullptr;
 	}
+
+	// A new light hung under a_parent, updated once (its world place now, not when the parent next updates) and registered
+	// (AddToScene); nullptr when the scene refused it, which then takes it off again - freed as Hang returns. Main thread.
+	[[nodiscard]] inline RE::BSLight* Hang(RE::NiNode* a_parent, RE::NiPointLight* a_light, RE::ShadowSceneNode* a_scene, float a_falloff = 1.0f,
+		bool a_portalStrict = true, bool a_shadow = false)
+	{
+		if (!a_parent || !a_light || !a_scene) {
+			return nullptr;
+		}
+		const RE::NiPointer<RE::NiPointLight> hold(a_light);
+		a_parent->AttachChild(a_light, true);
+		RE::NiUpdateData update{};
+		a_light->Update(update);
+		auto* bs = AddToScene(a_scene, a_light, a_falloff, a_portalStrict, a_shadow);
+		if (!bs) {
+			a_parent->DetachChild(a_light);
+		}
+		return bs;
+	}
+
+	// the ambient a light of ours wears off Community Shaders: a tenth of its color (RE::Light's rule, Truman)
+	[[nodiscard]] inline RE::NiColor Tenth(const RE::NiColor& a_color) { return { a_color.red * 0.1f, a_color.green * 0.1f, a_color.blue * 0.1f }; }
 
 	// "Dim in daylight" (LightMath.h's DaylightShare): 1 at night and in the dark; a_pick 0 off, 1 a little, 2 more. Main thread:
 	// it reads the player's cell (an interior by its own light, outdoors by the hour).
@@ -305,8 +351,8 @@ namespace LightKit
 	// An art model's color off the emissive colors of its effect shaders (LightMath.h ChromaMean), for an automatic hand light
 	// whose spell has no light of its own and fires no lit projectile (his order of 2026-10-18). The model is read through the
 	// game's own model loader, once per model for the session, and only while a_load is true (the data load): later callers may
-	// hold a lock a game thread waits on, so they get only what was read before. Main thread only. Not on VR: the loader's
-	// address is read off the SE / AE Address Library only.
+	// hold a lock a game thread waits on, so they get only what was read before. Main thread only. Not on VR: kept SE / AE
+	// only, untested there - the loader itself resolves on VR (id 74040 is in the VR Address Library).
 	[[nodiscard]] inline std::optional<RE::Color> ArtColor(const char* a_model, bool a_load = true)
 	{
 		static std::unordered_map<std::string, std::optional<RE::Color>> read;  // model -> its color, or none

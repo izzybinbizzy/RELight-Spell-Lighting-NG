@@ -140,7 +140,7 @@ namespace Plugin
 				Isl::SetOwn(a_light);
 				Isl::SetCutoff(a_light, kDrawnTimes * LightKit::kK * data.fade / IslRoom(a_radius));
 			} else {
-				data.ambient = { a_color.red * 0.1f, a_color.green * 0.1f, a_color.blue * 0.1f };  // RE::Light's rule (Truman)
+				data.ambient = LightKit::Tenth(a_color);
 			}
 		}
 
@@ -236,6 +236,21 @@ namespace Plugin
 			gLive.erase(it);
 		}
 
+		// every live 3D a test picks, let go: all collected first, as Forget erases from gLive
+		template <class Pick>
+		void ForgetIf(RE::ShadowSceneNode* a_scene, Pick a_pick)
+		{
+			std::vector<const RE::NiAVObject*> picked;
+			for (const auto& [root, live] : gLive) {
+				if (a_pick(live)) {
+					picked.push_back(root);
+				}
+			}
+			for (const auto* root : picked) {
+				Forget(root, a_scene);
+			}
+		}
+
 		// a cloud's light is the spell's one light: on Performance too, off with All lights off, its patch's switch and - hers -
 		// once the sneak fade has her lights out
 		[[nodiscard]] bool CloudOn(const RowRecipe& a_rec, bool a_hers)
@@ -286,13 +301,8 @@ namespace Plugin
 			Dress(light, rec->color, 0.0f, 1.0f, InverseSquare());
 			light->local.translate = holder->world.Invert() * a_ref->GetPosition();
 			light->local.scale = 1.0f;
-			const RE::NiPointer<RE::NiPointLight> hold(light);  // freed here if it is never registered
-			holder->AttachChild(light, true);
-			RE::NiUpdateData update{};
-			light->Update(update);
-			auto* bs = LightKit::AddToScene(a_scene, light, 2.0f);
+			auto* bs = LightKit::Hang(holder, light, a_scene, 2.0f);
 			if (!bs) {
-				holder->DetachChild(light);
 				return false;
 			}
 			const auto* proj = a_ref->As<RE::Projectile>();
@@ -393,14 +403,8 @@ namespace Plugin
 				Dress(light, recipe->second.color, 0.0f, 1.0f, isl);  // dark until UpdateRows lays it out
 				light->local.translate = {};
 				light->local.scale = 1.0f;
-				const RE::NiPointer<RE::NiPointLight> hold(light);  // freed here if it is never registered
-				node->AttachChild(light, true);
-				RE::NiUpdateData update{};
-				light->Update(update);
-				if (auto* bs = LightKit::AddToScene(a_scene, light, 2.0f)) {
+				if (auto* bs = LightKit::Hang(node, light, a_scene, 2.0f)) {
 					live.lights.emplace_back(bs);
-				} else {
-					node->DetachChild(light);
 				}
 			}
 			if (live.lights.empty()) {
@@ -467,8 +471,9 @@ namespace Plugin
 					}
 					continue;
 				}
-				const auto  toLocal = live.root->world.Invert();
-				const auto  row = BeamRow::Lay(length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
+				const auto                        toLocal = live.root->world.Invert();
+				static std::vector<BeamRow::Spot> row;  // main thread; its storage kept from row to row and frame to frame
+				BeamRow::Lay(row, length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
 				RE::NiColor color = live.tint ? *live.tint : rec.color;
 				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
 				auto*       spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
@@ -534,7 +539,7 @@ namespace Plugin
 
 	void UpdateRows()
 	{
-		auto*                                         scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		auto*                                         scene = LightKit::Scene();
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
 		{
 			std::lock_guard l{ gQueueLock };
@@ -551,19 +556,15 @@ namespace Plugin
 		std::erase_if(gCloudWait, [scene](CloudWait& a_w) { return HangCloud(a_w.ref.get(), scene) || ++a_w.frames >= kCloudTries; });
 		const bool on = RowsOn();
 		// gone (its 3D out of the world or rebuilt), switched off, or every row off: taken off the scene now
-		std::vector<const RE::NiAVObject*> drop;
-		for (const auto& [root, live] : gLive) {
-			const bool gone = !live.root->parent || !live.ref || live.ref->Get3D() != live.root.get();
-			if (gone || !RowOn(live.hers) || (live.recipe->option != kNone && !OptionLit(live.recipe->option)) || SpellRowOff(live.ref.get())) {
-				drop.push_back(root);
-				if (!gone) {
-					gParked.push_back(live.ref);
-				}
+		ForgetIf(scene, [](const Live& a_live) {
+			const bool gone = !a_live.root->parent || !a_live.ref || a_live.ref->Get3D() != a_live.root.get();
+			const bool off = gone || !RowOn(a_live.hers) || (a_live.recipe->option != kNone && !OptionLit(a_live.recipe->option)) ||
+			                 SpellRowOff(a_live.ref.get());
+			if (off && !gone) {
+				gParked.push_back(a_live.ref);
 			}
-		}
-		for (const auto* root : drop) {
-			Forget(root, scene);
-		}
+			return off;
+		});
 		if (!on || !scene) {
 			gParked.insert(gParked.end(), queued.begin(), queued.end());  // kept: tried again once rows are on and the scene is there
 		} else {
@@ -590,14 +591,8 @@ namespace Plugin
 
 	void DropRows()
 	{
-		auto*                              scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-		std::vector<const RE::NiAVObject*> all;
-		for (const auto& [root, live] : gLive) {
-			all.push_back(root);
-		}
-		for (const auto* root : all) {
-			Forget(root, scene);
-		}
+		auto* scene = LightKit::Scene();
+		ForgetIf(scene, [](const Live&) { return true; });
 		for (auto& cloud : gClouds) {
 			DropCloud(cloud, scene);
 		}

@@ -129,7 +129,9 @@ namespace Fade::Items
 				return 0;
 			}
 			auto*       dh = RE::TESDataHandler::GetSingleton();
-			const auto* form = dh ? dh->LookupForm(spec.id, spec.plugin) : nullptr;
+			const auto* file = dh ? dh->LookupModByName(spec.plugin) : nullptr;
+			// the plugin's own part of the id: a load-order prefix copied from a record editor named another form (L11)
+			const auto* form = file ? dh->LookupForm(FormText::LocalID(spec.id, file->IsLight()), spec.plugin) : nullptr;
 			return form ? form->GetFormID() : 0;
 		}
 
@@ -273,6 +275,7 @@ namespace Fade::Items
 			if (!a_light) {
 				return;
 			}
+			const auto turn = LightKit::Turn();  // the choice and its handshake in one turn (LightKit.h)
 			auto [it, added] = gHeld.try_emplace(a_light);
 			auto& h = it->second;
 			if (added) {
@@ -352,6 +355,9 @@ namespace Fade::Items
 						TouchUnder(node, choice);
 					}
 					Touch(caster, choice);
+					for (auto* light : NotedLightsOf(a_actor, left)) {
+						TouchUnder(light, choice);
+					}
 				};
 				if (form->As<RE::SpellItem>()) {
 					magicHand();
@@ -367,6 +373,9 @@ namespace Fade::Items
 					// game's own list of that hand's enchantment effects (FadeLights.cpp EffectRootsOf; CodeRabbit on RELight #16)
 					for (auto* root : EffectRootsOf(a_actor, left)) {
 						TouchUnder(root, choice);
+					}
+					for (auto* light : NotedLightsOf(a_actor, left)) {  // a plugin's light for this hand off its 3D (NoteHandLight)
+						TouchUnder(light, choice);
 					}
 				}
 			}
