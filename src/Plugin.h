@@ -237,7 +237,7 @@ namespace Plugin
 	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
 	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
 	void               SetPulseShapes(bool a_on);
-	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights pulse in their kind's shape (Pulse.h)
+	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
 	[[nodiscard]] bool PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
 	void               SetPerformanceMode(bool a_on);
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)

@@ -10,7 +10,8 @@
 // apart than 80 units, laid again every frame to where its art ends, where it hit something, or its range (BeamRow.h, the
 // same file as Illuminated's). Off on Performance (his Quality / Performance order of 2026-10-20), with All lights off, with
 // its option switched off, and once the sneak fade has her lights out (Hooks.cpp). With Dynamic Lighting on the row
-// flickers (BeamRow::Flicker), held under its cap so the peak can swing (BeamRow::Steady); with it off it holds still.
+// flickers (BeamRow::Flicker; under Realistic in its spell's shape, BeamRow::Pulsing), held under its cap so the peak can
+// swing (BeamRow::Steady); with it off it holds still.
 // Truman's call after the Lightning Bolt freeze still stands for the loader threads: the Load3D hook only QUEUES the
 // projectile (QueueRow, any thread); every light is made, moved and taken off here on the main thread (UpdateRows, in the
 // player update).
@@ -460,6 +461,11 @@ namespace Plugin
 						color = *own;  // the spell's Lights by Item color reaches its row too
 					}
 				}
+				// under Realistic the row pulses in its spell's shape, as the hand casting it does (BeamRow::Pulsing)
+				auto*      shot = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
+				const auto kind = flickers && shot && PulseRealistic() ? LightKit::PulseKindOfSpell(shot->GetProjectileRuntimeData().spell) :
+				                                                         Pulse::Kind::kNone;
+				const auto seed = static_cast<std::uint32_t>(std::hash<const void*>{}(live.root.get()));
 				for (std::size_t i = 0; i < live.lights.size(); ++i) {
 					auto* light = live.lights[i] ? netimmerse_cast<RE::NiPointLight*>(live.lights[i]->light.get()) : nullptr;
 					if (!light) {
@@ -476,7 +482,7 @@ namespace Plugin
 					const float want = rec.fade * s.strength * bright * (isl ? 1.0f : kRowPlain);
 					// a dimmer Brightness or daylight lowers the cap too, so the sliders still reach a capped row
 					const float steady = BeamRow::Steady(want, isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
-					Dress(light, color, steady * (flickers ? BeamRow::Flicker(seconds, i) : 1.0f), reach, isl);
+					Dress(light, color, steady * (flickers ? BeamRow::Pulsing(kind, seconds, i, seed) : 1.0f), reach, isl);
 					light->local.translate = toLocal * (axis.start + axis.dir * (s.along * length));  // on the path, in the root's units
 					if (static std::size_t told = 0; told < 6) {
 						++told;

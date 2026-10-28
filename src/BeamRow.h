@@ -20,7 +20,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
+
+#include "Pulse.h"
 
 namespace BeamRow
 {
@@ -65,6 +68,19 @@ namespace BeamRow
 		const double shared = 0.6 * std::sin(a_seconds * 43.0) + 0.4 * std::sin(a_seconds * 71.0 + 1.3);
 		const double own = 0.6 * std::sin(a_seconds * 47.0 + phase) + 0.4 * std::sin(a_seconds * 83.0 + phase * 1.7);
 		return 1.0f + kFlicker * static_cast<float>(kTogether * shared + (1.0 - kTogether) * own);
+	}
+
+	// the same factor under Realistic: a row whose spell has a kind (a_kind, Pulse.h) pulses in that kind's shape, as the hand
+	// casting it does - kTogether of it on the row's own seed (a_seed, one per row) so the row gusts as one, the rest on each
+	// light's, so it still shimmers. No kind: the Regular flicker. Within 1 +- kFlicker for every kind, so Steady's headroom holds
+	[[nodiscard]] inline float Pulsing(Pulse::Kind a_kind, double a_seconds, std::size_t a_index, std::uint32_t a_seed)
+	{
+		if (a_kind == Pulse::Kind::kNone) {
+			return Flicker(a_seconds, a_index);
+		}
+		const double shared = Pulse::Factor(a_kind, a_seconds, a_seed) - 1.0;
+		const double own = Pulse::Factor(a_kind, a_seconds, a_seed + 1u + static_cast<std::uint32_t>(a_index)) - 1.0;
+		return 1.0f + static_cast<float>(kTogether * shared + (1.0 - kTogether) * own);
 	}
 
 	// the share of a cloud light's strength a_sinceEnd seconds after its cone ended (below 0: the cone still flies), easing out

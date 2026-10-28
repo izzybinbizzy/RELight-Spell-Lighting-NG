@@ -385,6 +385,13 @@ namespace LightKit
 		}
 	}
 
+	// the pulse kind of a spell: its costliest effect's (what a hand casts, or what a sprayed / fired projectile carries)
+	[[nodiscard]] inline Pulse::Kind PulseKindOfSpell(const RE::MagicItem* a_spell)
+	{
+		const auto* item = a_spell ? a_spell->GetCostliestEffectItem() : nullptr;
+		return PulseKindOf(item ? item->baseEffect : nullptr);
+	}
+
 	// the pulse kind of what a hand holds: the spell it casts now, else the one readied in it (a hand light is made, and pulses,
 	// before any cast)
 	[[nodiscard]] inline Pulse::Kind PulseKindOfHand(RE::Actor* a_actor, bool a_left)
@@ -396,7 +403,6 @@ namespace LightKit
 			auto* equipped = a_actor ? a_actor->GetEquippedObject(a_left) : nullptr;
 			spell = equipped ? equipped->As<RE::MagicItem>() : nullptr;
 		}
-		const auto* item = spell ? spell->GetCostliestEffectItem() : nullptr;
-		return PulseKindOf(item ? item->baseEffect : nullptr);
+		return PulseKindOfSpell(spell);
 	}
 }
