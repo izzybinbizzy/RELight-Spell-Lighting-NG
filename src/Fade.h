@@ -60,6 +60,18 @@ namespace Fade
 	[[nodiscard]] std::string EditorID(const RE::TESForm* a_form);  // "" when unknown (a copy: the table may be rewritten)
 	[[nodiscard]] std::string Label(const RE::TESForm* a_form);     // "Name [EditorID] Skyrim.esm|0004E4EE" for the log
 
+	// powerofthree's Tweaks keeps editor IDs itself (its Load EditorIDs fix, on by default) and exports GetFormEditorID: while it
+	// does, EditorID asks it and our recorder stays out for the types it keeps
+	[[nodiscard]] bool        TweaksKeepsEditorIDs();
+	[[nodiscard]] const char* TweaksEditorID(RE::FormID a_id);  // nullptr without Tweaks or for a form it does not know
+
+	// the types Tweaks' cache covers (its CacheFormEditorIDs fix) - only these are left to it
+	template <class T>
+	inline constexpr bool kTweaksKeeps = std::is_same_v<T, RE::TESObjectWEAP> || std::is_same_v<T, RE::EnchantmentItem> ||
+	                                     std::is_same_v<T, RE::EffectSetting> || std::is_same_v<T, RE::BGSProjectile> ||
+	                                     std::is_same_v<T, RE::BGSExplosion> || std::is_same_v<T, RE::BGSHazard> ||
+	                                     std::is_same_v<T, RE::TESObjectLIGH> || std::is_same_v<T, RE::TESEffectShader>;
+
 	// the hook RecordEditorIDs<T> installs: SetFormEditorID (vtable slot 0x33) on T, recording the ID, then the game's own
 	template <class T>
 	struct EditorIDRecorder
@@ -77,6 +89,11 @@ namespace Fade
 	template <class T>
 	void RecordEditorIDs()
 	{
+		if constexpr (kTweaksKeeps<T>) {
+			if (TweaksKeepsEditorIDs()) {
+				return;
+			}
+		}
 		if (!std::exchange(EditorIDRecorder<T>::installed, true)) {
 			REL::Relocation<std::uintptr_t> vtbl{ T::VTABLE[0] };
 			EditorIDRecorder<T>::func = vtbl.write_vfunc(0x33, EditorIDRecorder<T>::thunk);
