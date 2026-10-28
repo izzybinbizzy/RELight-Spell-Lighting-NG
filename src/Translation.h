@@ -135,7 +135,7 @@ namespace Translation
 			}
 
 		private:
-			bool Fail(std::string& a_error, std::string a_what)
+			bool Fail(std::string& a_error, const std::string& a_what)
 			{
 				std::size_t line = 1;
 				for (std::size_t k = 0; k < i && k < s.size(); ++k) {

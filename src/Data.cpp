@@ -9,7 +9,7 @@
 //   version 1 | file <download> <option> | order <n> | menu <n> | switch <0|1> | mesh <key> | base <0xID~Plugin>
 //   stream <key> <node> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>
 //   hand <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <inverse square 0|1> <portal strict 0|1>
-//   spraylight <0xID~Plugin> [<r> <g> <b>]   a light record a spray makes; since 2.3 each spray wears a raised copy of it
+//   spraylight <0xID~Plugin> [<r> <g> <b>]   a light record a spray makes; each spray wears a plain copy of it
 //                              (Streams.cpp); the color only where his eye set one, else the record's own
 //   beamlight <0xID~Plugin> [<r> <g> <b>]    the same for a beam our data lights (the bolts)
 //   handfx <key> <pulse|flicker> <per second> <intensity>   a hand light's Dynamic Lighting (installed with it)
@@ -22,6 +22,8 @@
 //        its first-person model in first person
 //   body <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>   the light for that art model when the game hangs
 //        it on an actor (a cloak, a heal - BodyLights.cpp; never a spell's casting art); matched exactly, as `held` is
+//   cloud <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>   a cone whose one light stays where its cloud is
+//        (Rows.cpp), in place of RE::Light's, which rides the cone away; matched exactly, as `body` is
 //
 // Objects are matched as RE::Light matches them: a form first, then the bare mesh key ("Magic\RuneFire01.nif" is
 // "runefire01"), exactly, then the longest of our keys the object's key contains.
@@ -37,8 +39,8 @@ namespace Plugin
 	{
 		namespace fs = std::filesystem;
 		constexpr std::string_view kFolder = "Data/SKSE/Plugins/RELightSpellLightingNG";
-		// Dynamic Wards writes its ward-hand data file into this mod's folder under the old name (RelightSpellAddon) until its
-		// own next version moves it: read that one file there too, never anything else of the old folder
+		// Dynamic Wards 2.x wrote its ward-hand data file into this mod's folder under the old name (RelightSpellAddon); 3.x
+		// writes none. Read that one file there for players still on 2.x, never anything else of the old folder
 		constexpr std::string_view kOldDynamicWards = "Data/SKSE/Plugins/RelightSpellAddon/Dynamic Wards.txt";
 
 		struct Tint
@@ -55,6 +57,8 @@ namespace Plugin
 		StringMap<Stream>                           gHeld;       // weapon mesh key -> its held light (highest order wins)
 		std::unordered_map<RE::FormID, Stream>      gHeldBase;   // weapon form -> its held light (highest order wins)
 		StringMap<Stream>                           gBody;       // art model key -> its body light (highest order wins)
+		StringMap<Stream>                           gCloud;      // a cloud cone's model key -> its light (highest order wins)
+		std::unordered_map<RE::FormID, Stream>      gBodyBase;   // an effect shader's form -> its body light
 		// key -> EVERY layer's hand light, highest order first: a switched-off option hands the hand to the next layer
 		StringMap<std::vector<Hand>>   gHands;
 		std::unordered_set<RE::FormID> gSprayLights;
@@ -82,7 +86,12 @@ namespace Plugin
 		std::unordered_map<RE::FormID, const Stream*>      gHeldCache[2];  // [first person]: asked every frame per drawn weapon
 		std::unordered_map<RE::FormID, const Stream*>      gBodyCache;     // art object -> its body light: asked every frame per art
 
-		[[nodiscard]] RE::NiColor ColorOf(float a_r, float a_g, float a_b) { return { a_r / 255.0f, a_g / 255.0f, a_b / 255.0f }; }
+		// a bad data line never gives a negative or over-bright light
+		[[nodiscard]] RE::NiColor ColorOf(float a_r, float a_g, float a_b)
+		{
+			const auto unit = [](float a_v) { return std::clamp(a_v, 0.0f, 255.0f) / 255.0f; };
+			return { unit(a_r), unit(a_g), unit(a_b) };
+		}
 
 		[[nodiscard]] RE::FormID ResolveBase(std::string_view a_text)
 		{
@@ -167,7 +176,7 @@ namespace Plugin
 				s.at = { v[7], v[8], v[9] };
 				return s;
 			};
-			std::vector<Stream> streams, helds, bodies;
+			std::vector<Stream> streams, helds, bodies, clouds;
 			for (const auto& s : file.streams) {
 				streams.push_back(light(s));
 			}
@@ -176,6 +185,9 @@ namespace Plugin
 			}
 			for (const auto& s : file.bodies) {
 				bodies.push_back(light(s));
+			}
+			for (const auto& s : file.clouds) {
+				clouds.push_back(light(s));
 			}
 			const auto idx = gOptions.size();
 			opt.meshes = file.meshes.size();
@@ -231,7 +243,18 @@ namespace Plugin
 				s.order = opt.order;
 				s.option = idx;
 				const auto key = s.key;
-				KeepHighest(gBody, key, std::move(s), opt.order);
+				if (key.find('~') == std::string::npos) {
+					KeepHighest(gBody, key, std::move(s), opt.order);
+				} else if (const auto id = ResolveBase(key)) {
+					KeepHighest(gBodyBase, id, std::move(s), opt.order);
+				}
+			}
+			for (auto& s : clouds) {
+				s.order = opt.order;
+				s.option = idx;
+				own(gMeshOwner, s.key);  // its cone is ours, for the switch
+				const auto key = s.key;
+				KeepHighest(gCloud, key, std::move(s), opt.order);
 			}
 			for (const auto& fx : file.fx) {
 				KeepHighest(gHandFx, fx.key, HandFx{ fx.flicker, fx.perSecond, fx.intensity, opt.order }, opt.order);
@@ -401,6 +424,8 @@ namespace Plugin
 		gHeld.clear();
 		gHeldBase.clear();
 		gBody.clear();
+		gCloud.clear();
+		gBodyBase.clear();
 		gHands.clear();
 		gSprayLights.clear();
 		gBeamLights.clear();
@@ -422,7 +447,7 @@ namespace Plugin
 		std::vector<fs::path> files;
 		std::error_code       ec;
 		for (fs::directory_iterator it{ fs::path(kFolder), ec }, end; !ec && it != end; it.increment(ec)) {
-			if (it->is_regular_file() && it->path().extension() == ".txt") {
+			if (std::error_code fileEc; it->is_regular_file(fileEc) && it->path().extension() == ".txt") {
 				files.push_back(it->path());
 			}
 		}
@@ -674,6 +699,26 @@ namespace Plugin
 			}
 			return it != gBody.end() ? &it->second : nullptr;
 		});
+	}
+
+	const Stream* BodyOf(const RE::TESEffectShader* a_shader)
+	{
+		const auto it = a_shader ? gBodyBase.find(a_shader->GetFormID()) : gBodyBase.end();
+		return it != gBodyBase.end() ? &it->second : nullptr;
+	}
+
+	const Stream* CloudOf(const RE::BGSProjectile* a_projectile)
+	{
+		// exact, as `body` matches: the cone's model by its full path, then its bare name (asked once, at data load)
+		const char* path = a_projectile && !gCloud.empty() ? a_projectile->GetModel() : nullptr;
+		if (!path || !*path) {
+			return nullptr;
+		}
+		auto it = gCloud.find(PathKey(path));
+		if (it == gCloud.end()) {
+			it = gCloud.find(MeshKey(path));
+		}
+		return it != gCloud.end() ? &it->second : nullptr;
 	}
 
 	const StringMap<std::vector<Hand>>&   Hands() { return gHands; }

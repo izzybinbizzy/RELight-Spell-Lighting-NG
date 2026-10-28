@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -189,7 +190,7 @@ namespace DataText
 		std::vector<std::string> meshes, bases, sprays, beams;  // bases / sprays / beams: forms as written
 		// a spray's or beam's light record that carries his color (2.3): the form as written, and its color 0-255
 		std::vector<std::pair<std::string, std::array<int, 3>>> recordColors;
-		std::vector<LightText>                                  streams, helds, bodies;
+		std::vector<LightText>                                  streams, helds, bodies, clouds;
 		std::vector<HandText>                                   hands;
 		std::vector<FxText>                                     fx;
 		std::vector<TintText>                                   tints;
@@ -303,6 +304,15 @@ namespace DataText
 			a_file.bodies.push_back(std::move(s));
 			return true;
 		}
+		// cloud <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>: a cone whose one light stays where its cloud is (Rows.cpp)
+		if (kind == "cloud" && p.size() == 12) {
+			LightText s{ std::string(p[1]), "-", {} };
+			if (!Numbers(p, 2, s.v)) {
+				return false;
+			}
+			a_file.clouds.push_back(std::move(s));
+			return true;
+		}
 		if (kind == "hand" && p.size() == 11) {
 			HandText h{ std::string(p[1]), {} };
 			if (!Numbers(p, 2, h.v)) {
@@ -316,6 +326,7 @@ namespace DataText
 			if (!Number(p[3], f.perSecond) || !Number(p[4], f.intensity)) {
 				return false;
 			}
+			f.intensity = std::clamp(f.intensity, 0.0f, 1.0f);  // above 1 the swing would go below no light at all
 			a_file.fx.push_back(std::move(f));
 			return true;
 		}

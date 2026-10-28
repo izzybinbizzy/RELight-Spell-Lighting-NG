@@ -55,13 +55,17 @@ namespace
 		{
 			const bool hide = Fade::HideChargeBarOn();
 			if (Fade::DebugLogOn() && a_args && a_count == 4 && a_args[0].IsNumber() && a_args[2].IsBool() && a_args[3].IsBool()) {
-				// the debug log: each change of what the game hands the HUD (it calls this every frame)
-				static std::tuple<int, bool, bool> last[2]{ { -1, false, false }, { -1, false, false } };
-				const std::tuple<int, bool, bool>  now{ static_cast<int>(a_args[0].GetNumber()), a_args[2].GetBool(), a_args[3].GetBool() };
-				if (std::exchange(last[N], now) != now) {
-					SKSE::log::info("charge bar ({}): {}% {} hand, show {}{}{}", N, std::get<0>(now), std::get<1>(now) ? "left" : "right",
-						std::get<2>(now), hide ? " - hidden by " : "", hide ? Fade::Mod::kName : "");
-				}
+				LightKit::Guarded("charge bar log", [&]() {
+					// the debug log: each change of what the game hands the HUD (it calls this every frame)
+					static std::array<std::tuple<int, bool, bool>, 2> last{ { { -1, false, false }, { -1, false, false } } };
+					const double                                      percent = a_args[0].GetNumber();
+					const int                                         shown = std::isfinite(percent) ? static_cast<int>(std::clamp(percent, -1.0e6, 1.0e6)) : -1;
+					const std::tuple<int, bool, bool>                 now{ shown, a_args[2].GetBool(), a_args[3].GetBool() };
+					if (std::exchange(last[N], now) != now) {
+						SKSE::log::info("charge bar ({}): {}% {} hand, show {}{}{}", N, std::get<0>(now), std::get<1>(now) ? "left" : "right",
+							std::get<2>(now), hide ? " - hidden by " : "", hide ? Fade::Mod::kName : "");
+					}
+				});
 			}
 			if (a_args && a_count == 4 && hide) {
 				RE::GFxValue args[4]{ a_args[0], a_args[1], a_args[2], a_args[3] };

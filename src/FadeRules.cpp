@@ -46,9 +46,9 @@ namespace Fade
 		// belongs to, and another can be made at the same address.
 		struct PairKey
 		{
-			const void* weapon;
-			const void* ench;
-			RE::FormID  weaponID, enchID;
+			const void* weapon{ nullptr };
+			const void* ench{ nullptr };
+			RE::FormID  weaponID{ 0 }, enchID{ 0 };
 			bool        operator==(const PairKey&) const = default;
 		};
 		struct PairHash
@@ -240,12 +240,10 @@ namespace Fade
 			if (a_weapon->IsBound()) {
 				v.mode = a_settings.bound ? Mode::kBound : Mode::kExempt;
 				v.why = a_settings.bound ? "bound weapon" : "bound weapons off";
-			} else if (!a_settings.weapons) {
+			} else if (a_weapon->IsStaff() ? !a_settings.staves : !a_settings.weapons) {
+				// a staff answers to Staves alone, as its switch says - not to Weapon enchantments
 				v.mode = Mode::kExempt;
-				v.why = "weapons off";
-			} else if (a_weapon->IsStaff() && !a_settings.staves) {
-				v.mode = Mode::kExempt;
-				v.why = "staves off";
+				v.why = a_weapon->IsStaff() ? "staves off" : "weapons off";
 			} else if (const auto off = KindOff(a_settings, KindOf(a_ench)); !off.empty()) {
 				v.mode = Mode::kExempt;
 				v.why = off;

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "ArtAuto.h"
 #include "LightKit.h"
 
 namespace Plugin
@@ -142,7 +143,7 @@ namespace Plugin
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: how far the sneak fade has her lights now, 1 = full, down to "Sneaking brightness" (any thread)
 	[[nodiscard]] float SneakLevel();
-	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (any thread)
+	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (main thread: it resolves handles)
 	[[nodiscard]] bool CastByPlayer(const RE::TESObjectREFR* a_ref);
 
 	void                                                LoadData();
@@ -166,13 +167,17 @@ namespace Plugin
 	[[nodiscard]] const Stream* HeldOf(const RE::TESObjectWEAP* a_weapon, bool a_firstPerson);
 	// nullptr unless a `body` line lights this art model on an actor (BodyLights.cpp): its full path key, then its bare name
 	[[nodiscard]] const Stream* BodyOf(const RE::BGSArtObject* a_art);
+	// nullptr unless a `body` line names this effect shader by its form ("0xID~Plugin" - Frozen Electrocuted Combustion's bodies)
+	[[nodiscard]] const Stream* BodyOf(const RE::TESEffectShader* a_shader);
+	// nullptr unless a `cloud` line lights this cone: one light held where its cloud is (Rows.cpp), matched exactly, as `body`
+	[[nodiscard]] const Stream* CloudOf(const RE::BGSProjectile* a_projectile);
 
 	// ------------------------------------------------------------------ Keep.cpp: the one place a game light is held
 	using GoneLights = std::unordered_set<const RE::NiLight*>;
 	void                      KeepLight(RE::NiLight* a_light);  // any thread: alive for our lists while the game has it
 	void                      SweepKeptLights();                // main thread, first each frame: what left the game is forgotten, then freed
 	[[nodiscard]] std::size_t KeptLights();
-	void                      ForgetSpellLights(const GoneLights& a_gone);   // main.cpp (it calls Options.cpp's too)
+	void                      ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
 	void                      ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
 	void                      ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
 	void                      ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
@@ -206,6 +211,8 @@ namespace Plugin
 	void                SetRunesFadeOn(bool a_on);
 	[[nodiscard]] bool  InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
 	void                SetInvisibleFadeOn(bool a_on);
+	[[nodiscard]] bool  FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
+	void                SetFecFrozenFadesOut(bool a_on);
 	[[nodiscard]] bool  HandLightsOn();
 	void                SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool  WeaponLightsOn();
@@ -223,19 +230,29 @@ namespace Plugin
 	void               SetAutoLightsOn(bool a_on);
 	[[nodiscard]] bool AllLightsOff();  // Performance: every light of this mod off - the options' lights, hand, held and ground lights
 	void               SetAllLightsOff(bool a_off);
-	[[nodiscard]] int  ArtPick(int a_group);  // the chosen art of a DataText::kPickGroups group; 0 = the game's own
+	[[nodiscard]] int  ArtPick(int a_group);        // the art IN USE of a DataText::kPickGroups group (found or chosen); 0 = the game's own
+	[[nodiscard]] int  ManualArtPick(int a_group);  // the menu's pick: saved, the backup of "Find my art pack"
 	void               SetArtPick(int a_group, int a_v);
-	void               SetDynamicLighting(bool a_on);
-	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
-	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
-	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
-	[[nodiscard]] bool PerformanceMode();             // the Performance page's Quality pick on Performance (his 2026-10-20 order)
-	void               SetPerformanceMode(bool a_on);
+	// the Auto art picks (his checklist 298, "auto, manual backup"): each pick's switch and the pack the game's own files are
+	[[nodiscard]] bool                          ArtAutoOn(int a_group);
+	void                                        SetArtAuto(int a_group, bool a_on);
+	[[nodiscard]] int                           ArtFound(int a_group);  // -1: not recognised
+	void                                        NoteArtPacks();         // once at data load, before the data (main.cpp)
+	[[nodiscard]] std::array<ArtAuto::Found, 4> FindArtPacks();         // ArtPacks.cpp
+	void                                        SetDynamicLighting(bool a_on);
+	[[nodiscard]] bool                          DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
+	[[nodiscard]] bool                          DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
+	void                                        FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
+	[[nodiscard]] bool                          PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
+	void                                        SetPulseShapes(bool a_on);
+	[[nodiscard]] bool                          PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
+	[[nodiscard]] bool                          PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
+	void                                        SetPerformanceMode(bool a_on);
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);
 
-	// main.cpp: "Hand lights for" (the light budget for big fights) leaves this actor out - no hand light, no held light
+	// Hooks.cpp: "Hand lights for" (the light budget for big fights) leaves this actor out - no hand light, no held light
 	[[nodiscard]] bool LeftOutByBudget(const RE::Actor* a_actor);
 
 	// ------------------------------------------------------------------ Options.cpp: the switches
@@ -254,20 +271,21 @@ namespace Plugin
 	[[nodiscard]] const RE::NiColor* FleshHueOf(const RE::NiLight* a_light);
 
 	// ------------------------------------------------------------------ Brightness.cpp: our own sliders
-	void UpdateBrightness(float a_delta);  // every frame, last; a_delta is the game's frame time
+	void UpdateBrightness(float a_delta);  // every frame, before the fading module; a_delta is the game's frame time
 	// the fading module (Fade*.cpp) wrote this light's fade: taken only when it started from our value (never scaled twice)
 	void NoteFadeWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
 	// the fading module wrote this light's reach (radius x and y): the same handshake as the fade, so the Reach slider and
 	// the fading's "reach follows" never take each other's write for a new base and compound (the audit, 2026-10-14)
 	void NoteReachWrite(const RE::NiPointLight* a_light, float a_before, float a_after);
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr);
+	// a_hand: a hand light this plugin made (never one of RE::Light's flickering lights)
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false);
 	// what this pass gives every light of ours, for the lights another file scales (Held.cpp): the daylight factor (looked
 	// at every two seconds, main thread)
 	[[nodiscard]] float DaylightFactor();
 
 	// ------------------------------------------------------------------ Streams.cpp: sprays, beams, breath shouts
 	void RaiseStreamLights();  // once, after the data is read and the lighting found, BEFORE MakeHandLights
-	// a light record of ours (a spray's / bolt's raised copy, a beam record's other users' plain copy): made by the game's own
+	// a light record of ours (a spray's / bolt's plain copy, a beam record's other users' plain copy): made by the game's own
 	// function, never RE::Light's (Hooks.cpp), and dressed by DressStreamLight - any thread
 	[[nodiscard]] bool        IsOurLight(const RE::TESObjectLIGH* a_light);
 	void                      DressStreamLight(RE::NiLight* a_light, const RE::TESObjectLIGH* a_record);
@@ -284,6 +302,7 @@ namespace Plugin
 		float       fade{ 1.0f }, reach{ 300.0f };  // the projectile's own light: the row's middle glows as it would right under it
 		bool        beam{ true };                   // a bolt (along its model) - else a flame spray or cone (along its aim)
 		std::size_t option{ kNone };                // its switch
+		bool        cloud{ false };                 // a cone's cloud: one light on its path, held where the cloud is after the cone ends
 	};
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
 	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
@@ -295,10 +314,15 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ Held.cpp: a weapon's own light while it is drawn
 	void                      UpdateHeldLights();  // every frame, after UpdateOptionLights
+	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
 	[[nodiscard]] std::size_t LiveHeldLights();
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
-	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
-		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made);
+	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
+	[[nodiscard]] bool ShadowPatch();
+	// a hand light record's twin that casts a shadow (her own lights, with ShadowPatch), else the record itself; any thread
+	[[nodiscard]] RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light);
+	[[nodiscard]] RE::BSLight*       MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
+		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
 	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
 	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community

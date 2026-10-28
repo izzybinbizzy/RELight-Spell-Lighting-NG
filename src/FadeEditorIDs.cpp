@@ -9,6 +9,7 @@
 // plugin that needs more types asks for them with RecordEditorIDs<T>() (Fade.h). After the data has loaded,
 // ForgetPassEditorIDs() lets go of every other editor ID - the passes that needed them have run - so the table holds
 // only those three types. EditorID() hands out a copy.
+// With powerofthree's Tweaks keeping editor IDs, it does that work: it is asked first and the recorder stays out.
 
 #include "Fade.h"
 
@@ -19,6 +20,40 @@ namespace Fade
 		std::unordered_map<const RE::TESForm*, std::string> gEditorIDs;
 		RE::BSSpinLock                                      gLock;
 
+		using TweaksLookup = const char* (*)(std::uint32_t);
+
+		[[nodiscard]] TweaksLookup TweaksFn()
+		{
+			static const auto fn = [] {
+				const auto tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks");
+				return tweaks ? reinterpret_cast<TweaksLookup>(REX::W32::GetProcAddress(tweaks, "GetFormEditorID")) : nullptr;
+			}();
+			return fn;
+		}
+
+		// its ini can switch the cache off ([Fixes] bLoadEditorIDs, "Load EditorIDs" before); on unless it says off
+		[[nodiscard]] bool TweaksLoadsEditorIDs()
+		{
+			std::ifstream       in(std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / "po3_Tweaks.ini");
+			std::optional<bool> current, legacy;
+			for (std::string line; std::getline(in, line);) {
+				std::string key;
+				for (const char c : line) {
+					if (c != ' ' && c != '\t' && c != '\r') {
+						key += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+					}
+				}
+				// read as its ini reader reads a switch (f, n, of or 0 is off); the current key wins over the old one wherever each stands
+				const auto off = [](std::string_view a_v) { return a_v.starts_with('f') || a_v.starts_with('n') || a_v.starts_with("of") || a_v.starts_with('0'); };
+				if (key.starts_with("bloadeditorids=")) {
+					current = !off(std::string_view(key).substr(15));
+				} else if (key.starts_with("loadeditorids=")) {
+					legacy = !off(std::string_view(key).substr(14));
+				}
+			}
+			return current.value_or(legacy.value_or(true));
+		}
+
 		// the form types kept for the whole session: weapons and enchantments (rule files name them), magic effects (read
 		// while the game runs: the soul trap test and the plugins' own readers)
 		[[nodiscard]] bool RuleType(const RE::TESForm* a_form) noexcept
@@ -27,20 +62,43 @@ namespace Fade
 		}
 	}
 
-	void RememberEditorID(const RE::TESForm* a_form, const char* a_id)
+	// called from the game's loader (the recorder hook): out of memory there, the name is not kept and nothing leaves into the game
+	void RememberEditorID(const RE::TESForm* a_form, const char* a_id) noexcept
 	{
-		if (a_form && a_id && *a_id) {
+		if (!a_form || !a_id || !*a_id) {
+			return;
+		}
+		try {
 			RE::BSSpinLockGuard guard(gLock);
 			gEditorIDs[a_form] = a_id;
+		} catch (...) {
+			return;
 		}
+	}
+
+	bool TweaksKeepsEditorIDs()
+	{
+		static const bool keeps = TweaksFn() && TweaksLoadsEditorIDs();
+		return keeps;
+	}
+
+	const char* TweaksEditorID(RE::FormID a_id)
+	{
+		const auto fn = TweaksFn();
+		return fn ? fn(a_id) : nullptr;
 	}
 
 	void InstallEditorIDHooks()
 	{
+		if (TweaksKeepsEditorIDs()) {
+			SKSE::log::info("editor IDs: powerofthree's Tweaks keeps them - asked first, our recorder is not installed");
+			return;
+		}
 		RecordEditorIDs<RE::TESObjectWEAP>();
 		RecordEditorIDs<RE::EnchantmentItem>();
 		RecordEditorIDs<RE::EffectSetting>();
-		SKSE::log::info("editor IDs: weapons, enchantments and magic effects are recorded as they load");
+		SKSE::log::info("editor IDs: weapons, enchantments and magic effects are recorded as they load{}",
+			TweaksFn() ? " (powerofthree's Tweaks keeps none: its Load EditorIDs is off)" : "");
 	}
 
 	void ForgetPassEditorIDs()
@@ -58,11 +116,14 @@ namespace Fade
 		{
 			RE::BSSpinLockGuard guard(gLock);
 			if (const auto it = gEditorIDs.find(a_form); it != gEditorIDs.end()) {
-				return it->second;
+				return it->second;  // our own copies' names, and every recorded one while Tweaks keeps none
 			}
 		}
-		const char* own = a_form->GetFormEditorID();
-		return own ? std::string(own) : std::string();
+		const char* id = TweaksEditorID(a_form->GetFormID());
+		if (!id || !*id) {
+			id = a_form->GetFormEditorID();
+		}
+		return id ? std::string(id) : std::string();
 	}
 
 	std::string Label(const RE::TESForm* a_form)

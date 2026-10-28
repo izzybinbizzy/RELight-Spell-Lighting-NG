@@ -27,8 +27,8 @@ namespace Plugin
 	{
 		struct Target
 		{
-			RE::EffectSetting* effect;
-			RE::TESObjectLIGH* own;  // the light its plugin gave it
+			RE::EffectSetting* effect{ nullptr };
+			RE::TESObjectLIGH* own{ nullptr };  // the light its plugin gave it
 			std::string        key;
 			bool               automatic{ false };  // no layer lights its art: key names an automatic hand (gAutoHands)
 		};
@@ -42,19 +42,20 @@ namespace Plugin
 		// "i have to dispel the spell then re-cast")
 		struct Live
 		{
-			RE::NiLight* light;  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
+			RE::NiLight* light{ nullptr };  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
 			std::string  key;
 			bool         heldOut{ false };  // put out because nothing lights its key any more
 		};
 
-		std::mutex                                                gLock;
-		std::vector<Target>                                       gTargets;
-		std::vector<Live>                                         gLive;
-		std::unordered_map<std::string, RE::TESObjectLIGH*>       gCopies;
-		std::unordered_map<const RE::TESObjectLIGH*, const Hand*> gInUse;
-		std::size_t                                               gLit = 0, gAutoLit = 0;
-		std::map<std::string, Hand, std::less<>>                  gAutoHands;   // "auto r,g,b" -> its hand (stable: a map's nodes never move)
-		std::unordered_map<std::string, RE::TESObjectLIGH*>       gAutoCopies;  // the same key -> its light record
+		std::mutex                                                       gLock;
+		std::vector<Target>                                              gTargets;
+		std::vector<Live>                                                gLive;
+		std::unordered_map<std::string, RE::TESObjectLIGH*>              gCopies;
+		std::unordered_map<const RE::TESObjectLIGH*, const Hand*>        gInUse;
+		std::size_t                                                      gLit = 0, gAutoLit = 0;
+		std::map<std::string, Hand, std::less<>>                         gAutoHands;    // "auto r,g,b" -> its hand (stable: a map's nodes never move)
+		std::unordered_map<std::string, RE::TESObjectLIGH*>              gAutoCopies;   // the same key -> its light record
+		std::unordered_map<const RE::TESObjectLIGH*, RE::TESObjectLIGH*> gShadowTwins;  // a copy -> its shadow-casting twin (ShadowPatch)
 
 		[[nodiscard]] bool AutoKey(std::string_view a_key) { return a_key.starts_with(kAutoPrefix); }
 
@@ -123,7 +124,7 @@ namespace Plugin
 		{
 			auto& d = a_light->data;
 			d.time = -1;
-			d.radius = static_cast<std::uint32_t>(std::lround((std::max)(a_hand.radius, 0.0f)));
+			d.radius = static_cast<std::uint32_t>(std::lround(std::clamp(a_hand.radius, 0.0f, 100000.0f)));
 			d.color.red = a_hand.rgb[0];
 			d.color.green = a_hand.rgb[1];
 			d.color.blue = a_hand.rgb[2];
@@ -278,6 +279,20 @@ namespace Plugin
 			}
 			return byPath;
 		}
+
+		// every copy - the automatic ones a re-find adds too - gets its shadow-casting twin once (gLock held)
+		void TwinCopies()
+		{
+			for (const auto* copies : { &gCopies, &gAutoCopies }) {
+				for (auto* copy : *copies | std::views::values) {
+					if (!gShadowTwins.contains(copy)) {
+						if (auto* twin = LightKit::NewForm<RE::TESObjectLIGH>()) {
+							gShadowTwins.emplace(copy, twin);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	void RefindHandLights()
@@ -289,6 +304,9 @@ namespace Plugin
 				return;
 			}
 			byPath = FindTargets(false);
+			if (ShadowPatch()) {
+				TwinCopies();  // a re-find may have made new automatic copies
+			}
 			n = gTargets.size();
 		}
 		SKSE::log::info("hand lights: re-found - {} magic effect(s) wear one of their meshes ({} by full path)", n, byPath);
@@ -318,6 +336,11 @@ namespace Plugin
 				++made;
 			}
 			byPath = FindTargets(true);  // data load: no game thread runs a light hook yet
+			gShadowTwins.clear();
+			if (ShadowPatch()) {
+				TwinCopies();
+				SKSE::log::info("hand lights: the Bottled Shaders shadow download is installed - {} shadow twin(s) for her hands", gShadowTwins.size());
+			}
 		}
 		SKSE::log::info(
 			"hand lights: {} light(s) made in memory, {} failed; {} magic effect(s) wear one of their meshes ({} by "
@@ -386,7 +409,7 @@ namespace Plugin
 						live.heldOut = false;
 					}
 					DressHandLight(live.light, *h);
-					RememberLight(live.light, HandFxOf(h->key));
+					RememberLight(live.light, HandFxOf(h->key), Pulse::Kind::kNone, true);
 				} else if (!live.heldOut) {
 					live.light->SetAppCulled(true);
 					live.heldOut = true;
@@ -396,6 +419,30 @@ namespace Plugin
 		if (a_log) {
 			SKSE::log::info("hand lights: {} magic effect(s) lit by this mod, {} left with their own light", lit, given);
 		}
+	}
+
+	bool ShadowPatch()
+	{
+		static const bool on = [] {
+			std::error_code ec;
+			return std::filesystem::exists("Data/SKSE/Plugins/RELightSpellLightingNG/Bottled Shaders Shadows.ini", ec);
+		}();
+		return on;
+	}
+
+	RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light)
+	{
+		std::lock_guard l{ gLock };
+		const auto      it = a_light ? gShadowTwins.find(a_light) : gShadowTwins.end();
+		if (it == gShadowTwins.end()) {
+			return a_light;
+		}
+		// the copy's numbers as the menu last set them, plus the engine's omni shadow flag
+		auto* twin = it->second;
+		twin->data = a_light->data;
+		twin->data.flags.set(RE::TES_LIGHT_FLAGS::kOmniShadow);
+		twin->fade = a_light->fade;
+		return twin;
 	}
 
 	const Hand* HandOfLight(const RE::TESObjectLIGH* a_light)

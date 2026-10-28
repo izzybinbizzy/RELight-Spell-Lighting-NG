@@ -11,11 +11,14 @@
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
 //   FadeWhileInvisible=1        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
+//   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
 //   DimInDaylight=1             0 off, 1 a little, 2 more (Brightness.cpp)
-//   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (main.cpp)
+//   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (Hooks.cpp)
+//   FireArtAuto=1               1 = the art pack the game's own files are is found at start and used; the FireArt pick is the
+//                               backup (FrostArtAuto, ShockArtAuto, HealingArtAuto the same - ArtPacks.cpp)
 //   AutoLights=1                spells from mods with no patch get a hand light too (HandLights.cpp)
 //   Quality=0                   0 quality, 1 performance: hand, weapon and body lights for the player and followers only (Hooks.cpp)
 //   [Switches]
@@ -29,6 +32,7 @@
 // beside itself and moved over it, so a crash or a full disk mid-write leaves the old settings, never half a file.
 
 #include "DataText.h"
+#include "Fade.h"
 #include "FadeSettingsText.h"
 #include "Plugin.h"
 
@@ -50,6 +54,7 @@ namespace Plugin
 		std::atomic<int>                gSneakBrightness{ 0 };
 		std::atomic<bool>               gRunes{ true };
 		std::atomic<bool>               gInvisible{ true };
+		std::atomic<bool>               gFecFrozenFades{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
@@ -58,8 +63,12 @@ namespace Plugin
 		std::atomic<bool>               gAuto{ true };
 		std::atomic<bool>               gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
 		std::array<std::atomic<int>, 4> gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
-		std::atomic<bool>               gDynamic{ true };
-		std::atomic<bool>               gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		// the Auto art picks (his checklist 298): each pick's "Find my art pack" switch, and the pack found at data load (never saved)
+		std::array<std::atomic<bool>, 4> gArtAuto{ true, true, true, true };
+		std::array<std::atomic<int>, 4>  gArtFound{ -1, -1, -1, -1 };
+		std::atomic<bool>                gDynamic{ true };
+		std::atomic<bool>                gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		std::atomic<bool>                gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
 
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
@@ -104,6 +113,7 @@ namespace Plugin
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
 			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
+			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
@@ -115,7 +125,12 @@ namespace Plugin
 			{ "FrostArt", [] { return gArt[1].load(); }, [](int v) { gArt[1] = ClampPick(1, v); } },
 			{ "ShockArt", [] { return gArt[2].load(); }, [](int v) { gArt[2] = ClampPick(2, v); } },
 			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
+			{ "FireArtAuto", [] { return gArtAuto[0] ? 1 : 0; }, [](int v) { gArtAuto[0] = v != 0; } },
+			{ "FrostArtAuto", [] { return gArtAuto[1] ? 1 : 0; }, [](int v) { gArtAuto[1] = v != 0; } },
+			{ "ShockArtAuto", [] { return gArtAuto[2] ? 1 : 0; }, [](int v) { gArtAuto[2] = v != 0; } },
+			{ "HealingArtAuto", [] { return gArtAuto[3] ? 1 : 0; }, [](int v) { gArtAuto[3] = v != 0; } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
+			{ "PulseShapes", [] { return gPulse ? 1 : 0; }, [](int v) { gPulse = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
 		};
 
@@ -141,7 +156,8 @@ namespace Plugin
 
 		[[nodiscard]] bool IsPickKey(std::string_view a_key)
 		{
-			for (const auto* k : { "FireArt", "FrostArt", "ShockArt", "HealingArt", "DynamicLighting" }) {
+			for (const auto* k : { "FireArt", "FrostArt", "ShockArt", "HealingArt", "FireArtAuto", "FrostArtAuto", "ShockArtAuto", "HealingArtAuto",
+					 "DynamicLighting" }) {
 				if (SameText(a_key, k)) {
 					return true;
 				}
@@ -156,7 +172,7 @@ namespace Plugin
 			std::vector<std::string> names;
 			std::error_code          ec;
 			for (std::filesystem::directory_iterator it{ kOldFolder, ec }, end; !ec && it != end; it.increment(ec)) {
-				names.push_back(it->path().filename().string());
+				names.push_back(Fade::PathText(it->path().filename()));  // never path::string(): it throws on a name the code page cannot show
 			}
 			const auto old = DataText::PicksFromOldFiles(names);
 			if (!old.found) {
@@ -220,8 +236,11 @@ namespace Plugin
 		std::size_t              read = 0;
 		std::vector<std::string> problems;
 		std::vector<std::string> unknown;  // each unknown section named once
-		bool                     picksRead = false;
-		while (in && std::getline(in, line)) {
+		bool                     picksRead = false, pulseRead = false, dynamicRead = false;
+		for (bool first = true; in && std::getline(in, line); first = false) {
+			if (first && line.starts_with("\xEF\xBB\xBF")) {
+				line.erase(0, 3);  // a file saved "UTF-8 with BOM" would lose its first section
+			}
 			const auto l = Trim(line);
 			if (l.empty() || l.front() == ';' || l.front() == '#') {
 				continue;
@@ -235,7 +254,11 @@ namespace Plugin
 				continue;
 			}
 			const auto key = Trim(l.substr(0, eq));
-			const auto val = Trim(l.substr(eq + 1));
+			auto       rest = l.substr(eq + 1);
+			if (const auto c = rest.find_first_of(";#"); c != std::string_view::npos) {
+				rest = rest.substr(0, c);  // a comment after the value, as the fading module's file allows
+			}
+			const auto val = Trim(rest);
 			const bool settings = SameText(section, "Settings"), switches = SameText(section, "Switches");
 			if (!settings && !switches) {
 				if (!SameText(section, "Brightness") && std::ranges::find(unknown, section) == unknown.end()) {
@@ -252,6 +275,8 @@ namespace Plugin
 			++read;
 			if (settings) {
 				picksRead = picksRead || IsPickKey(key);
+				pulseRead = pulseRead || SameText(key, "PulseShapes");
+				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
 				if (!ApplySetting(key, *v)) {
 					problems.push_back(std::format("{}: not a setting", key));
 				}
@@ -270,6 +295,9 @@ namespace Plugin
 		}
 		if (!picksRead) {
 			CarryOldPicks(a_log);
+		}
+		if (!pulseRead) {
+			gPulse = !dynamicRead;  // a new player starts on Realistic; one who saved Dynamic Lighting keeps it (On = Regular)
 		}
 		if (!a_log) {
 			return;  // the early read before the data (main.cpp): the read after it says what it found
@@ -299,7 +327,7 @@ namespace Plugin
 		}
 		const auto write = [] {
 			queued = false;
-			WriteSettingsFile();
+			LightKit::Guarded("settings save", []() { WriteSettingsFile(); });
 		};
 		if (auto* tasks = SKSE::GetTaskInterface()) {
 			tasks->AddTask(write);
@@ -351,6 +379,21 @@ namespace Plugin
 	}
 
 	bool InvisibleFadeOn() { return gInvisible; }
+
+	bool PulseShapes() { return gPulse; }
+
+	void SetPulseShapes(bool a_on) { gPulse = a_on; }
+
+	bool PulseRealistic() { return gPulse && DynamicLightingThisSession(); }
+
+	bool FecFrozenFadesOut() { return gFecFrozenFades; }
+
+	void SetFecFrozenFadesOut(bool a_on)
+	{
+		if (gFecFrozenFades.exchange(a_on) != a_on) {
+			SKSE::log::info("frozen bodies' glow {}", a_on ? "fades out" : "stays while frozen");
+		}
+	}
 
 	void SetInvisibleFadeOn(bool a_on)
 	{
@@ -435,11 +478,39 @@ namespace Plugin
 	void SetAutoLightsOn(bool a_on) { gAuto = a_on; }
 	bool AllLightsOff() { return gAllOff; }
 	void SetAllLightsOff(bool a_off) { gAllOff = a_off; }
-	int  ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
+	int  ManualArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
+	int  ArtFound(int a_group) { return a_group >= 0 && a_group < 4 ? gArtFound[static_cast<std::size_t>(a_group)].load() : -1; }
+	bool ArtAutoOn(int a_group) { return a_group >= 0 && a_group < 4 && gArtAuto[static_cast<std::size_t>(a_group)]; }
+
+	int ArtPick(int a_group)
+	{
+		const int found = ArtFound(a_group);
+		return found >= 0 && ArtAutoOn(a_group) ? found : ManualArtPick(a_group);
+	}
+
 	void SetArtPick(int a_group, int a_v)
 	{
 		if (a_group >= 0 && a_group < 4) {
 			gArt[static_cast<std::size_t>(a_group)] = ClampPick(a_group, a_v);
+		}
+	}
+
+	void SetArtAuto(int a_group, bool a_on)
+	{
+		if (a_group >= 0 && a_group < 4) {
+			gArtAuto[static_cast<std::size_t>(a_group)] = a_on;
+		}
+	}
+
+	void NoteArtPacks()
+	{
+		const auto found = FindArtPacks();
+		for (std::size_t g = 0; g < found.size(); ++g) {
+			const int f = found[g].pick.value_or(-1);
+			gArtFound[g] = f >= 0 && f < DataText::PickCount(static_cast<int>(g)) ? f : -1;
+			SKSE::log::info("art pack ({}): {} ({}) - in use: {}{}", DataText::kPickGroups[g],
+				gArtFound[g] >= 0 ? DataText::kPickNames[g][static_cast<std::size_t>(gArtFound[g].load())] : "not recognised", found[g].why,
+				DataText::kPickNames[g][static_cast<std::size_t>(ArtPick(static_cast<int>(g)))], ArtAutoOn(static_cast<int>(g)) ? "" : " (Find my art pack is off)");
 		}
 	}
 	bool DynamicLighting() { return gDynamic; }

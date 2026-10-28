@@ -190,8 +190,19 @@ namespace Plugin
 				recipe.color = { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f };
 			}
 		}
+		// a cone our data lights as a cloud: one light held where its cloud is (Rows.cpp) - RE::Light has no config for it
+		std::size_t clouds = 0;
+		for (auto* p : dh->GetFormArray<RE::BGSProjectile>()) {
+			if (const auto* c = p && p->IsCone() ? CloudOf(p) : nullptr) {
+				rows[p->GetFormID()] = { c->color, c->fade, c->radius, false, c->option != kNone ? c->option : OptionOf(p), true };
+				++clouds;
+			}
+		}
 		gReady.store(true, std::memory_order_release);
 		SetRowRecipes(std::move(rows));
+		if (clouds) {
+			SKSE::log::info("stream lights: {} cone(s) hold one light where their cloud is", clouds);
+		}
 		SKSE::log::info(
 			"stream lights: {} spray(s) and {} bolt(s) wear a plain copy of their own light ({} copies) and a row; the records' other users - "
 			"{} projectile(s), {} muzzle flash(es), {} magic effect(s), {} explosion(s), {} hazard(s): {} on a spray record left dark, "
@@ -221,11 +232,11 @@ namespace Plugin
 
 	bool IsSprayLight(const RE::TESObjectLIGH* a_light)
 	{
-		return a_light && (gSpraySet.contains(a_light) || (gReady.load(std::memory_order_acquire) && gRowCopies.contains(a_light)));
+		return a_light && gReady.load(std::memory_order_acquire) && (gSpraySet.contains(a_light) || gRowCopies.contains(a_light));
 	}
 
 	bool IsStreamObject(const RE::TESObjectREFR* a_ref)
 	{
-		return a_ref && StreamOf(a_ref->GetBaseObject()) != nullptr;
+		return a_ref && gReady.load(std::memory_order_acquire) && StreamOf(a_ref->GetBaseObject()) != nullptr;
 	}
 }

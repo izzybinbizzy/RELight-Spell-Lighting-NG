@@ -37,8 +37,9 @@ namespace Plugin
 			float                           written{ -1.0f }, wroteReach{ -1.0f };
 		};
 
-		std::vector<Live> gLive;
-		std::size_t       gTold = 0;
+		std::vector<Live>        gLive;
+		std::atomic<std::size_t> gLiveCount{ 0 };  // the testing DLL's pages read it from the render thread
+		std::size_t              gTold = 0;
 
 		struct Want
 		{
@@ -209,7 +210,7 @@ namespace Plugin
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
 	// lights (BodyLights.cpp) are both made here
 	RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent, RE::ShadowSceneNode* a_scene,
-		const char* a_name, RE::NiPointLight*& a_made)
+		const char* a_name, RE::NiPointLight*& a_made, bool a_shadow)
 	{
 		auto* light = LightKit::CloneLight();
 		if (!light) {
@@ -240,7 +241,7 @@ namespace Plugin
 		a_parent->AttachChild(light, true);
 		RE::NiUpdateData update{};
 		light->Update(update);
-		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true);
+		auto* bs = LightKit::AddToScene(a_scene, light, 1.0f, true, a_shadow);
 		if (!bs) {
 			a_parent->DetachChild(light);
 			return nullptr;
@@ -309,7 +310,7 @@ namespace Plugin
 			if (have || std::ranges::any_of(gFailed, [&w](const Failed& f) { return f.Is(w) && gUpdate < f.retryAt; })) {
 				continue;
 			}
-			if (gLive.size() >= kMaxLive) {
+			if (gLive.size() >= kMaxLive && w.actor != player) {  // her own weapon is never the one left dark
 				if (!gCapLogged) {
 					gCapLogged = true;
 					SKSE::log::info("[HELD] {} held weapon lights are lit at once, the most there may be: the rest wait for one to go out",
@@ -350,7 +351,19 @@ namespace Plugin
 				v.wroteReach = reach;
 			}
 		}
+		gLiveCount = gLive.size();
 	}
 
-	std::size_t LiveHeldLights() { return gLive.size(); }
+	void DropHeldLights()
+	{
+		auto* scene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		for (auto& v : gLive) {
+			TakeOff(v, scene);
+		}
+		gLive.clear();
+		gLiveCount = 0;
+		gFailed.clear();
+	}
+
+	std::size_t LiveHeldLights() { return gLiveCount.load(); }
 }

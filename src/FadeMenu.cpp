@@ -23,6 +23,7 @@
 #	define NOMINMAX
 #endif
 #include "Fade.h"
+#include "LightKit.h"
 
 // SKSE Menu Framework's own header (theirs, MIT): its warnings are not ours, and ours are errors (xmake.lua) - under
 // MSVC and under clang-cl, which checks every file too
@@ -140,7 +141,7 @@ namespace Fade
 			if (auto* tasks = SKSE::GetTaskInterface()) {
 				tasks->AddTask([]() {
 					queued = false;
-					SaveSettings();
+					LightKit::Guarded("fading settings save", []() { SaveSettings(); });
 				});
 			} else {
 				queued = false;
@@ -413,7 +414,7 @@ namespace Fade
 			if (ImGuiMCP::Button(T("Reload rule files"))) {
 				// on the game's main thread, between frames: the per-frame pass reads the rules there
 				if (auto* tasks = SKSE::GetTaskInterface()) {
-					tasks->AddTask([]() { LoadRules(); });
+					tasks->AddTask([]() { LightKit::Guarded("fading rule files", []() { LoadRules(); }); });
 				}
 			}
 			Tip("Reads the .json files again, so a rule can be edited without restarting the game.");
@@ -482,13 +483,15 @@ namespace Fade
 				}
 				const std::string_view name = a_event->menuName.c_str();
 				if (std::ranges::find(kHiding, name) != std::end(kHiding)) {
-					std::lock_guard lock(gate);
-					if (a_event->opening) {
-						open.insert(std::string(name));
-					} else {
-						open.erase(std::string(name));
-					}
-					hide.store(!open.empty(), std::memory_order_relaxed);
+					LightKit::Guarded("menu watch", [&]() {
+						std::lock_guard lock(gate);
+						if (a_event->opening) {
+							open.insert(std::string(name));
+						} else {
+							open.erase(std::string(name));
+						}
+						hide.store(!open.empty(), std::memory_order_relaxed);
+					});
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -511,8 +514,9 @@ namespace Fade
 			if (MenusHideHud()) {
 				return true;
 			}
+			// the game's own HUD hidden (the tm toggle and the HUD-hiding keys that use it) hides our gems too
 			auto* ui = RE::UI::GetSingleton();
-			return ui && ui->GameIsPaused();
+			return ui && (ui->GameIsPaused() || !ui->IsShowingMenus());
 		}
 
 		// THE 3D SOUL GEM (his order: "I want a blender made 3d soul gem in super high detail (but optimized well so as to not

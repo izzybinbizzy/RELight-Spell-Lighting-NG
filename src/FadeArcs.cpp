@@ -22,6 +22,7 @@
 #	define NOMINMAX
 #endif
 #include "Fade.h"
+#include "LightKit.h"
 
 // Reticle Arcs' own header (theirs, MIT) needs GetModuleHandleW / GetProcAddress; its warnings are not ours
 #include <Windows.h>
@@ -68,18 +69,20 @@ namespace Fade
 
 		void BoundTime(float, BarState& a_state)
 		{
-			const auto hud = Hud();
-			for (const std::size_t hand : { std::size_t{ 1 }, std::size_t{ 0 } }) {
-				if (const auto& h = hud.hands[hand]; hud.drawn && h.shown && h.bound) {
-					Show(a_state, h.fraction, hud.low, h);
-					gBoundShown = true;
-					gBoundLast = h.fraction;
-					return;
+			LightKit::Guarded("Reticle Arcs bound weapon bar", [&a_state]() {
+				const auto hud = Hud();
+				for (const std::size_t hand : { std::size_t{ 1 }, std::size_t{ 0 } }) {
+					if (const auto& h = hud.hands[hand]; hud.drawn && h.shown && h.bound) {
+						Show(a_state, h.fraction, hud.low, h);
+						gBoundShown = true;
+						gBoundLast = h.fraction;
+						return;
+					}
 				}
-			}
-			// the weapon ran out (not put away with time left): the break effect instead of the release
-			a_state.broken = gBoundShown && gBoundLast < 0.05f;
-			gBoundShown = false;
+				// the weapon ran out (not put away with time left): the break effect instead of the release
+				a_state.broken = gBoundShown && gBoundLast < 0.05f;
+				gBoundShown = false;
+			});
 		}
 
 		// an enchanted weapon's charge, once it starts dropping (no setting of ours changes that - his order of 2026-10-19; the
@@ -87,11 +90,13 @@ namespace Fade
 		template <std::size_t Hand>
 		void Charge(float, BarState& a_state)
 		{
-			const auto  hud = Hud();
-			const auto& h = hud.hands[Hand];
-			if (hud.drawn && h.shown && !h.spell && !h.bound && h.fraction < 0.999f) {
-				Show(a_state, h.fraction, hud.low, h);
-			}
+			LightKit::Guarded("Reticle Arcs charge bar", [&a_state]() {
+				const auto  hud = Hud();
+				const auto& h = hud.hands[Hand];
+				if (hud.drawn && h.shown && !h.spell && !h.bound && h.fraction < 0.999f) {
+					Show(a_state, h.fraction, hud.low, h);
+				}
+			});
 		}
 
 		void ArcReset()
@@ -111,7 +116,7 @@ namespace Fade
 		// interface 2: Reticle Arcs' own spell bars in the color of the light that hand holds, its shout bar in the color of the
 		// ready shout's light (his yes 2026-10-20); false (its fallback - the element's or the school's color, or the player's)
 		// for the bow (no arrow-draw light exists), a shout with no light and a hand the fading pass does not follow
-		bool SpellBarColor(const ReticleArcsAPI::ColorQuery& a_query, std::uint32_t& a_rgb)
+		bool BarColor(const ReticleArcsAPI::ColorQuery& a_query, std::uint32_t& a_rgb)
 		{
 			if (a_query.bar == ReticleArcsAPI::Bar::kShout) {
 				const auto hud = Hud();
@@ -131,6 +136,14 @@ namespace Fade
 			}
 			a_rgb = Packed(h.color);
 			return true;
+		}
+
+		// called from Reticle Arcs' DLL: nothing thrown goes back across
+		bool SpellBarColor(const ReticleArcsAPI::ColorQuery& a_query, std::uint32_t& a_rgb)
+		{
+			bool given = false;
+			LightKit::Guarded("Reticle Arcs spell bar color", [&]() { given = BarColor(a_query, a_rgb); });
+			return given;
 		}
 
 		struct Def

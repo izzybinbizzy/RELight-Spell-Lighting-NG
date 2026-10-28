@@ -68,6 +68,7 @@ namespace
 				"VR only - 1: a hand's ground light hangs at your VR hand; 0: at the body's hand (the default)", Plugin::gGroundLightVRHand);
 		}
 		Plugin::LoadSettings(false);  // the art picks and Dynamic Lighting decide which data files count
+		Plugin::NoteArtPacks();       // the art packs the game's own files are: "Find my art pack" picks before the data is read
 		Plugin::FixDynamicLighting();
 		Plugin::LoadData();
 		Plugin::LoadSettings();             // again: the option switches need the options the data made
@@ -80,7 +81,7 @@ namespace
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
 		Plugin::RegisterMenu();
-		Fade::OnDataLoaded();  // after the menu: its two pages go under the Spell Addon's section, after ours
+		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
 		SKSE::log::info("done in {:.1f} ms",
 			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStarted).count());
@@ -113,10 +114,13 @@ namespace
 			// SKSE refuses a listener for a plugin that is not, and CommonLib logs that as an error players report (2.1)
 			if (Plugin::WardsSteppedDown()) {
 				SKSE::GetMessagingInterface()->RegisterListener("DynamicWards", [](SKSE::MessagingInterface::Message* a_m) {
-					if (a_m && a_m->type == 'DWAC') {
-						LightKit::Guarded("Dynamic Wards message", []() {
-							Plugin::RefindHandLights();
-							Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+					// handled on the main thread, whichever thread Dynamic Wards sends from
+					if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
+						tasks->AddTask([]() {
+							LightKit::Guarded("Dynamic Wards message", []() {
+								Plugin::RefindHandLights();
+								Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+							});
 						});
 					}
 				});
@@ -128,6 +132,7 @@ namespace
 		case SKSE::MessagingInterface::kPreLoadGame:
 			Plugin::DropGroundLights();  // the hands and casting lights they follow are the old game's
 			Plugin::DropBodyLights();    // and the art the body lights hang on
+			Plugin::DropHeldLights();    // and the weapons the held lights hang on
 			Plugin::DropRows();          // and the projectiles the rows hang on
 			Fade::OnGameLoading();
 			break;
@@ -137,6 +142,7 @@ namespace
 				// no kPreLoadGame comes before a new game: the last game's twins and fading go here
 				Plugin::DropGroundLights();
 				Plugin::DropBodyLights();
+				Plugin::DropHeldLights();
 				Plugin::DropRows();
 				Fade::OnGameLoading();
 			}

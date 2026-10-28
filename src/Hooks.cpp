@@ -2,9 +2,7 @@
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
-// The hooks, and spell lights fading while you sneak - out of main.cpp since 2.2 (his order "make sure relight is
-// structurally up to par with illuminated": main.cpp holds the order of work and the SKSE messages, as Illuminated's does;
-// Illuminated keeps its update hooks in LightCopies.cpp):
+// The hooks, and spell lights fading while you sneak (main.cpp holds the order of work and the SKSE messages):
 //   the spell-light call (up to four call sites, each before RE::Light's hook there): our hand lights made, the light
 //                 budget ("Hand lights for"), sneaking;
 //   3D loads      of projectiles, explosions and hazards: a switched-off option's light out before its first frame, sneaking;
@@ -103,6 +101,14 @@ namespace
 		DimAll(gSneakLevel.load(std::memory_order_relaxed));
 	}
 
+	// the fading pass after an effect update writes only under a weapon enchantment's own actor, and only her lights are dimmed:
+	// any other effect leaves the dimmed list alone
+	[[nodiscard]] bool OnHerWeapon(const RE::ReferenceEffect* a_effect)
+	{
+		const auto* ctrl = a_effect ? skyrim_cast<const RE::WeaponEnchantmentController*>(a_effect->controller) : nullptr;
+		return ctrl && ctrl->target && ctrl->target->IsPlayerRef();
+	}
+
 	// a perk or ability that only pays off in the dark (a Shadow birthsign: spells cheaper and quieter "in shadows") reads the
 	// light level, which her lights raise - so while she carries one her lights fade out (his pick). Found once: every perk whose
 	// conditions, or an entry point's, ask for a LOW light level, and every ability with such an effect
@@ -138,7 +144,8 @@ namespace
 					const auto* point = a_entry && a_entry->GetType() == RE::PERK_ENTRY_TYPE::kEntryPoint ?
 					                        static_cast<const RE::BGSEntryPointPerkEntry*>(a_entry) :
 					                        nullptr;
-					return point && std::ranges::any_of(point->conditions, ReadsLightLevel);
+					// the perk owner's own tab only (the first): an entry point's other tabs ask about a target or a weapon
+					return point && point->conditions.size() > 0 && ReadsLightLevel(point->conditions[0]);
 				}));
 				if (reads) {
 					found.perks.push_back(perk);
@@ -206,8 +213,7 @@ namespace
 	// The projectiles, explosions and hazards that are MAGIC: what a magic effect fires or sets off (its projectile, its
 	// explosion, its projectile's explosion, the hazard such an explosion leaves), worked out once at data load before
 	// the hooks go in, read-only after (the 3D-load hooks ask from loader threads). An arrow, a trap's explosion or a
-	// burning oil slick is none of these, so "Lights off while sneaking" leaves its light alone (the audit, 2026-10-14:
-	// every arrow, explosion and hazard used to count as a spell)
+	// burning oil slick is none of these, so "Lights off while sneaking" leaves its light alone
 	std::unordered_set<const void*> gSpellBases;
 	std::atomic<bool>               gSpellBasesReady{ false };  // set once gSpellBases is built (release), read before it (acquire)
 
@@ -269,7 +275,10 @@ namespace
 		bool          spell{ false };
 		bool          rune{ false };  // the Runes setting itself is read every frame, so a change reaches a known light
 		std::uint32_t frame{ 0 };
+		std::uint8_t  asks{ 0 };  // frames a light on a caster was asked again before it counts as no spell light
+		bool          settled{ false };
 	};
+	constexpr std::uint8_t                             kSneakAsks = 30;  // about half a second: a cast's SKSE task notes its light a frame or two later
 	std::unordered_map<const RE::NiLight*, SneakKnown> gSneakKnown;
 	std::uint32_t                                      gSneakFrame = 0;
 
@@ -339,18 +348,17 @@ namespace
 		auto&       k = gSneakKnown[a_light];
 		const void* name = a_light->name.c_str();
 		const void* parent = a_light->parent;
-		if (k.frame == 0 || k.name != name || k.parent != parent) {
+		if (!k.settled || k.name != name || k.parent != parent) {
 			const auto* ref = Plugin::ReferenceOf(a_light);
 			const bool  hers = CastByHer(ref);
 			const bool  made = gMagicLights.contains(a_light);
-			const bool  spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)));
-			if (!spell && hers && ref && ref->As<RE::Actor>()) {
-				// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again
-				// next frame, never remembered as "not a spell light"
-				gSneakKnown.erase(a_light);
-				return false;
-			}
-			k = { name, parent, spell, IsRune(ref), gSneakFrame };
+			// RE::Light's enchantment light on her weapon too: the setting's tip promises her weapon lights fade
+			const bool spell = hers && (IsSpellObject(ref) || (made && SneakDarkens(ref)) || (Plugin::IsEnchantLight(a_light) && ref && ref->As<RE::Actor>()));
+			// a light on a caster not noted as a spell light yet (its SKSE task may come later this frame): asked again the next
+			// frames, then remembered as no spell light
+			const bool         unsure = !spell && hers && ref && ref->As<RE::Actor>();
+			const std::uint8_t asks = unsure && k.name == name && k.parent == parent ? static_cast<std::uint8_t>(k.asks + 1) : 0;
+			k = { name, parent, spell, IsRune(ref), gSneakFrame, asks, !unsure || asks >= kSneakAsks };
 		}
 		k.frame = gSneakFrame;
 		return k.spell && !(k.rune && !Plugin::RunesFadeOn());
@@ -401,7 +409,7 @@ namespace
 
 	// on the main thread only (an SKSE task from the hook below): a new spell light goes into our lists. The last
 	// reference to a light is only ever dropped on the main thread (here, or in Keep.cpp's sweep)
-	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours)
+	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind)
 	{
 		if (!a_light || a_light->GetRefCount() <= 1) {
 			return;  // the game let go of it before the main thread came round: nothing to note (freed right here)
@@ -414,7 +422,7 @@ namespace
 		// a hand light of ours, a spray light RE::Light made from our config, and the light of a beam or breath
 		// projectile our data names (RE::Light lights it; Streams.cpp) are ours for the sliders
 		if (a_ours) {
-			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey));
+			Plugin::RememberLight(a_light.get(), a_handKey.empty() ? nullptr : Plugin::HandFxOf(a_handKey), a_kind, !a_handKey.empty());
 		}
 		// a light made while her lights were dimmed was put out at once and comes here through AdoptSneakCulled; one made
 		// just before she crouched is dimmed by the next player update's sneaking pass, which reads gMagicLights
@@ -445,8 +453,9 @@ namespace
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
 		RE::NiPointLight*   made = nullptr;
 		if (hand) {
-			made = netimmerse_cast<RE::NiPointLight*>(
-				a_light->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
+			// her own hand lights cast a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
+			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
+			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 		} else if (Plugin::IsOurLight(a_light)) {
 			// 2.3: a spray's / bolt's raised copy, or a beam record's other users' plain copy (Streams.cpp) - the game's own
@@ -473,11 +482,16 @@ namespace
 					made->SetAppCulled(true);
 				}
 				if (auto* tasks = SKSE::GetTaskInterface()) {
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking]() {
-						NoteMagicLight(light, key, ours);
-						if (sneaking) {
-							AdoptSneakCulled({ light });
-						}
+					// the spell in the hand now, when its light is made - a spell swapped before the task runs is not this light's
+					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
+					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind]() {
+						LightKit::Guarded("spell light task", [&]() {
+							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind);
+							if (sneaking) {
+								AdoptSneakCulled({ light });
+							}
+						});
 					});
 				}
 			});
@@ -549,13 +563,13 @@ namespace
 				// RE::Light has already hung its light here; a switched-off option's goes out before its first frame
 				std::size_t option = Plugin::kNone;
 				if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
-					tasks->AddTask([lights = std::move(culled), option]() { Plugin::AdoptOptionLights(option, lights); });
+					tasks->AddTask([lights = std::move(culled), option]() { LightKit::Guarded("option lights task", [&]() { Plugin::AdoptOptionLights(option, lights); }); });
 				}
 				// while her lights are dimmed, the rest of a magic object's go out until the main thread dims them, or gives them
 				// back when another caster made it (an arrow, a trap's explosion or an oil fire keeps its light - IsSpellObject)
 				if (SneakDimsNow() && MaybeSneakDarkens(a_this)) {
 					if (auto culled = CullTree(root); !culled.empty()) {
-						tasks->AddTask([lights = std::move(culled)]() { AdoptSneakCulled(lights); });
+						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
 				if constexpr (std::is_base_of_v<RE::Projectile, T>) {
@@ -575,11 +589,12 @@ namespace
 	{
 		static void thunk(RE::PlayerCharacter* a_this, float a_delta)
 		{
+			// the dimmed lights get the others' numbers back BEFORE the update: RE::Light writes this frame's fades inside it
+			LightKit::Guarded("player update undim", []() { UndimForFrame(); });
 			func(a_this, a_delta);
 			LightKit::Guarded("player update", [a_this, a_delta]() {
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
-				UndimForFrame();
 				const float sneak = StepSneakLevel(a_this, a_delta);
 				Plugin::UpdateOptionLights();
 				Plugin::UpdateHeldLights();
@@ -606,9 +621,14 @@ namespace
 		{
 			func(a_this);
 			LightKit::Guarded("effect update", [a_this]() {
-				UndimmedFor([a_this]() {
+				const auto pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
-				});
+				};
+				if (gDimming.load(std::memory_order_acquire) && OnHerWeapon(a_this)) {  // the cast only while something is dimmed
+					UndimmedFor(pass);
+				} else {
+					pass();
+				}
 			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -765,7 +785,7 @@ bool Plugin::CastByPlayer(const RE::TESObjectREFR* a_ref) { return CastByHer(a_r
 
 bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 {
-	// Performance (his order 2026-10-20): the player and followers at most
+	// Performance: the player and followers at most
 	const int who = PerformanceMode() ? (std::max)(HandLightsFor(), 2) : HandLightsFor();
 	if (!who || !a_actor || a_actor->IsPlayerRef()) {
 		return false;

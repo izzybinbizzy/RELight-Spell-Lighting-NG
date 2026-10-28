@@ -40,9 +40,7 @@ namespace Plugin
 		void RehandSoon()
 		{
 			if (auto* tasks = SKSE::GetTaskInterface()) {
-				tasks->AddTask([]() {
-					ApplyHandLights(true);
-				});
+				tasks->AddTask([]() { LightKit::Guarded("menu hand lights", []() { ApplyHandLights(true); }); });
 			}
 		}
 
@@ -52,9 +50,11 @@ namespace Plugin
 		{
 			if (auto* tasks = SKSE::GetTaskInterface()) {
 				tasks->AddTask([]() {
-					ApplyWards("a preset");
-					RefindHandLights();
-					ApplyHandLights(true);
+					LightKit::Guarded("menu preset", []() {
+						ApplyWards("a preset");
+						RefindHandLights();
+						ApplyHandLights(true);
+					});
 				});
 			}
 		}
@@ -283,12 +283,26 @@ namespace Plugin
 		// choices follow DataText::kPickNames (the game's own art first); a pick applies the next time the game starts
 		void DrawArtPick(int a_group, const char* a_label, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
 		{
-			int pick = std::clamp(ArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
+			// the Auto art picks (his checklist 298, "auto, manual backup"): the switch says what it found, the pick below greys
+			// while that pack is used and stays the backup
+			bool       on = ArtAutoOn(a_group);
+			const int  found = ArtFound(a_group);
+			const bool known = found >= 0 && found < static_cast<int>(a_items.size());
+			const auto label = std::format("{} ({})##artauto{}", T("Find my art pack"),
+				known ? std::string(T("found:")) + " " + a_items[static_cast<std::size_t>(found)] : std::string(T("not recognised")), a_group);
+			if (ImGuiMCP::Checkbox(label.c_str(), &on)) {
+				SetArtAuto(a_group, on);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("The art pack you have installed is found when the game starts, and the light takes its color - the pick below is then greyed out. Not recognised (a mix of packs, another pack, an updated one): the pick below is used. Off: always the pick below. Applies the next time the game starts."));
+			ImGuiMCP::BeginDisabled(on && known);
+			int pick = std::clamp(ManualArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
 			if (ImGuiMCP::Combo(a_label, &pick, a_items.data(), static_cast<int>(a_items.size()))) {
 				SetArtPick(a_group, pick);
 				SaveSettings();
 			}
 			MenuStyle::Tip(a_tips[static_cast<std::size_t>(pick)]);
+			ImGuiMCP::EndDisabled();
 		}
 
 		// ------------------------------------------------------------------ the player's own presets, one set per lighting
@@ -311,7 +325,10 @@ namespace Plugin
 			gPresets.clear();
 			std::ifstream in(Fade::SettingsText::ReadFrom(kPresetsPath, kOldPresetsPath));
 			std::string   line;
-			while (std::getline(in, line)) {
+			for (bool first = true; std::getline(in, line); first = false) {
+				if (first && line.starts_with("\xEF\xBB\xBF")) {
+					line.erase(0, 3);  // a file saved "UTF-8 with BOM" would lose its first section
+				}
 				std::string_view t = line;
 				while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) {
 					t.remove_suffix(1);
@@ -341,6 +358,26 @@ namespace Plugin
 			}
 		}
 
+		// beside itself, then moved over (main thread)
+		void WritePresetsFile(const std::string& a_all)
+		{
+			std::error_code ec;
+			std::filesystem::create_directories(std::filesystem::path(kPresetsPath).parent_path(), ec);
+			const std::string tmp = std::string(kPresetsPath) + ".tmp";
+			{
+				std::ofstream out(tmp, std::ios::trunc);
+				out << a_all;
+				if (!out.flush()) {
+					SKSE::log::warn("presets: {} could not be written", kPresetsPath);
+					return;
+				}
+			}
+			if (std::filesystem::rename(tmp, kPresetsPath, ec); ec) {
+				SKSE::log::warn("presets: {} could not be replaced ({})", kPresetsPath, ec.message());
+				std::filesystem::remove(tmp, ec);
+			}
+		}
+
 		// the caller holds gPresetLock; the file is written by an SKSE task on the main thread, from the copy it is handed
 		// (Settings.cpp's rule: no file work on the render thread)
 		void WritePresetsSoon()
@@ -357,23 +394,7 @@ namespace Plugin
 			if (!tasks) {
 				return;
 			}
-			tasks->AddTask([all = std::move(text).str()]() {
-				std::error_code ec;
-				std::filesystem::create_directories(std::filesystem::path(kPresetsPath).parent_path(), ec);
-				const std::string tmp = std::string(kPresetsPath) + ".tmp";
-				{
-					std::ofstream out(tmp, std::ios::trunc);
-					out << all;
-					if (!out.flush()) {
-						SKSE::log::warn("presets: {} could not be written", kPresetsPath);
-						return;
-					}
-				}
-				if (std::filesystem::rename(tmp, kPresetsPath, ec); ec) {
-					SKSE::log::warn("presets: {} could not be replaced ({})", kPresetsPath, ec.message());
-					std::filesystem::remove(tmp, ec);
-				}
-			});
+			tasks->AddTask([all = std::move(text).str()]() { LightKit::Guarded("presets save", [&all]() { WritePresetsFile(all); }); });
 		}
 
 		// the Version heading's one line (Illuminated's DrawVersion): the lighting found, never picked (his word)
@@ -558,13 +579,15 @@ namespace Plugin
 
 			// the old installer's Dynamic Lighting question, in Illuminated's place for it (its Flicker group)
 			GlowHeading("Flicker", Icon::kBulb);
-			const char* const kDynamic[] = { T("Off"), T("On") };
-			int               dynamic = DynamicLighting() ? 1 : 0;
-			if (ImGuiMCP::Combo(T("Dynamic Lighting"), &dynamic, kDynamic, 2)) {
-				SetDynamicLighting(dynamic == 1);
+			const char* const kDynamic[] = { T("Off"), T("Regular"), T("Realistic") };
+			int               dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
+			                                                                     1;
+			if (ImGuiMCP::Combo(T("Dynamic Lighting"), &dynamic, kDynamic, 3)) {
+				SetDynamicLighting(dynamic != 0);
+				SetPulseShapes(dynamic == 2);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T("Off: static lights. On: lights breathe and flicker like fire and lightning, and so do the rows of light along a spray or bolt. Applies the next time the game starts."));
+			MenuStyle::Tip(T("Off: static lights. Regular: lights breathe and flicker, and so do the rows of light along a spray or bolt. Realistic: the hand lights pulse in their own way per kind of spell - fire flickers, absorb spells beat like a heart, healing breathes slowly. Off and on apply the next time the game starts."));
 
 			GlowHeading("Hands and Weapons", Icon::kBulb);
 			bool hands = HandLightsOn();
@@ -599,8 +622,10 @@ namespace Plugin
 					// the art forms and lights are changed on the game's main thread; the next cast shows it
 					if (auto* tasks = SKSE::GetTaskInterface()) {
 						tasks->AddTask([]() {
-							ApplyWards("the menu");
-							RefindHandLights();
+							LightKit::Guarded("menu ward color", []() {
+								ApplyWards("the menu");
+								RefindHandLights();
+							});
 						});
 					}
 				}
@@ -679,10 +704,23 @@ namespace Plugin
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
 		// Club, the single-mod patches (Other Mods), then each author's mods under the author's name
+		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
+
 		void __stdcall RenderConfigs()
 		{
 			const GlowStyle style;
 			DrawSwitches(Page::kConfigs);
+			// a frozen body stays frozen: whether its glow fades out is the player's pick
+			if (gFecLoaded) {
+				GlowHeading("Frozen Electrocuted Combustion");
+				const char* const kFrozen[] = { T("Glow fades out"), T("Glow stays while frozen") };
+				int               frozen = FecFrozenFadesOut() ? 0 : 1;
+				if (ImGuiMCP::Combo(T("Frozen bodies"), &frozen, kFrozen, 2)) {
+					SetFecFrozenFadesOut(frozen == 0);
+					SaveSettings();
+				}
+				MenuStyle::Tip(T("A body frozen solid glows blue for a few seconds, then the glow fades out. Stays keeps it lit for as long as the body is frozen."));
+			}
 		}
 
 		// Illuminated puts Praedy's Staves on a page of their own, right below Configs
@@ -748,6 +786,9 @@ namespace Plugin
 	void RegisterMenu()
 	{
 		FindCSLight();
+		if (auto* data = RE::TESDataHandler::GetSingleton()) {
+			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
+		}
 		// the old folder's file read only while the new one is not there (CodeRabbit on #29; never written)
 		SKSE::log::info("{}", Translation::Load(Fade::SettingsText::ReadFrom("Data/SKSE/Plugins/RELightSpellLightingNG/Translation.json",
 								  "Data/SKSE/Plugins/RelightSpellAddon/Translation.json")));

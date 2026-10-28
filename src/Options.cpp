@@ -33,8 +33,8 @@ namespace Plugin
 	{
 		struct Held
 		{
-			RE::NiLight* light;  // held in Keep.cpp; ForgetOptionLights drops it here before it is freed
-			std::size_t  option;
+			RE::NiLight* light{ nullptr };  // held in Keep.cpp; ForgetOptionLights drops it here before it is freed
+			std::size_t  option{ 0 };
 			bool         enchant{ false };
 		};
 		std::vector<Held>                                       gHeldOut;

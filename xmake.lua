@@ -1,7 +1,7 @@
 -- RELight - Spell Lighting NG - SKSE plugin. GPL-3.0-or-later, see LICENSE.txt.
 set_xmakever("3.0.0")
 set_project("RELightSpellLightingNG")
-set_version("2.9.0")
+set_version("3.0.0")
 set_license("GPL-3.0-or-later")
 set_arch("x64")
 set_languages("c++23")

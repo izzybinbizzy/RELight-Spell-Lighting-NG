@@ -21,6 +21,7 @@
 #include "PCH.h"
 
 #include "LightMath.h"
+#include "Pulse.h"
 
 namespace LightKit
 {
@@ -172,16 +173,16 @@ namespace LightKit
 	// a_portalStrict false: a row that lets its light through portals. nullptr when the scene refused it - the caller then
 	// detaches it. Main thread.
 	[[nodiscard]] inline RE::BSLight* AddToScene(RE::ShadowSceneNode* a_scene, RE::NiPointLight* a_light, float a_falloff = 1.0f,
-		bool a_portalStrict = true)
+		bool a_portalStrict = true, bool a_shadow = false)
 	{
 		RE::ShadowSceneNode::LIGHT_CREATE_PARAMS params{};
 		params.dynamic = true;
-		params.shadowLight = false;
+		params.shadowLight = a_shadow;  // only RELight's optional Bottled Shaders shadow patch asks
 		params.portalStrict = a_portalStrict;
 		params.affectLand = true;
 		params.affectWater = true;
 		params.neverFades = true;
-		params.fov = 90.0f;
+		params.fov = a_shadow ? 6.2831855f : 90.0f;  // an omni shadow caster sees all round
 		params.falloff = a_falloff;
 		params.nearDistance = 5.0f;
 		params.depthBias = 1.0f;
@@ -336,5 +337,73 @@ namespace LightKit
 			it->second = RE::Color((*rgb)[0], (*rgb)[1], (*rgb)[2], 0);
 		}
 		return it->second;
+	}
+
+	// which pulse shape a spell's light takes under Realistic, read off its magic effect, so a spell nobody patched gets one too
+	[[nodiscard]] inline Pulse::Kind PulseKindOf(const RE::EffectSetting* a_effect)
+	{
+		using AV = RE::ActorValue;
+		using Arch = RE::EffectArchetypes::ArchetypeID;
+		if (!a_effect) {
+			return Pulse::Kind::kNone;
+		}
+		const auto& d = a_effect->data;
+		if (d.archetype == Arch::kAbsorb) {
+			return d.primaryAV == AV::kMagicka ? Pulse::Kind::kAbsorbMagicka :
+			       d.primaryAV == AV::kStamina ? Pulse::Kind::kAbsorbStamina :
+			                                     Pulse::Kind::kAbsorbHealth;
+		}
+		if (d.primaryAV == AV::kWardPower) {
+			return Pulse::Kind::kWard;
+		}
+		if (d.archetype == Arch::kLight) {
+			return Pulse::Kind::kMagelight;
+		}
+		switch (d.resistVariable) {
+		case AV::kResistFire:
+			return Pulse::Kind::kFire;
+		case AV::kResistFrost:
+			return Pulse::Kind::kFrost;
+		case AV::kResistShock:
+			return Pulse::Kind::kShock;
+		case AV::kPoisonResist:
+			return Pulse::Kind::kPoison;
+		default:
+			break;
+		}
+		switch (d.associatedSkill) {
+		case AV::kRestoration:
+			return Pulse::Kind::kHealing;
+		case AV::kIllusion:
+			return Pulse::Kind::kIllusion;
+		case AV::kConjuration:
+			return Pulse::Kind::kConjuration;
+		case AV::kAlteration:
+			return Pulse::Kind::kAlteration;
+		default:
+			return Pulse::Kind::kNone;
+		}
+	}
+
+	// the pulse kind of a spell: its costliest effect's (what a hand casts, or what a sprayed / fired projectile carries)
+	[[nodiscard]] inline Pulse::Kind PulseKindOfSpell(const RE::MagicItem* a_spell)
+	{
+		const auto* item = a_spell ? a_spell->GetCostliestEffectItem() : nullptr;
+		return PulseKindOf(item ? item->baseEffect : nullptr);
+	}
+
+	// the pulse kind of what a hand holds: the spell it casts now, else the one readied in it (a hand light is made, and pulses,
+	// before any cast)
+	[[nodiscard]] inline Pulse::Kind PulseKindOfHand(RE::Actor* a_actor, bool a_left)
+	{
+		// read straight off the actor: GetMagicCaster may make a missing caster, and the light hooks also run off the main thread
+		const auto* caster = a_actor ? a_actor->GetActorRuntimeData().magicCasters[a_left ? RE::Actor::SlotTypes::kLeftHand : RE::Actor::SlotTypes::kRightHand] :
+		                               nullptr;
+		const auto* spell = caster ? caster->currentSpell : nullptr;
+		if (!spell) {
+			auto* equipped = a_actor ? a_actor->GetEquippedObject(a_left) : nullptr;
+			spell = equipped ? equipped->As<RE::MagicItem>() : nullptr;
+		}
+		return PulseKindOfSpell(spell);
 	}
 }

@@ -10,8 +10,8 @@
 //   ENB                 } the game's own lighting: the inverse square words are ambient color, a light reaches its radius. The
 //   Vanilla             } hand, held and stream lights are drawn plain (LightKit::PlainOf)
 //
-// Automatic only, never a pick. The game is looked at once, at data load: Community Shaders (its inverse square shader, Light Limit Fix's
-// built-in one, or CommunityShaders.dll loaded) -> Community Shaders; an ENB that is running -> ENB; else Vanilla. ENB's settings
+// Automatic only, never a pick. The game is looked at once, at data load: Community Shaders (CommunityShaders.dll
+// loaded; its shader files alone are a leftover) -> Community Shaders; an ENB that is running -> ENB; else Vanilla. ENB's settings
 // files alone never make it ENB: an ENB preset left in the game folder with no ENB running drew Vanilla lights at ENB's
 // strength, rows ~6x too dim. An ENB under another file name is found by its export.
 //
@@ -104,7 +104,9 @@ namespace Plugin
 		const bool      shaderFile = std::filesystem::exists(std::filesystem::current_path() / kIslShader, ec);
 		const bool      inLlf = IslBuiltIntoLightLimitFix();
 		gCsLoaded = CommunityShadersLoaded();
-		gIslShader = shaderFile || inLlf || gCsLoaded;
+		// the shader files count only beside the DLL: a hand install can leave them behind, and inverse-square words on a Vanilla /
+		// ENB light land in its ambient color (a short, tinted light) - the same reason leftover ENB files are refused below
+		gIslShader = gCsLoaded.load();
 		gEnbFiles = EnbFilesLeft();
 		const auto running = EnbRunning();
 		gEnbRunning = running.value_or(gEnbFiles.load());
@@ -117,7 +119,8 @@ namespace Plugin
 			"lighting: {} (detected - CommunityShaders.dll {}, inverse square shader {}, in Light Limit Fix {}, ENB running {}, ENB "
 			"settings in the game folder {}{}); lights drawn {}",
 			LightingName(gFound), gCsLoaded ? "loaded" : "not loaded", shaderFile ? "installed" : "not installed", inLlf ? "yes" : "no",
-			gEnbRunning ? "yes" : "no", gEnbFiles ? "yes" : "no", gEnbFiles && !gEnbRunning && !gIslShader ? " - left over, not used" : "",
+			gEnbRunning ? "yes" : "no", gEnbFiles ? "yes" : "no",
+			(gEnbFiles && !gEnbRunning && !gIslShader) || ((shaderFile || inLlf) && !gCsLoaded) ? " - left over, not used" : "",
 			InverseSquare() ? "inverse square" : "plain");
 	}
 
