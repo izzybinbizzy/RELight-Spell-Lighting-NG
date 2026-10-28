@@ -197,7 +197,8 @@ namespace Pulse
 	}
 
 	// the factor a light of kind a_kind and seed a_seed has a_seconds into the session, its swing scaled by a_depth (0 = steady,
-	// 1 = the shape as designed; cloaks 0.5, enchanted weapons a third). Doubles throughout: a float clock loses its steps
+	// 1 = the shape as designed). Only hand lights are shaped today, at depth 1; the design's runes and its cloak / enchanted
+	// weapon depths have no caller yet. Doubles throughout: a float clock loses its steps
 	[[nodiscard]] inline float Factor(Kind a_kind, double a_seconds, std::uint32_t a_seed, float a_depth = 1.0f)
 	{
 		if (!std::isfinite(a_seconds) || !(a_depth > 0.0f)) {

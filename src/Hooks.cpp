@@ -439,17 +439,6 @@ namespace
 
 	void AdoptSneakCulled(const Plugin::LightList& a_lights);
 
-	// the kind of spell a hand holds now (its costliest effect), for Dynamic Lighting's Realistic; plain pointer reads, at the light's making
-	[[nodiscard]] Pulse::Kind HandKind(const RE::ObjectRefHandle& a_ref, bool a_left)
-	{
-		const auto  ref = a_ref.get();
-		auto*       actor = ref ? ref->As<RE::Actor>() : nullptr;
-		auto*       caster = actor ? actor->GetMagicCaster(a_left ? RE::MagicSystem::CastingSource::kLeftHand : RE::MagicSystem::CastingSource::kRightHand) : nullptr;
-		const auto* spell = caster ? caster->currentSpell : nullptr;
-		const auto* item = spell ? spell->GetCostliestEffectItem() : nullptr;
-		return LightKit::PulseKindOf(item ? item->baseEffect : nullptr);
-	}
-
 	using MagicLightFn = RE::NiPointLight*(RE::TESObjectLIGH*, RE::TESObjectREFR*, RE::NiNode*, bool, bool, bool);
 
 	// the spell-light call, at every hooked site; a_next is what that site called before us (the game's function, or another
@@ -496,7 +485,7 @@ namespace
 				if (auto* tasks = SKSE::GetTaskInterface()) {
 					// the spell in the hand now, when its light is made - a spell swapped before the task runs is not this light's
 					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
-					const auto kind = hand && a_ref ? HandKind(a_ref->GetHandle(), left) : Pulse::Kind::kNone;
+					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
 					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind]() {
 						NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind);
 						if (sneaking) {

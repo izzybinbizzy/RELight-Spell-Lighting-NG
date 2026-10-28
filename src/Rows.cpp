@@ -413,6 +413,10 @@ namespace Plugin
 			if (!rt.spell || rt.spell->GetCastingType() != RE::MagicSystem::CastingType::kConcentration) {
 				return false;
 			}
+			// only a hand's cast is judged: a scripted cast goes through the instant caster, which never holds the spell
+			if (rt.castingSource != RE::MagicSystem::CastingSource::kLeftHand && rt.castingSource != RE::MagicSystem::CastingSource::kRightHand) {
+				return false;
+			}
 			const auto shooter = rt.shooter.get();
 			auto*      actor = shooter ? shooter->As<RE::Actor>() : nullptr;
 			if (!actor) {
