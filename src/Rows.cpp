@@ -270,7 +270,7 @@ namespace Plugin
 			auto*       holder = root ? root->parent : nullptr;
 			const auto* rec = CloudRecipe(a_ref);
 			const bool  hers = CastByPlayer(a_ref);
-			const bool  listed = std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
+			const bool  listed = root && std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
 			if (!rec || listed) {
 				return true;  // not a cloud of ours, or lit already
 			}

@@ -162,12 +162,19 @@ namespace Fade
 		// the refusal after a throw, and a fixed one when even that cannot be built (no memory): nothing leaves through DevBench
 		void Refuse(void* a_sink, DevBenchAPI::WriteFn a_write, const char* a_what) noexcept
 		{
+			if (!a_write) {
+				return;
+			}
+			std::string text;
 			try {
-				DevBenchGlue::Reply(a_sink, a_write, DevBenchGlue::Refusal(a_what));
+				text = DevBenchGlue::Dump(DevBenchGlue::Refusal(a_what));
 			} catch (...) {
-				if (a_write) {
-					a_write(a_sink, "{\"ok\":false,\"error\":\"out of memory\"}");
-				}
+				text.clear();  // not even the refusal could be built: the fixed one below
+			}
+			try {
+				a_write(a_sink, text.empty() ? "{\"ok\":false,\"error\":\"out of memory\"}" : text.c_str());
+			} catch (...) {
+				return;  // the writer is called once: a throw out of it is not retried
 			}
 		}
 

@@ -31,10 +31,11 @@ namespace Fade
 			return fn;
 		}
 
-		// its ini can switch the cache off ([Fixes] bLoadEditorIDs, "Load EditorIDs" before); on unless it says false or 0
+		// its ini can switch the cache off ([Fixes] bLoadEditorIDs, "Load EditorIDs" before); on unless it says off
 		[[nodiscard]] bool TweaksLoadsEditorIDs()
 		{
-			std::ifstream in(std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / "po3_Tweaks.ini");
+			std::ifstream       in(std::filesystem::current_path() / "Data" / "SKSE" / "Plugins" / "po3_Tweaks.ini");
+			std::optional<bool> current, legacy;
 			for (std::string line; std::getline(in, line);) {
 				std::string key;
 				for (const char c : line) {
@@ -42,14 +43,15 @@ namespace Fade
 						key += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 					}
 				}
-				for (const std::string_view name : { "bloadeditorids=", "loadeditorids=" }) {
-					if (key.starts_with(name)) {
-						const auto value = std::string_view(key).substr(name.size());
-						return !value.starts_with("false") && !value.starts_with('0');
-					}
+				// read as its ini reader reads a switch (f, n, of or 0 is off); the current key wins over the old one wherever each stands
+				const auto off = [](std::string_view a_v) { return a_v.starts_with('f') || a_v.starts_with('n') || a_v.starts_with("of") || a_v.starts_with('0'); };
+				if (key.starts_with("bloadeditorids=")) {
+					current = !off(std::string_view(key).substr(15));
+				} else if (key.starts_with("loadeditorids=")) {
+					legacy = !off(std::string_view(key).substr(14));
 				}
 			}
-			return true;
+			return current.value_or(legacy.value_or(true));
 		}
 
 		// the form types kept for the whole session: weapons and enchantments (rule files name them), magic effects (read

@@ -279,6 +279,20 @@ namespace Plugin
 			}
 			return byPath;
 		}
+
+		// every copy - the automatic ones a re-find adds too - gets its shadow-casting twin once (gLock held)
+		void TwinCopies()
+		{
+			for (const auto* copies : { &gCopies, &gAutoCopies }) {
+				for (auto* copy : *copies | std::views::values) {
+					if (!gShadowTwins.contains(copy)) {
+						if (auto* twin = LightKit::NewForm<RE::TESObjectLIGH>()) {
+							gShadowTwins.emplace(copy, twin);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	void RefindHandLights()
@@ -290,6 +304,9 @@ namespace Plugin
 				return;
 			}
 			byPath = FindTargets(false);
+			if (ShadowPatch()) {
+				TwinCopies();  // a re-find may have made new automatic copies
+			}
 			n = gTargets.size();
 		}
 		SKSE::log::info("hand lights: re-found - {} magic effect(s) wear one of their meshes ({} by full path)", n, byPath);
@@ -321,13 +338,7 @@ namespace Plugin
 			byPath = FindTargets(true);  // data load: no game thread runs a light hook yet
 			gShadowTwins.clear();
 			if (ShadowPatch()) {
-				for (const auto* copies : { &gCopies, &gAutoCopies }) {
-					for (auto* copy : *copies | std::views::values) {
-						if (auto* twin = LightKit::NewForm<RE::TESObjectLIGH>()) {
-							gShadowTwins.emplace(copy, twin);
-						}
-					}
-				}
+				TwinCopies();
 				SKSE::log::info("hand lights: the Bottled Shaders shadow download is installed - {} shadow twin(s) for her hands", gShadowTwins.size());
 			}
 		}

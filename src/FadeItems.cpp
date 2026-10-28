@@ -247,8 +247,10 @@ namespace Fade::Items
 			// a failed write is tried again after kSaveQuietMs, up to kSaveRetries times, then at the next change. A copy that a
 			// newer change or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
 			tasks->AddTask([c = std::move(copy), generation]() {
-				LightKit::Guarded("lights by item save", [&c, generation]() {
-					if (Save(c)) {
+				bool saved = false;
+				LightKit::Guarded("lights by item save", [&c, &saved]() { saved = Save(c); });  // a throw is a failed write, tried again below
+				LightKit::Guarded("lights by item save retry", [saved, generation]() {
+					if (saved) {
 						gSaveFailures.store(0, std::memory_order_relaxed);
 						return;
 					}

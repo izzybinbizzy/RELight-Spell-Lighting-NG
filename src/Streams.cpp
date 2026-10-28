@@ -194,7 +194,7 @@ namespace Plugin
 		std::size_t clouds = 0;
 		for (auto* p : dh->GetFormArray<RE::BGSProjectile>()) {
 			if (const auto* c = p && p->IsCone() ? CloudOf(p) : nullptr) {
-				rows[p->GetFormID()] = { c->color, c->fade, c->radius, false, OptionOf(p), true };
+				rows[p->GetFormID()] = { c->color, c->fade, c->radius, false, c->option != kNone ? c->option : OptionOf(p), true };
 				++clouds;
 			}
 		}
