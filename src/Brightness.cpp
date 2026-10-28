@@ -106,7 +106,7 @@ namespace Plugin
 			const HandFx* fx{ nullptr };
 			Pulse::Kind   kind{ Pulse::Kind::kNone };
 			bool          hand{ false };
-			float         dressed{ -1.0f };  // the fade its dress wrote (-1: none known)
+			Dressed       dressed{};  // what its dress wrote (fade -1: none known)
 		};
 		std::vector<Made> gNew;  // lights made since the last frame
 
@@ -163,18 +163,20 @@ namespace Plugin
 		void Apply(RE::NiLight* a_light, Seen& a_s, float a_scale, float a_reach, float a_dt, const RE::NiColor* a_hue)
 		{
 			auto& data = a_light->GetLightRuntimeData();
-			// a hand light of ours has the base DressHandLight gave it, taken once: a later write (another pass multiplying it each
-			// frame) never becomes its base, or the next frame multiplies that again - the 3.0 white-out on ENB, x1.6 a frame
-			if (a_s.ours ? a_s.rebase : data.fade != a_s.written) {
+			// a hand light of ours has the bases DressHandLight gave it - fade, reach and cutoff - taken once: a later write (another
+			// pass scaling it each frame) never becomes its base, or the next frame scales that again - the 3.0 white-out on ENB, x1.6
+			// a frame; and readied at low magicka, the fading's first write would stay its reach for life
+			const bool rebase = a_s.ours && a_s.rebase;
+			a_s.rebase = false;
+			if (a_s.ours ? rebase : data.fade != a_s.written) {
 				a_s.base = data.fade;  // written since we last touched it (or ours, just dressed): that is the new base
-				a_s.rebase = false;
 			}
 			// the peak follows a rise at once and sinks slowly (kPeakSink a second) toward a lower base, so a lasting change in what
 			// RE::Light gives (its own brightness slider, the reference's scale) is followed within seconds while a flicker's dips
 			// (a fraction of a second) barely move it
 			constexpr float kPeakSink = 0.02f;
 			a_s.peak = a_s.base >= a_s.peak ? a_s.base : (std::max)(a_s.base, a_s.peak * (1.0f - kPeakSink * a_dt));
-			if (data.radius.x != a_s.wroteRadius) {
+			if (a_s.ours ? rebase : data.radius.x != a_s.wroteRadius) {
 				a_s.baseRadius = data.radius.x;  // x and y are the reach, z is the size
 			}
 			// Dynamic Lighting off: an RE::Light light that flickers by its config is held at the most it reached. Only one that
@@ -221,7 +223,7 @@ namespace Plugin
 				return;
 			}
 			const float current = Isl::Cutoff(a_light);
-			if (current != a_s.wroteCutoff) {
+			if (a_s.ours ? rebase || a_s.baseCutoff < 0.0f : current != a_s.wroteCutoff) {
 				a_s.baseCutoff = current;
 			}
 			float cutoff = a_s.baseCutoff;
@@ -237,7 +239,7 @@ namespace Plugin
 		}
 	}
 
-	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx, Pulse::Kind a_kind, bool a_hand, float a_dressed)
+	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx, Pulse::Kind a_kind, bool a_hand, Dressed a_dressed)
 	{
 		if (a_light) {
 			KeepLight(a_light);
@@ -306,11 +308,13 @@ namespace Plugin
 				if (m.hand) {
 					s.ours = true;
 					s.flickers = false;
-					// made or re-dressed: the fade its dress wrote is its base - a pass that scaled it before this list came round (the
-					// fading module, the frame it was made) is never baked in; no dress fade known: its fade now (rebase)
-					s.rebase = !(m.dressed >= 0.0f);
+					// made or re-dressed: what its dress wrote is its base - a pass that scaled it before this list came round (the
+					// fading module, the frame it was made) is never baked in; nothing known: its values now (rebase)
+					s.rebase = !(m.dressed.fade >= 0.0f);
 					if (!s.rebase) {
-						s.base = m.dressed;
+						s.base = m.dressed.fade;
+						s.baseRadius = m.dressed.radius;
+						s.baseCutoff = m.dressed.cutoff;
 					}
 				}
 				if (m.kind != Pulse::Kind::kNone) {

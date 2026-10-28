@@ -412,7 +412,7 @@ namespace
 	// on the main thread only (an SKSE task from the hook below): a new spell light goes into our lists. The last
 	// reference to a light is only ever dropped on the main thread (here, or in Keep.cpp's sweep)
 	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind,
-		float a_dressed)
+		Plugin::Dressed a_dressed)
 	{
 		if (!a_light || a_light->GetRefCount() <= 1) {
 			return;  // the game let go of it before the main thread came round: nothing to note (freed right here)
@@ -456,7 +456,7 @@ namespace
 		// a casting light it has no config for (an in-memory record can have none)
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
 		RE::NiPointLight*   made = nullptr;
-		float               dressed = -1.0f;  // the fade a hand light's dress wrote: its Brightness base (the task carries it)
+		Plugin::Dressed     dressed{};  // what a hand light's dress wrote: its Brightness bases (the task carries them)
 		if (hand) {
 			// her own hand lights cast a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
 			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;

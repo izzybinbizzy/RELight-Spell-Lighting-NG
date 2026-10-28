@@ -124,8 +124,7 @@ namespace BeamRow
 	// Laid into a_row, emptied first: a pass laying rows every frame keeps one buffer and allocates nothing.
 	inline void Lay(std::vector<Spot>& a_row, float a_length, int a_most, float a_reach, float a_height)
 	{
-		auto& row = a_row;
-		row.clear();
+		a_row.clear();
 		if (!(a_length > 1.0f) || !std::isfinite(a_length) || a_most < 1 || !(a_reach > 0.0f)) {
 			return;
 		}
@@ -134,16 +133,16 @@ namespace BeamRow
 		const int    n = std::clamp((std::max)(static_cast<int>(needed), kFewest), 1, a_most);
 		const float  spacing = a_length / static_cast<float>(n);
 		const float  reach = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
-		row.reserve(static_cast<std::size_t>(n));
+		a_row.reserve(static_cast<std::size_t>(n));
 		for (int i = 0; i < n; ++i) {
 			const bool end = n >= kHalveFrom && (i == 0 || i == n - 1);
-			row.push_back({ (static_cast<float>(i) + 0.5f) / static_cast<float>(n), end ? kEndScale : 1.0f, reach });
+			a_row.push_back({ (static_cast<float>(i) + 0.5f) / static_cast<float>(n), end ? kEndScale : 1.0f, reach });
 		}
 		const std::array one{ Spot{ 0.5f, 1.0f, a_reach } };
 		const float      want = Ground(one, a_length, a_length * 0.5f, 0.0f, a_height);
-		const float      got = Ground(row, a_length, a_length * 0.5f, 0.0f, a_height);
+		const float      got = Ground(a_row, a_length, a_length * 0.5f, 0.0f, a_height);
 		if (got > 0.0f && want > 0.0f) {
-			for (auto& s : row) {
+			for (auto& s : a_row) {
 				s.strength *= want / got;
 			}
 		}

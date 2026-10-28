@@ -66,7 +66,8 @@ namespace Fade
 			}
 		};
 
-		// the hand's numbers a light's last write was made with (ApplyLight)
+		// the hand's numbers a light's last write was made with (ApplyLight): every value ApplyLight reads off the hand belongs
+		// here, as HoldsOurWrite skips a light only when all of them match
 		struct LightInputs
 		{
 			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f };
@@ -1080,9 +1081,11 @@ namespace Fade
 		NoteRoot(gNotedLights[ItemKey(a_actor, a_left)], a_light);
 	}
 
-	std::vector<RE::NiAVObject*> NotedLightsOf(const RE::Actor* a_actor, bool a_left)
+	// one buffer, refilled at each call (under gLock): read it before the next call
+	const std::vector<RE::NiAVObject*>& NotedLightsOf(const RE::Actor* a_actor, bool a_left)
 	{
-		std::vector<RE::NiAVObject*> out;
+		static std::vector<RE::NiAVObject*> out;
+		out.clear();
 		if (const auto it = gNotedLights.find(ItemKey(a_actor, a_left)); it != gNotedLights.end()) {
 			for (const auto& root : it->second) {
 				if (root.node && root.node->parent && gFrame - root.frame <= 1) {

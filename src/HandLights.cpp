@@ -408,7 +408,7 @@ namespace Plugin
 						live.light->SetAppCulled(false);
 						live.heldOut = false;
 					}
-					const float dressed = DressHandLight(live.light, *h);
+					const auto dressed = DressHandLight(live.light, *h);
 					RememberLight(live.light, HandFxOf(h->key), Pulse::Kind::kNone, true, dressed);
 				} else if (!live.heldOut) {
 					live.light->SetAppCulled(true);
@@ -456,11 +456,11 @@ namespace Plugin
 	}
 
 	// dressed as RE::Light dresses a plugin light: fade, reach with the size in z, color, and under Community Shaders
-	// the inverse square flag and cutoff. Returns the fade it wrote: Brightness's base for the light (-1: no light)
-	float DressHandLight(RE::NiLight* a_light, const Hand& a_hand)
+	// the inverse square flag and cutoff. Returns what it wrote: Brightness's bases for the light
+	Dressed DressHandLight(RE::NiLight* a_light, const Hand& a_hand)
 	{
 		if (!a_light) {
-			return -1.0f;
+			return {};
 		}
 		const auto turn = LightKit::Turn();
 		a_light->fadeAmount = kMovingLightMark;
@@ -473,7 +473,7 @@ namespace Plugin
 				Isl::SetOn(a_light);
 			}
 			Isl::SetCutoff(a_light, a_hand.cutoff);
-			return data.fade;
+			return { data.fade, data.radius.x, Isl::On(a_light) ? Isl::Cutoff(a_light) : -1.0f };
 		}
 		// ENB and Vanilla (his report: "relight casting light is not working"): the layer's light is made for
 		// inverse square lighting, which the game's own lighting does not draw - so it is drawn plain, as Illuminated draws
@@ -486,7 +486,7 @@ namespace Plugin
 			point->SetLightAttenuation(plain.radius);
 		}
 		data.ambient = LightKit::Tenth(a_hand.color);  // after the attenuation's words
-		return data.fade;
+		return { data.fade, data.radius.x };
 	}
 
 	// main thread (main.cpp NoteMagicLight)

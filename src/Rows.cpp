@@ -471,8 +471,8 @@ namespace Plugin
 					}
 					continue;
 				}
-				const auto                              toLocal = live.root->world.Invert();
-				thread_local std::vector<BeamRow::Spot> row;  // its storage kept from row to row and frame to frame
+				const auto                        toLocal = live.root->world.Invert();
+				static std::vector<BeamRow::Spot> row;  // main thread; its storage kept from row to row and frame to frame
 				BeamRow::Lay(row, length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
 				RE::NiColor color = live.tint ? *live.tint : rec.color;
 				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
