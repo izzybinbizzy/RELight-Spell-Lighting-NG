@@ -192,7 +192,7 @@ namespace Plugin
 				return path;
 			}
 			auto&       rt = proj->GetProjectileRuntimeData();
-			const auto* base = a_ref->GetBaseObject() ? a_ref->GetBaseObject()->As<RE::BGSProjectile>() : nullptr;
+			const auto* base = proj->GetProjectileBase();
 			// a cone flies: what is left of its range runs from where it is now
 			path.length = base && base->IsCone() ? (std::max)(rt.range - rt.distanceMoved, 0.0f) : rt.range;
 			// only a bolt stops where its art is drawn: a spray's geometry reads far shorter than its flames (Flames 230 of 768)
@@ -204,7 +204,7 @@ namespace Plugin
 			for (const auto* impact : rt.impacts) {  // the newest impact comes first
 				if (impact) {
 					const auto  hit = impact->desiredTargetLoc - path.axis.start;
-					const float d = hit.Length();
+					const float d = a_beam ? hit.Length() : hit.Dot(path.axis.dir);  // a spray along its aim: a passed impact is behind it
 					if (d > 1.0f && d < rt.range && (a_beam || d < path.length)) {
 						path.length = d;
 						if (a_beam) {
