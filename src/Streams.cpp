@@ -207,8 +207,9 @@ namespace Plugin
 				}
 				handColor(it->second);
 				const auto& c = it->second->data.color;
-				rows[a_proj->GetFormID()] = { { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f }, a_light->fade,
-					static_cast<float>(a_light->data.radius), bolt, OptionOf(a_proj) };
+				// the worn copy's numbers, so the row matches the light the projectile wears (WearLook changed it)
+				rows[a_proj->GetFormID()] = { { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f }, it->second->fade,
+					static_cast<float>(it->second->data.radius), bolt, OptionOf(a_proj) };
 				rowCopy[a_proj->GetFormID()] = it->second;
 				a_light = it->second;
 				(spray ? sprays : bolts) += 1;

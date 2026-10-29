@@ -296,9 +296,7 @@ namespace Plugin
 			if (!rec || listed) {
 				return true;  // not a cloud of ours, or lit already
 			}
-			if (!CloudSwitchedOn(*rec)) {
-				return true;  // switched off: nothing to wait for (her sneak fade is waited out below)
-			}
+			// switched off: kept waiting (CloudOn below), so turning it on while the cone still stands hangs its light
 			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
 				return false;
 			}

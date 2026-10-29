@@ -122,17 +122,16 @@ namespace DevBenchGlue
 				}
 			}
 		});
+		// the task holds its own copy: a promise it cannot keep then breaks, so the wait ends at once
+		promise.reset();
 		if (result.wait_for(a_timeout) != std::future_status::ready)
 			return std::nullopt;
-		// ready with no answer (a broken promise) is a refusal, never "not run yet"
+		// ready with no answer (a broken promise) is a refusal, never "not run yet"; a refusal that cannot be built
+		// (no memory) reaches the caller's own catch, which refuses too
 		try {
 			return result.get();
 		} catch (...) {
-			try {
-				return Refusal("the change failed on the main thread");
-			} catch (...) {
-				return std::nullopt;
-			}
+			return Refusal("the main thread did not return an answer");
 		}
 	}
 
