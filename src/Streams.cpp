@@ -87,15 +87,16 @@ namespace Plugin
 			{ 0x10FBEC, "MagicLightFireball02", 400, 0x4001, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 1.5f },
 		};
 
-		// off Community Shaders the inverse square flag means nothing, so the light is made plain at the reach it has there
+		// off Community Shaders the inverse square flag means nothing, so the light is made plain the way Illuminated's pass 0 does it
 		void WearLook(RE::TESObjectLIGH* a_copy, const SprayLook& a_look)
 		{
 			std::uint32_t radius = a_look.radius, flags = a_look.flags;
 			float         fade = a_look.fade;
-			if (!InverseSquare() && (flags & LightKit::kRecordInverseSquare)) {
-				const auto plain = LightKit::PlainOf(a_look.fade, static_cast<float>(a_look.radius), a_look.falloff, LightKit::LightPlacerSize(a_look.fov));
-				radius = static_cast<std::uint32_t>(std::lround(plain.radius));
-				fade = plain.fade;
+			const bool    plain = !InverseSquare() && (flags & LightKit::kRecordInverseSquare);
+			if (plain) {
+				const auto drawn = LightKit::PlainOf(a_look.fade, static_cast<float>(a_look.radius), a_look.falloff, LightKit::LightPlacerSize(a_look.fov));
+				radius = static_cast<std::uint32_t>(std::lround(drawn.radius));
+				fade = drawn.fade;
 				flags &= ~LightKit::kRecordInverseSquare;
 			} else {
 				a_copy->data.fallofExponent = a_look.falloff;
@@ -107,6 +108,7 @@ namespace Plugin
 			a_copy->data.flickerIntensityAmplitude = a_look.flickerIntensity;
 			a_copy->data.flickerMovementAmplitude = a_look.flickerMovement;
 			a_copy->fade = fade;
+			SKSE::log::info("[SPRAY-LOOK] {} | radius {} | fade {:.2f} | flags {:X}{}", a_look.editorID, radius, fade, flags, plain ? " (made plain)" : "");
 		}
 
 		// Dynamic Lighting off: the record's own flicker and pulse bits come off the copy, so a spray's or bolt's own light holds steady

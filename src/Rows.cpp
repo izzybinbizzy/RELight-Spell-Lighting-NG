@@ -191,8 +191,10 @@ namespace Plugin
 			if (!proj) {
 				return path;
 			}
-			auto& rt = proj->GetProjectileRuntimeData();
-			path.length = rt.range;
+			auto&       rt = proj->GetProjectileRuntimeData();
+			const auto* base = a_ref->GetBaseObject() ? a_ref->GetBaseObject()->As<RE::BGSProjectile>() : nullptr;
+			// a cone flies: what is left of its range runs from where it is now
+			path.length = base && base->IsCone() ? (std::max)(rt.range - rt.distanceMoved, 0.0f) : rt.range;
 			// only a bolt stops where its art is drawn: a spray's geometry reads far shorter than its flames (Flames 230 of 768)
 			if (a_beam) {
 				if (const float drawn = DrawnLength(a_root, path.axis); drawn > 1.0f && drawn < path.length) {
@@ -256,10 +258,12 @@ namespace Plugin
 
 		// a cloud's light is the spell's one light: on Performance too, off with All lights off, its patch's switch and - hers -
 		// once the sneak fade has her lights out
-		[[nodiscard]] bool CloudOn(const RowRecipe& a_rec, bool a_hers)
+		[[nodiscard]] bool CloudSwitchedOn(const RowRecipe& a_rec)
 		{
-			return !AllLightsOff() && (a_rec.option == kNone || OptionLit(a_rec.option)) && (SneakLevel() > 0.0f || !a_hers);
+			return !AllLightsOff() && (a_rec.option == kNone || OptionLit(a_rec.option));
 		}
+
+		[[nodiscard]] bool CloudOn(const RowRecipe& a_rec, bool a_hers) { return CloudSwitchedOn(a_rec) && (SneakLevel() > 0.0f || !a_hers); }
 
 		[[nodiscard]] const RowRecipe* CloudRecipe(const RE::TESObjectREFR* a_ref)
 		{
@@ -292,7 +296,7 @@ namespace Plugin
 			if (!rec || listed) {
 				return true;  // not a cloud of ours, or lit already
 			}
-			if (AllLightsOff() || (rec->option != kNone && !OptionLit(rec->option))) {
+			if (!CloudSwitchedOn(*rec)) {
 				return true;  // switched off: nothing to wait for (her sneak fade is waited out below)
 			}
 			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
