@@ -68,6 +68,49 @@ namespace Plugin
 			return copy;
 		}
 
+		// Illuminated's look for the game's projectile lights a spray or bolt wears (its LightSettings.cpp pass 0, out of CS Light.esp):
+		// the plain record left RELight's sprays smaller and paler than Illuminated's on the same setup
+		struct SprayLook
+		{
+			std::uint32_t localID;
+			const char*   editorID;
+			std::uint32_t radius;
+			std::uint32_t flags;
+			float         falloff, fov, nearDistance, flickerIntensity, flickerMovement, fade;
+		};
+
+		constexpr SprayLook kSprayLooks[] = {
+			{ 0x01CBB3, "MagicLightFireball01", 300, 0x4041, 1.0f, 2.0f, 0.0f, 0.5f, 1.8f, 1.8f },
+			{ 0x056ACA, "MagicLightShockProjectile01", 360, 0x4009, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 2.25f },
+			{ 0x07331E, "MagicLightIllusionPosProjectile01", 200, 0x4000, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 1.5f },
+			{ 0x07479B, "MagicLightIllusionNegProjectile01", 200, 0x4000, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 1.5f },
+			{ 0x10FBEC, "MagicLightFireball02", 400, 0x4001, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 1.5f },
+		};
+
+		// off Community Shaders the inverse square flag means nothing, so the light is made plain the way Illuminated's pass 0 does it
+		void WearLook(RE::TESObjectLIGH* a_copy, const SprayLook& a_look)
+		{
+			std::uint32_t radius = a_look.radius, flags = a_look.flags;
+			float         fade = a_look.fade;
+			const bool    plain = !InverseSquare() && (flags & LightKit::kRecordInverseSquare);
+			if (plain) {
+				const auto drawn = LightKit::PlainOf(a_look.fade, static_cast<float>(a_look.radius), a_look.falloff, LightKit::LightPlacerSize(a_look.fov));
+				radius = static_cast<std::uint32_t>(std::lround(drawn.radius));
+				fade = drawn.fade;
+				flags &= ~LightKit::kRecordInverseSquare;
+			} else {
+				a_copy->data.fallofExponent = a_look.falloff;
+				a_copy->data.fov = a_look.fov;
+			}
+			a_copy->data.radius = radius;
+			a_copy->data.flags = static_cast<RE::TES_LIGHT_FLAGS>(flags);
+			a_copy->data.nearDistance = a_look.nearDistance;
+			a_copy->data.flickerIntensityAmplitude = a_look.flickerIntensity;
+			a_copy->data.flickerMovementAmplitude = a_look.flickerMovement;
+			a_copy->fade = fade;
+			SKSE::log::info("[SPRAY-LOOK] {} | radius {} | fade {:.2f} | flags {:X}{}", a_look.editorID, radius, fade, flags, plain ? " (made plain)" : "");
+		}
+
 		// Dynamic Lighting off: the record's own flicker and pulse bits come off the copy, so a spray's or bolt's own light holds steady
 		void HoldSteady(RE::TESObjectLIGH* a_light)
 		{
@@ -107,8 +150,14 @@ namespace Plugin
 		std::unordered_map<RE::FormID, RowRecipe>                        rows;
 		std::unordered_set<const RE::TESObjectLIGH*>                     handTinted;  // plain copies already in the hand's color
 		std::unordered_map<RE::FormID, const RE::TESObjectLIGH*>         rowCopy;     // each row's projectile -> the copy it wears
-		std::size_t                                                      sprays = 0, bolts = 0, failed = 0, dark = 0;
-		const auto                                                       n = ForEachLightField(*dh, [&](const RE::BGSProjectile* a_proj, RE::TESObjectLIGH*& a_light) {
+		std::unordered_map<const RE::TESObjectLIGH*, const SprayLook*>   looks;
+		for (const auto& look : kSprayLooks) {
+			if (const auto* l = dh->LookupForm<RE::TESObjectLIGH>(look.localID, "Skyrim.esm")) {
+				looks[l] = &look;
+			}
+		}
+		std::size_t sprays = 0, bolts = 0, failed = 0, dark = 0, looked = 0;
+		const auto  n = ForEachLightField(*dh, [&](const RE::BGSProjectile* a_proj, RE::TESObjectLIGH*& a_light) {
 			const bool sprayRecord = a_light && gSpraySet.contains(a_light);
 			if (!a_light || (!sprayRecord && !beams.contains(a_light))) {
 				return false;
@@ -135,6 +184,10 @@ namespace Plugin
 				};
 				if (fresh) {
 					it->second = CopyOf(a_light);
+					if (const auto look = looks.find(a_light); it->second && look != looks.end()) {
+						WearLook(it->second, *look->second);
+						++looked;
+					}
 					if (const auto his = it->second ? RecordColor(a_light->GetFormID()) : std::nullopt) {
 						it->second->data.color.red = his->red;
 						it->second->data.color.green = his->green;
@@ -154,8 +207,9 @@ namespace Plugin
 				}
 				handColor(it->second);
 				const auto& c = it->second->data.color;
-				rows[a_proj->GetFormID()] = { { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f }, a_light->fade,
-					static_cast<float>(a_light->data.radius), bolt, OptionOf(a_proj) };
+				// the worn copy's numbers, so the row matches the light the projectile wears (WearLook changed it)
+				rows[a_proj->GetFormID()] = { { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f }, it->second->fade,
+					static_cast<float>(it->second->data.radius), bolt, OptionOf(a_proj) };
 				rowCopy[a_proj->GetFormID()] = it->second;
 				a_light = it->second;
 				(spray ? sprays : bolts) += 1;
@@ -203,6 +257,8 @@ namespace Plugin
 		if (clouds) {
 			SKSE::log::info("stream lights: {} cone(s) hold one light where their cloud is", clouds);
 		}
+		SKSE::log::info("stream lights: {} of their own light copies wear Illuminated's look for that light ({})", looked,
+			InverseSquare() ? "inverse square" : "made plain - no inverse square shader");
 		SKSE::log::info(
 			"stream lights: {} spray(s) and {} bolt(s) wear a plain copy of their own light ({} copies) and a row; the records' other users - "
 			"{} projectile(s), {} muzzle flash(es), {} magic effect(s), {} explosion(s), {} hazard(s): {} on a spray record left dark, "
