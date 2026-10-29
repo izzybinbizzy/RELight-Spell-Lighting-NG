@@ -124,7 +124,7 @@ namespace DevBenchGlue
 		});
 		if (result.wait_for(a_timeout) != std::future_status::ready)
 			return std::nullopt;
-		// ready means it ran: a broken promise (no answer could be made) is a failure, never "not run yet"
+		// ready with no answer (a broken promise) is a refusal, never "not run yet"
 		try {
 			return result.get();
 		} catch (...) {
