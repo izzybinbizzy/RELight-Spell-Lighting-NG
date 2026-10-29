@@ -115,12 +115,20 @@ namespace DevBenchGlue
 			try {
 				promise->set_value(fn());
 			} catch (...) {
-				promise->set_value(Refusal("the change failed on the main thread"));
+				try {
+					promise->set_value(Refusal("the change failed on the main thread"));
+				} catch (...) {
+					// out of memory even for the refusal: the promise breaks and the caller reads no answer
+				}
 			}
 		});
 		if (result.wait_for(a_timeout) != std::future_status::ready)
 			return std::nullopt;
-		return result.get();
+		try {
+			return result.get();
+		} catch (...) {
+			return std::nullopt;
+		}
 	}
 
 	// what a tool replies when the main thread did not run its work within the wait

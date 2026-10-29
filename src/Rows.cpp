@@ -193,8 +193,11 @@ namespace Plugin
 			}
 			auto& rt = proj->GetProjectileRuntimeData();
 			path.length = rt.range;
-			if (const float drawn = DrawnLength(a_root, path.axis); drawn > 1.0f && drawn < path.length) {
-				path.length = drawn;
+			// only a bolt stops where its art is drawn: a spray's geometry reads far shorter than its flames (Flames 230 of 768)
+			if (a_beam) {
+				if (const float drawn = DrawnLength(a_root, path.axis); drawn > 1.0f && drawn < path.length) {
+					path.length = drawn;
+				}
 			}
 			for (const auto* impact : rt.impacts) {  // the newest impact comes first
 				if (impact) {
@@ -288,6 +291,9 @@ namespace Plugin
 			const bool  listed = root && std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
 			if (!rec || listed) {
 				return true;  // not a cloud of ours, or lit already
+			}
+			if (AllLightsOff() || (rec->option != kNone && !OptionLit(rec->option))) {
+				return true;  // switched off: nothing to wait for (her sneak fade is waited out below)
 			}
 			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
 				return false;
