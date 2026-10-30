@@ -100,7 +100,8 @@ namespace Plugin
 		[[nodiscard]] RE::NiAVObject* HandAbove(RE::NiAVObject* a_node)
 		{
 			for (auto* up = a_node; up; up = up->parent) {
-				if (std::string_view(up->name.c_str()).find("Hand [") != std::string_view::npos) {
+				const char* name = up->name.c_str();
+				if (name && std::string_view(name).find("Hand [") != std::string_view::npos) {
 					return up;
 				}
 			}
