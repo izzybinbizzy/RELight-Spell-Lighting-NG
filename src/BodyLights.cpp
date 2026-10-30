@@ -96,22 +96,62 @@ namespace Plugin
 			gArtKnown = true;
 		}
 
+		// the hand a node sits under (itself when it is one), or nullptr - Illuminated's ArtLights.cpp
+		[[nodiscard]] RE::NiAVObject* HandAbove(RE::NiAVObject* a_node)
+		{
+			for (auto* up = a_node; up; up = up->parent) {
+				const char* name = up->name.c_str();
+				if (name && std::string_view(name).find("Hand [") != std::string_view::npos) {
+					return up;
+				}
+			}
+			return nullptr;
+		}
+
+		// in first person the third-person arms are not posed; the spine's MagicEffectsNode lights the floor (Illuminated's ArtLights.cpp)
+		[[nodiscard]] RE::NiNode* BodyNode(RE::NiAVObject* a_third)
+		{
+			static const RE::BSFixedString kEffectsNode{ "MagicEffectsNode" };
+			auto*                          node = a_third->GetObjectByName(kEffectsNode);
+			return (node ? node : a_third)->AsNode();
+		}
+
 		// Truman's enchantment light: the effect's attach root, or the third-person node of the same name (a light under the
-		// first-person skeleton lights nothing on ENB). An unnamed root is used as it is - a search for "" finds any unnamed node
+		// first-person skeleton lights nothing on ENB). Her own art in first person hangs in the first-person skeleton, its model
+		// its own root - a name the third-person body lacks - so there the nearest node above it the body has is used, the body
+		// node for one on an arm. An unnamed root is used as it is - a search for "" finds any unnamed node
 		[[nodiscard]] RE::NiNode* NodeFor(RE::ReferenceEffect* a_art, RE::TESObjectREFR* a_ref)
 		{
 			auto* root = a_art->GetAttachRoot();
 			if (!root) {
 				return nullptr;
 			}
-			auto*       third = a_ref->Get3D(false);
-			const char* name = root->name.c_str();
-			if (third && third != root && name && *name) {
-				if (auto* same = third->GetObjectByName(root->name)) {
-					root = same;
+			auto* const third = a_ref->Get3D(false);
+			auto* const first = a_ref->Get3D(true);
+			if (!third || third == root) {
+				return root->AsNode();
+			}
+			bool underFirst = false;
+			for (const RE::NiAVObject* up = root; first && first != third && up && !underFirst; up = up->parent) {
+				underFirst = up == first;
+			}
+			if (!underFirst) {
+				const char* name = root->name.c_str();
+				if (name && *name) {
+					if (auto* same = third->GetObjectByName(root->name)) {
+						root = same;
+					}
+				}
+				return root->AsNode();
+			}
+			for (auto* up = root; up; up = up == first ? nullptr : up->parent) {
+				const char* name = up->name.c_str();
+				auto*       same = name && *name ? third->GetObjectByName(up->name) : nullptr;
+				if (same && same->AsNode()) {
+					return HandAbove(same) ? BodyNode(third) : same->AsNode();
 				}
 			}
-			return root->AsNode();
+			return BodyNode(third);
 		}
 
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)

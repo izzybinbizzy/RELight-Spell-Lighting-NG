@@ -41,6 +41,10 @@ namespace BeamRow
 	inline constexpr float kReachTimes = 2.2f;
 	inline constexpr float kLeastReach = 140.0f;  // over a beam's usual height above the ground with room to spare: under that a light barely lands
 	inline constexpr float kMostReach = 160.0f;   // the light stays this close to the beam
+	// a row the light cap thinned (5 lights on a long beam off Community Shaders) reaches across its gaps instead: without it
+	// a long beam was lit only in spots, its first stretch dark
+	inline constexpr float kGapReach = 1.0f;
+	inline constexpr float kMostGapReach = 800.0f;
 	inline constexpr float kEndScale = 0.5f;
 	inline constexpr int   kHalveFrom = 5;  // fewer lights keep full ends: halving one of 3 or 4 dims a third of the beam
 
@@ -132,7 +136,9 @@ namespace BeamRow
 		const double needed = (std::min)(std::ceil(static_cast<double>(a_length) / kSpacing), static_cast<double>(a_most));
 		const int    n = std::clamp((std::max)(static_cast<int>(needed), kFewest), 1, a_most);
 		const float  spacing = a_length / static_cast<float>(n);
-		const float  reach = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
+		const float  besideBeam = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
+		const bool   thinned = static_cast<int>(needed) >= a_most && spacing > kSpacing;
+		const float  reach = thinned ? (std::max)(besideBeam, (std::min)(kGapReach * spacing, kMostGapReach)) : besideBeam;
 		a_row.reserve(static_cast<std::size_t>(n));
 		for (int i = 0; i < n; ++i) {
 			const bool end = n >= kHalveFrom && (i == 0 || i == n - 1);

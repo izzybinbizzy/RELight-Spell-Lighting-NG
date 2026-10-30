@@ -220,6 +220,33 @@ namespace Plugin
 			});
 		}
 
+		// RE::Light's Load3D hook for hazards attaches its config's light on every load of the hazard's 3D with no check for one
+		// already there, so a burning patch can wear two identical lights at one spot. The later twin is put out; the first stays.
+		std::vector<const RE::NiLight*> gTwinSeen;  // this frame's hazard lights of RE::Light's, the first of each
+
+		bool SameTwin(const RE::NiLight* a_a, const RE::NiLight* a_b)
+		{
+			return a_a->parent == a_b->parent && a_a->name == a_b->name &&
+			       a_a->GetLightRuntimeData().diffuse == a_b->GetLightRuntimeData().diffuse &&
+			       a_a->local.translate.GetDistance(a_b->local.translate) < 0.5f;
+		}
+
+		void TwinNet(RE::NiLight* a_light)
+		{
+			if (!IsReLightLight(a_light) || IsEnchantLight(a_light) || a_light->GetAppCulled() || !a_light->parent) {
+				return;
+			}
+			const auto* ref = ReferenceOf(a_light);
+			if (!ref || !ref->Is(RE::FormType::PlacedHazard)) {
+				return;
+			}
+			if (std::ranges::any_of(gTwinSeen, [a_light](const RE::NiLight* a_seen) { return SameTwin(a_seen, a_light); })) {
+				a_light->SetAppCulled(true);
+				return;
+			}
+			gTwinSeen.push_back(a_light);
+		}
+
 		// RE::Light culls an enchantment light on sheathe: a switch turned back on must not light a sheathed weapon
 		bool MayGiveBack(const Held& a_held)
 		{
@@ -294,11 +321,13 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
+		gTwinSeen.clear();
 		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {
 			if (!bsLight || !bsLight->light) {
 				continue;
 			}
 			auto* niLight = bsLight->light.get();
+			TwinNet(niLight);
 			SheathedNet(niLight);  // every RE::Light enchantment light, ours or not
 			const auto opt = OptionOfLight(niLight);
 			if (opt == kNone) {
