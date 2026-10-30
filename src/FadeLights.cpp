@@ -256,10 +256,11 @@ namespace Fade
 				Plugin::NoteReachWrite(a_light, reachBefore, r);  // the reach handshake, as the fade's (a plugin's Reach slider)
 			}
 			// on Community Shaders the reach comes from the fade and the cutoff, never the radius above: the cutoff moves with the
-			// fade (x brightness / reach^2) so the light reaches what "Reach follows" asks
+			// fade (LightKit::ReachCutoffFactor) so the light reaches what "Reach follows" asks
 			if (const float cutoffBefore = Plugin::InverseSquare() && LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
 				const float q = (std::max)(a_hand.out.reach, 0.05f);
-				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, a_hand.out.brightness / (q * q)));
+				const float factor = LightKit::ReachCutoffFactor(a_hand.out.brightness, q, seen.fade.base, seen.cutoff.BaseFor(cutoffBefore), data.radius.z);
+				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, factor));
 				seen.cutoff.written = LightKit::Isl::Cutoff(a_light);  // as clamped: our own write, never read back as another's
 				Plugin::NoteCutoffWrite(a_light, cutoffBefore, seen.cutoff.written);
 			}

@@ -414,6 +414,12 @@ namespace Glow
 			return v;
 		}
 
+		// the base Apply would work from if it were given a_current now (ReachCutoffFactor needs a light's base before it is written)
+		[[nodiscard]] float BaseFor(float a_current) const noexcept
+		{
+			return !touched || (a_current != written && watch == Watch::kFollow) ? a_current : base;
+		}
+
 		[[nodiscard]] bool Written() const noexcept { return touched; }
 
 		// what to put back when we let go: our base if the value still holds our write, else leave it
