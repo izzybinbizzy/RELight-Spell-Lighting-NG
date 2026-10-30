@@ -90,14 +90,12 @@ namespace LightKit
 		}
 		return std::sqrt((std::max)(kK * a_fade / a_cutoff - a_size * a_size, 0.0f));
 	}
-	// What the shader takes off a light's fade-over-cutoff, per size², before any reach is left: reach = sqrt(K x fade / cutoff -
-	// kReachOffset x size²). Fitted to a size-2 light's listed reach at three states; IslReach above takes only size², the figure
-	// the shipped cutoffs were worked out with, and is left as it is.
+	// What the shader takes off a light's fade over cutoff, per size²: reach² = K x fade / cutoff - kReachOffset x size². IslReach
+	// above keeps the plain size² its shipped cutoffs were worked out with.
 	inline constexpr float kReachOffset = kK / 2.0f;
 
-	// The factor a light's cutoff takes while its fade takes a_brightness, so the reach it has now (a_fade over a_cutoff, size
-	// a_size) shrinks by a_reach and no more. The offset above does not shrink with the fade, so brightness / reach² alone
-	// over-shrinks a small light: a size-2 light of reach 253 asked for 0.49 came out near 98, not 125.
+	// The factor a light's cutoff takes while its fade takes a_brightness, so its reach (a_fade over a_cutoff, size a_size) shrinks
+	// by a_reach and no more; the offset does not shrink with the fade, so brightness / reach² alone over-shrinks a small light.
 	[[nodiscard]] inline float ReachCutoffFactor(float a_brightness, float a_reach, float a_fade, float a_cutoff, float a_size) noexcept
 	{
 		const float q2 = a_reach * a_reach;

@@ -414,10 +414,12 @@ namespace Glow
 			return v;
 		}
 
-		// the base Apply would work from if it were given a_current now (ReachCutoffFactor needs a light's base before it is written)
+		// the base Apply would go on to use if it were given a_current now, in every watch state (ReachCutoffFactor needs it before the write)
 		[[nodiscard]] float BaseFor(float a_current) const noexcept
 		{
-			return !touched || (a_current != written && watch == Watch::kFollow) ? a_current : base;
+			Scaled next = *this;
+			(void)next.Apply(a_current, 1.0f);
+			return next.base;
 		}
 
 		[[nodiscard]] bool Written() const noexcept { return touched; }
