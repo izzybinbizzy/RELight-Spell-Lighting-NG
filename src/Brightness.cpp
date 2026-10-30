@@ -229,9 +229,8 @@ namespace Plugin
 			}
 			float cutoff = a_s.baseCutoff;
 			if ((a_scale != 1.0f || a_reach != 1.0f) && a_s.baseCutoff > 0.0f && a_scale > 0.0f && fade > 0.0f) {
-				const float size = data.radius.z;
-				const float reach = std::sqrt((std::max)(kK * (fade / a_scale) / a_s.baseCutoff - size * size, 1.0f)) * a_reach;
-				cutoff = CutoffFor(fade, reach, size);
+				const float factor = LightKit::ReachCutoffFactor(a_scale, a_reach, fade / a_scale, a_s.baseCutoff, data.radius.z);
+				cutoff = std::clamp(a_s.baseCutoff * factor, Isl::kLowestCutoff, Isl::kHighestCutoff);
 			}
 			if (cutoff != current) {
 				Isl::SetCutoff(a_light, cutoff);

@@ -414,6 +414,14 @@ namespace Glow
 			return v;
 		}
 
+		// the base Apply would go on to use if it were given a_current now, in every watch state (ReachCutoffFactor needs it before the write)
+		[[nodiscard]] float BaseFor(float a_current) const noexcept
+		{
+			Scaled next = *this;
+			(void)next.Apply(a_current, 1.0f);
+			return next.base;
+		}
+
 		[[nodiscard]] bool Written() const noexcept { return touched; }
 
 		// what to put back when we let go: our base if the value still holds our write, else leave it
