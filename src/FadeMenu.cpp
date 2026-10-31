@@ -4,7 +4,7 @@
 //
 // Pages in SKSE Menu Framework's Mod Control Panel, under the mod's own section, in his order: HUD (the charge bar and the
 // charge gems) right below the mod's Configs page, then Fading - his answer 2026-10-13: "HUD right below Configs, Lights by
-// Item after Fading" (the mod's own Menu.cpp adds Lights by Item, FadeItems.cpp's Items::Render, after these). Settings ("Fading"): every other setting of the
+// Item after Fading" (the mod's own Menu.cpp adds Choose Your Own Color, FadeItems.cpp's Items::Render, after these). Settings ("Fading"): every other setting of the
 // module (his rule: settings live in the SKSE menu only), live on the next frame and saved on the game's main thread (never
 // the render thread); the rule files pick weapons one by one. Debug (ONLY in the testing DLL of the PDB and Source download - his call: "remove fading
 // debug entirely only keep it with source and pdb as an in game testing dll"; built with FADE_DEBUG_PAGE): the debug log,
@@ -719,7 +719,7 @@ namespace Fade
 				return;
 			}
 			std::array<bool, 2> here{ false, false };
-			if (hud.gems && hud.drawn && !HideHud()) {
+			if (hud.gems && hud.drawn && !hud.hudHidden && !HideHud()) {
 				for (std::size_t i = 0; i < 2; ++i) {
 					const auto& h = hud.hands[i];
 					if (!h.shown || h.spell || (h.fraction >= 0.995f && !hud.gemFull)) {
@@ -801,8 +801,8 @@ namespace Fade
 		}
 		// under the mod's own section; the colour scheme is the plugin's (its Menu.cpp sets it first): one DLL, one theme
 		SKSEMenuFramework::SetSection(T(Mod::kName));
-		// his answer 2026-10-13: "HUD right below Configs, Lights by Item after Fading" - the mod's own pages (up to Configs)
-		// are added before these, its later pages (Lights by Item / Spell - Items::Render under the mod's own settings for that
+		// the mod's own pages (up to Configs)
+		// are added before these, its later pages (Choose Your Own Color - Items::Render under the mod's own settings for that
 		// page -, then the rest) after them (its RegisterMenuTail)
 		SKSEMenuFramework::AddSectionItem(T("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
 		SKSEMenuFramework::AddSectionItem(T("Fading"), LightKit::GuardedDraw<RenderSettings>);

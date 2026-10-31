@@ -193,8 +193,9 @@ namespace Fade
 	};
 	struct HudState
 	{
-		bool                   gems{ false };   // the gems' switch (and the module is on)
-		bool                   drawn{ false };  // the player's weapons or spells are out
+		bool                   gems{ false };       // the gems' switch (and the module is on)
+		bool                   drawn{ false };      // the player's weapons or spells are out
+		bool                   hudHidden{ false };  // a HUD toggle mod has hidden the game's HUD
 		float                  gemSize{ 1.0f }, gemOpacity{ 0.9f };
 		bool                   gemPercent{ true };
 		bool                   gemFull{ false };  // a gem at full charge too (the HUD page's Show at full charge)
@@ -236,8 +237,7 @@ namespace Fade
 		[[nodiscard]] std::optional<RE::NiColor> ChoiceColor(RE::FormID a_id);                             // main thread: an item's own color, black when off, none on Auto
 		bool                                     SetFromText(RE::FormID a_id, std::string_view a_choice);  // "auto", "off" or "r,g,b", as the menu would
 		void                                     Release();                                                // every light back as its owner left it (a load)
-		void                                     RenderSpells();                                           // the Spell page's list
-		void __stdcall                           RenderWeapons();                                          // the Weapons and Staves page
+		void                                     Render();                                                 // the Choose Your Own Color list
 	}
 
 	// ------------------------------------------------------------------ FadeMenu.cpp

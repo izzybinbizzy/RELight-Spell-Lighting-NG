@@ -725,6 +725,13 @@ namespace Fade
 			auto*       player = RE::PlayerCharacter::GetSingleton();
 			const auto* state = player ? player->AsActorState() : nullptr;
 			hud.drawn = state && state->IsWeaponDrawn();
+			// a HUD toggle mod (Toggle UI's F6) takes the HUD movie's root alpha to 0 and leaves the menus showing
+			if (hud.gems) {
+				auto*        ui = RE::UI::GetSingleton();
+				const auto   menu = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
+				RE::GFxValue alpha;
+				hud.hudHidden = menu && menu->uiMovie && menu->uiMovie->GetVariable(&alpha, "_root._alpha") && alpha.IsNumber() && alpha.GetNumber() < 1.0;
+			}
 			if (a_s.enabled) {
 				for (const auto& [key, h] : gHands) {
 					if (h.active && h.frame == gFrame && player && h.actorSeen == player) {

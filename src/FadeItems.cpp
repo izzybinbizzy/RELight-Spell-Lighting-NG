@@ -76,7 +76,6 @@ namespace Fade::Items
 
 		std::vector<Item>                      gCatalog;
 		std::unordered_set<RE::FormID>         gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
-		std::unordered_set<RE::FormID>         gSpellIds;    // the spells among them (read-only after load)
 		std::mutex                             gLock;        // the choices: the menu (render thread) changes them, the main thread applies
 		std::unordered_map<RE::FormID, Choice> gChoices;
 		std::atomic<std::uint32_t>             gGeneration{ 0 };  // bumped on every change; the main thread copies on a change
@@ -458,12 +457,8 @@ namespace Fade::Items
 		}
 		std::ranges::sort(gCatalog, [](const Item& a, const Item& b) { return std::make_tuple(!a.spell, a.group, a.lower) < std::make_tuple(!b.spell, b.group, b.lower); });
 		gCatalogIds.clear();
-		gSpellIds.clear();
 		for (const auto& item : gCatalog) {
 			gCatalogIds.insert(item.id);
-			if (item.spell) {
-				gSpellIds.insert(item.id);
-			}
 		}
 		SKSE::log::info("lights by item: {} spells and weapons in the list", gCatalog.size());
 	}
@@ -567,26 +562,21 @@ namespace Fade::Items
 		gHolding.store(false, std::memory_order_relaxed);
 	}
 
-	// ------------------------------------------------------------------ the pages
-	// Spell is a submenu of Lights by Item: each page lists only its own kind
-	static void RenderList(bool a_spells)
+	// ------------------------------------------------------------------ the page
+	// his order 2026-10-30: spells, staves and weapons on one page, Choose Your Own Color
+	void Render()
 	{
 		using namespace ImGuiMCP;
 		const MenuStyle::Page page;
-		static char           searches[2][64]{};
-		static bool           handsOnlys[2]{};
-		auto&                 search = searches[a_spells ? 1 : 0];
-		auto&                 handsOnly = handsOnlys[a_spells ? 1 : 0];
-		MenuStyle::Header(MenuStyle::Icon::kBulb, a_spells ? T("Lights by Spell") : T("Lights by Weapon and Staff"));
-		TextWrapped("%s", a_spells ? T("Find a spell and change its light: switch it off, or give it a color of its own. Every other spell "
-									   "keeps its light as it is (Auto). The main Brightness and Reach sliders still reach them all.") :
-									 T("Find a staff or weapon and change its light: switch it off, or give it a color of its own. Every "
-									   "other staff and weapon keeps its light as it is (Auto). The main Brightness and Reach sliders "
-									   "still reach them all."));
+		static char           search[64]{};
+		static bool           handsOnly = false;
+		MenuStyle::Header(MenuStyle::Icon::kBulb, T("Choose Your Own Color"));
+		TextWrapped("%s", T("Find a spell, staff or weapon and change its light: switch it off, or give it a color of its own. Everything "
+							"else keeps its light as it is (Auto). The main Brightness and Reach sliders still reach them all."));
 		// his list: "explain the buttons in light by item and make them one above the other" - each control on its own line,
 		// what it does beside it
 		SetNextItemWidth(260.0f);
-		if (InputTextWithHint("##itemSearch", a_spells ? T("Search a spell") : T("Search a staff or weapon"), search, sizeof(search))) {
+		if (InputTextWithHint("##itemSearch", T("Search a spell, staff or weapon"), search, sizeof(search))) {
 			handsOnly = false;
 		}
 		SameLine();
@@ -600,14 +590,12 @@ namespace Fade::Items
 		if (Button(T("Reset all"))) {
 			{
 				std::lock_guard lock(gLock);
-				std::erase_if(gChoices, [a_spells](const auto& a_choice) {
-					return gSpellIds.contains(a_choice.first) == a_spells;  // a choice is only ever held for a listed item
-				});
+				gChoices.clear();
 			}
 			MarkChanged();
 		}
 		SameLine();
-		TextDisabled("%s", a_spells ? T("Every spell back to Auto.") : T("Every staff and weapon back to Auto."));
+		TextDisabled("%s", T("Everything back to Auto."));
 		TextDisabled("%s", T("Each item: first box = its light on or off, second box = a color of its own (pick it in the square), "
 							 "Reset = back to Auto."));
 		std::unordered_map<RE::FormID, Choice> choices;
@@ -619,11 +607,8 @@ namespace Fade::Items
 		const RE::FormID      hands[2]{ gInHands[0].load(std::memory_order_relaxed), gInHands[1].load(std::memory_order_relaxed) };
 		std::string           group;
 		std::size_t           shown = 0;
-		constexpr std::size_t kMaxShown = 120;  // a search narrows it; the whole load order is thousands
+		constexpr std::size_t kMaxShown = 240;  // a search narrows it; the whole load order is thousands
 		for (const auto& item : gCatalog) {
-			if (item.spell != a_spells) {
-				continue;
-			}
 			const bool inHands = item.id && (item.id == hands[0] || item.id == hands[1]);
 			const bool changed = choices.contains(item.id);
 			if (handsOnly ? !inHands : (needle.empty() ? !changed : item.lower.find(needle) == std::string::npos)) {
@@ -673,19 +658,8 @@ namespace Fade::Items
 		}
 		if (shown == 0) {
 			TextDisabled("%s", handsOnly      ? T("Nothing with a light in your hands right now.") :
-							   needle.empty() ? (a_spells ? T("No spell changed yet - search one above.") :
-															T("No staff or weapon changed yet - search one above.")) :
+							   needle.empty() ? T("Nothing changed yet - search above.") :
 												T("Nothing by that name."));
 		}
-	}
-
-	void RenderSpells()
-	{
-		RenderList(true);
-	}
-
-	void __stdcall RenderWeapons()
-	{
-		RenderList(false);
 	}
 }

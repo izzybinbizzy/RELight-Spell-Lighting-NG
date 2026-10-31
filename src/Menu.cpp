@@ -4,10 +4,9 @@
 //
 // Pages in SKSE Menu Framework's Mod Control Panel, under their own section so nothing of RE::Light's own menu is touched, laid out
 // as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, daylight, sneaking, Flicker, hand and weapon lights,
-// the ward color), Spell & Enchantment Art (the weapon enchantment mods, then the Shock, Fire, Frost and Healing art picks),
-// Configs (the spells' own switches, Creation Club, the single-mod patches, then one group per author) and Praedy's Staves. The
-// fading module adds HUD and Fading after them, then this file the Lights by Item folder (Spell: automatic lights above the spell
-// list; Weapons and Staves) and Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
+// the ward color), Configs (the weapon enchantment mods, the spells' own switches, Creation Club, then the other mods' groups) and
+// Praedy's Staves. The fading module adds HUD and Fading after them, then this file Choose Your Own Color (the four art picks,
+// automatic lights, the item list) and Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
 // already lit. The look is the shared MenuStyle.h in warm spell-light gold, with this mod's glowing headings.
 
 #define WIN32_LEAN_AND_MEAN  // NOMINMAX is set for every file in xmake.lua (the fading module needs it too)
@@ -63,19 +62,19 @@ namespace Plugin
 		constexpr std::string_view kPraedys = "Praedy's Staves";           // the menugroup of Praedy's seven staves options
 		constexpr std::string_view kWeaponsGroup = "Weapons";              // the menugroup of Artifacts and Bound Weapons
 
-		// where an option's switch is drawn, as Illuminated's pages are: the weapon enchantment mods on Spell & Enchantment Art (with
-		// the four art picks), Praedy's staves on a page of their own, everything else on Configs
+		// where an option's switch is drawn, as Illuminated's pages are: the weapon enchantment mods first on Configs, Praedy's staves
+		// on a page of their own, everything else after them on Configs
 		enum class Page
 		{
-			kArt,
+			kEnchantments,
 			kConfigs,
 			kPraedys
 		};
 
 		[[nodiscard]] Page PageOf(const Option& a_option)
 		{
-			return a_option.category == kEnchantments ? Page::kArt : a_option.category == kPraedys ? Page::kPraedys :
-			                                                                                         Page::kConfigs;
+			return a_option.category == kEnchantments ? Page::kEnchantments : a_option.category == kPraedys ? Page::kPraedys :
+			                                                                                                  Page::kConfigs;
 		}
 
 		// Illuminated's Praedy's Staves page: each staff under the mod it needs, in the sections and words of its settings file
@@ -86,11 +85,11 @@ namespace Plugin
 		constexpr PraedySection kPraedySections[]{
 			{ "Praedy's Staves", "Setup", "Praedy's Staves", "" },
 			{ "Praedy's Staves - Legacy of the Dragonborn", "Setup", "Legacy of the Dragonborn", "Needs Legacy of the Dragonborn (LegacyoftheDragonborn.esm)." },
+			{ "Praedy's Staves - Olivias staff", "3DNPC", "Olivias staff", "Needs Interesting NPCs (3DNPC.esp)." },
+			{ "Praedy's Staves - Staff of Meteor Storms", "Extras", "Staff of Meteor Storms", "Needs Staff of Meteor Storms (RiverStaff.esp)." },
 			{ "Praedy's Staves - Spider control rod", "Forgotten Seasons", "Spider control rod", "Needs the Forgotten Seasons Creation (ccTWBSSE001-PuzzleDungeon.esm)." },
 			{ "Praedy's Staves - Ayleid staff", "The Cause", "Ayleid staff", "Needs The Cause Creation (ccBGSSSE067-DaedInv.esm)." },
-			{ "Praedy's Staves - Olivias staff", "3DNPC", "Olivias staff", "Needs Interesting NPCs (3DNPC.esp)." },
 			{ "Praedy's Staves - Staff of Worms", "Undeath", "Staff of Worms", "Needs Undeath (Undeath.esp)." },
-			{ "Praedy's Staves - Staff of Meteor Storms", "Extras", "Staff of Meteor Storms", "Needs Staff of Meteor Storms (RiverStaff.esp)." },
 		};
 
 		// its section's place on the page (a staff the table does not know goes last, under its own name)
@@ -179,8 +178,8 @@ namespace Plugin
 			Dummy(ImVec2{ 0.0f, 4.0f });
 		}
 
-		// the headings of Configs, in Illuminated's order: the spells' own switches, Creation Club, the single-mod patches (Other Mods -
-		// his rule: author patches go last), then one group per author
+		// the headings of Configs, in Illuminated's order: the spells' own switches, Creation Club, one group per author A-Z, then the
+		// single-mod patches (Other Mods)
 		struct Heading
 		{
 			int         rank;
@@ -190,7 +189,7 @@ namespace Plugin
 		[[nodiscard]] Heading ConfigsHeading(const Option& a_option)
 		{
 			if (!a_option.author.empty()) {
-				return { 3, a_option.author };
+				return { 2, a_option.author };
 			}
 			if (a_option.name == "Creation Club") {
 				return { 1, T("Creation Club") };
@@ -198,24 +197,24 @@ namespace Plugin
 			if (a_option.download == "Spells" || a_option.category == kWeaponsGroup) {
 				return { 0, T("Spells and Effects") };
 			}
-			return { 2, T("Other Mods") };
+			return { 3, T("Other Mods") };
 		}
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
-		void DrawSwitches(Page a_page)
+		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen)
 		{
 			auto& opts = Options();
 			struct Row
 			{
 				Heading     heading;
 				std::size_t index;
+				std::string key;  // A-Z without regard to case
 			};
-			std::vector<Row>                rows;
-			std::unordered_set<std::string> seen;
+			std::vector<Row> rows;
 			for (const auto i : OptionsInMenuOrder()) {
 				const auto& o = opts[i];
-				if (!o.switchable || PageOf(o) != a_page || !seen.insert(o.id).second) {
+				if (!o.switchable || PageOf(o) != a_page || !a_seen.insert(o.id).second) {
 					continue;
 				}
 				Heading heading = a_page == Page::kConfigs ? ConfigsHeading(o) : Heading{ 0, T("Weapon Enchantments") };
@@ -223,15 +222,13 @@ namespace Plugin
 					const auto at = PraedyIndexOf(o);
 					heading = { static_cast<int>(at), at < std::size(kPraedySections) ? std::string{ kPraedySections[at].group } : o.name };
 				}
-				rows.push_back({ heading, i });
+				rows.push_back({ heading, i, LightKit::Lower(heading.text) + "\n" + LightKit::Lower(o.name) });
 			}
 			if (a_page == Page::kPraedys) {
 				// a section's staves together, the sections in Illuminated's order, each staff where the data puts it
 				std::ranges::stable_sort(rows, [](const Row& a_x, const Row& a_y) { return a_x.heading.rank < a_y.heading.rank; });
 			} else {
-				std::ranges::stable_sort(rows, [&opts](const Row& a_x, const Row& a_y) {
-					return std::tie(a_x.heading.rank, a_x.heading.text, opts[a_x.index].name) < std::tie(a_y.heading.rank, a_y.heading.text, opts[a_y.index].name);
-				});
+				std::ranges::stable_sort(rows, [](const Row& a_x, const Row& a_y) { return std::tie(a_x.heading.rank, a_x.key) < std::tie(a_y.heading.rank, a_y.key); });
 			}
 			// every file of a pack, counted once per draw (CodeRabbit deep scan, CWE-407: a scan of every option
 			// for every row was quadratic in the number of installed data files)
@@ -283,26 +280,12 @@ namespace Plugin
 		// choices follow DataText::kPickNames (the game's own art first); a pick applies the next time the game starts
 		void DrawArtPick(int a_group, const char* a_label, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
 		{
-			// the Auto art picks (his checklist 298, "auto, manual backup"): the switch says what it found, the pick below greys
-			// while that pack is used and stays the backup
-			bool       on = ArtAutoOn(a_group);
-			const int  found = ArtFound(a_group);
-			const bool known = found >= 0 && found < static_cast<int>(a_items.size());
-			const auto label = std::format("{} ({})##artauto{}", T("Find my art pack"),
-				known ? std::string(T("found:")) + " " + a_items[static_cast<std::size_t>(found)] : std::string(T("not recognised")), a_group);
-			if (ImGuiMCP::Checkbox(label.c_str(), &on)) {
-				SetArtAuto(a_group, on);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T("The art pack you have installed is found when the game starts, and the light takes its color - the pick below is then greyed out. Not recognised (a mix of packs, another pack, an updated one): the pick below is used. Off: always the pick below. Applies the next time the game starts."));
-			ImGuiMCP::BeginDisabled(on && known);
-			int pick = std::clamp(ManualArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
+			int pick = std::clamp(ArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
 			if (ImGuiMCP::Combo(a_label, &pick, a_items.data(), static_cast<int>(a_items.size()))) {
 				SetArtPick(a_group, pick);
 				SaveSettings();
 			}
 			MenuStyle::Tip(a_tips[static_cast<std::size_t>(pick)]);
-			ImGuiMCP::EndDisabled();
 		}
 
 		// ------------------------------------------------------------------ the player's own presets, one set per lighting
@@ -457,7 +440,7 @@ namespace Plugin
 			}
 		}
 
-		// Illuminated's Lights page; the lighting is found, never picked, and the art picks are on the Spell & Enchantment Art page
+		// Illuminated's Lights page; the lighting is found, never picked, and the art picks are on the Choose Your Own Color page
 		void __stdcall RenderLights()
 		{
 			const GlowStyle style;
@@ -507,76 +490,6 @@ namespace Plugin
 			// 🚫🚫 no Light colors pick (Vanilla / Paler / Deeper): HIS WORDS 2026-10-21 "pale and deep also need to be removed" - the
 			// second time he took it out (CLAUDE.md)
 
-			GlowHeading("Light Strength", Icon::kBulb);
-			int b = BrightnessPercent();
-			if (ImGuiMCP::SliderInt(T("Brightness"), &b, 10, 200, "%d%%")) {
-				SetBrightnessPercent(b);
-			}
-			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"How bright this mod's lights are, and only this mod's. 100% is the measured brightness; about 30% "
-				"is what the old Reduced download was. How far they carry does not change - that is the slider below."));
-
-			int r = ReachPercent();
-			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
-				SetReachPercent(r);
-			}
-			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"How far this mod's lights carry. 100% is the measured reach. How bright they are does not change - "
-				"that is the slider above."));
-
-			// Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister
-			// mods"); RE::Light lights the objects, these are what it has no setting for
-			const char* const kDaylight[] = { T("Off"), T("A little"), T("More") };
-			int               day = DimInDaylight();
-			if (ImGuiMCP::Combo(T("Dim in daylight"), &day, kDaylight, 3)) {
-				SetDimInDaylight(day);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"This mod's lights are dimmer outdoors by day and in brightly lit rooms, where a bright light looks out of place, and at "
-				"full strength at night and in the dark. Follows the time of day as it passes."));
-
-			GlowHeading("While Sneaking", Icon::kBulb);
-			const char* const kSneaking[] = { T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
-			int               sneak = SneakOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("Sneaking"), &sneak, kSneaking, 2)) {
-				SetSneakOn(sneak == 0);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"When you crouch, your spell lights fade down over half a second - hand lights, projectiles, runes, explosions, "
-				"hazards, your weapon lights and the glow on your body - and fade back up when you stand."));
-			if (SneakOn()) {
-				int dim = SneakBrightness();
-				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
-					SetSneakBrightness(dim);
-				}
-				if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-					SaveSettings();
-				}
-				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
-			}
-			const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
-			int               runes = RunesFadeOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
-				SetRunesFadeOn(runes == 0);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
-			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
-			int               hidden = InvisibleFadeOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
-				SetInvisibleFadeOn(hidden == 0);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
-
 			// the old installer's Dynamic Lighting question, in Illuminated's place for it (its Flicker group)
 			GlowHeading("Flicker", Icon::kBulb);
 			const char* const kDynamic[] = { T("Off"), T("Regular"), T("Realistic") };
@@ -607,7 +520,49 @@ namespace Plugin
 			}
 			MenuStyle::Tip(T(
 				"Every weapon light: enchanted weapons, bound weapons, artifacts and staves. Off puts them all out at "
-				"once; the switches on the Spell & Enchantment Art page choose among them."));
+				"once; the switches on the Configs page choose among them."));
+
+			GlowHeading("Light Strength", Icon::kBulb);
+			int b = BrightnessPercent();
+			if (ImGuiMCP::SliderInt(T("Brightness"), &b, 10, 200, "%d%%")) {
+				SetBrightnessPercent(b);
+			}
+			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"How bright this mod's lights are, and only this mod's. 100% is the measured brightness; about 30% "
+				"is what the old Reduced download was. How far they carry does not change - that is the Reach slider."));
+
+			// Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister
+			// mods"); RE::Light lights the objects, these are what it has no setting for
+			const char* const kDaylight[] = { T("Off"), T("A little"), T("More") };
+			int               day = DimInDaylight();
+			if (ImGuiMCP::Combo(T("Dim in daylight"), &day, kDaylight, 3)) {
+				SetDimInDaylight(day);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"This mod's lights are dimmer outdoors by day and in brightly lit rooms, where a bright light looks out of place, and at "
+				"full strength at night and in the dark. Follows the time of day as it passes."));
+
+			int r = ReachPercent();
+			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
+				SetReachPercent(r);
+			}
+			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"How far this mod's lights carry. 100% is the measured reach. How bright they are does not change - "
+				"that is the Brightness slider."));
+
+			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
+			if (const auto* cs = CSLightLoaded()) {
+				GlowHeading("Other Light Mods", Icon::kBulb);
+				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
+				MenuStyle::Tip(T("RELight - Spell Lighting NG does not need CS Light. Keeping it for its world lights? Untick its Magic FX, Mysticsm, Bound Weapons, Praedy Staves, Spiders, Misc Effects and Dwarven Spiders options, or those lights glow twice."));
+			}
 
 			// Illuminated's "Sprays Bolts and Wards" heading: RELight's sprays and bolts are RE::Light's, its wards' color is ours
 			GlowHeading("Sprays, Bolts and Wards", Icon::kShield);
@@ -634,19 +589,71 @@ namespace Plugin
 					"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
 			}
 
-			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
-			if (const auto* cs = CSLightLoaded()) {
-				GlowHeading("Other Light Mods", Icon::kBulb);
-				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
-				MenuStyle::Tip(T("RELight - Spell Lighting NG does not need CS Light. Keeping it for its world lights? Untick its Magic FX, Mysticsm, Bound Weapons, Praedy Staves, Spiders, Misc Effects and Dwarven Spiders options, or those lights glow twice."));
+			GlowHeading("While Sneaking", Icon::kBulb);
+			const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
+			int               runes = RunesFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
+				SetRunesFadeOn(runes == 0);
+				SaveSettings();
 			}
+			MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
+			const char* const kSneaking[] = { T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
+			int               sneak = SneakOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("Sneaking"), &sneak, kSneaking, 2)) {
+				SetSneakOn(sneak == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"When you crouch, your spell lights fade down over half a second - hand lights, projectiles, runes, explosions, "
+				"hazards, your weapon lights and the glow on your body - and fade back up when you stand."));
+			if (SneakOn()) {
+				int dim = SneakBrightness();
+				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
+					SetSneakBrightness(dim);
+				}
+				if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
+					SaveSettings();
+				}
+				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
+			}
+			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
+			int               hidden = InvisibleFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
+				SetInvisibleFadeOn(hidden == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
 		}
 
-		// 🔁 HIS ORDER 2026-10-20: "spells without a patch moved to lights by item/spell" - above the fading module's item list
+		void DrawArtPicks()
+		{
+			GlowHeading("Fire");
+			DrawArtPick(0, T("Fire Art"), { T("Vanilla fire"), T("Inferno"), T("Embers XD"), T("Kittytail Flame") },
+				{ T("Skyrim's orange. Applies the next time the game starts."),
+					T("A hotter, more yellow fire light.\nInstall first: Inferno - Fire Effects Redux.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
+					T("A deeper amber fire light.\nInstall first: Embers XD.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
+					T("A deeper, redder fire light.\nInstall first: Kittytail's Flame VFX Edit.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+			GlowHeading("Frost");
+			DrawArtPick(1, T("Frost Art"), { T("Vanilla / Arctic"), T("Kittytail") },
+				{ T("Skyrim's pale blue. Applies the next time the game starts."),
+					T("A deeper, more saturated blue.\nInstall first: Kittytail's Frost VFX Edit.\nWrong pick and frost lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+			GlowHeading("Healing");
+			DrawArtPick(3, T("Healing Art"), { T("Vanilla healing"), T("Kittytail healing") },
+				{ T("Healing hands keep the light Skyrim gives them. Applies the next time the game starts."),
+					T("The cooler blue healing light from Kittytail's pack.\nInstall first: Kittytail's healing VFX edit. Applies the next time the game starts.") });
+			GlowHeading("Shock");
+			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage") },
+				{ T("Skyrim's own blue-violet. Applies the next time the game starts."),
+					T("A deeper, more saturated blue.\nInstall first: Kittytail's Lightning VFX Edit.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts."),
+					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+		}
+
+		// Spells Without a Patch and the art picks above the fading module's item list
 		void __stdcall RenderItems()
 		{
 			{
 				const GlowStyle style;
+				DrawArtPicks();
 				GlowHeading("Spells Without a Patch", Icon::kBulb);
 				bool autoOn = AutoLightsOn();
 				if (ImGuiMCP::Checkbox(T("Light spells this mod has no patch for"), &autoOn)) {
@@ -660,7 +667,7 @@ namespace Plugin
 				ImGuiMCP::SameLine();
 				ImGuiMCP::TextDisabled(T("%zu lit"), AutoHandEffects());
 			}
-			Fade::Items::RenderSpells();
+			Fade::Items::Render();
 		}
 
 		// 🔁 HIS ORDER 2026-10-20: "I want a quality/performance setting for relight and illuminated. quality has all features turned
@@ -709,7 +716,13 @@ namespace Plugin
 		void __stdcall RenderConfigs()
 		{
 			const GlowStyle style;
-			DrawSwitches(Page::kConfigs);
+			if (!WeaponLightsOn()) {
+				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so weapon lights here are out."));
+			}
+			// one row per id across both draws
+			std::unordered_set<std::string> seen;
+			DrawSwitches(Page::kEnchantments, seen);
+			DrawSwitches(Page::kConfigs, seen);
 			// a frozen body stays frozen: whether its glow fades out is the player's pick
 			if (gFecLoaded) {
 				GlowHeading("Frozen Electrocuted Combustion");
@@ -730,36 +743,8 @@ namespace Plugin
 			if (!WeaponLightsOn()) {
 				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so every light here is out."));
 			}
-			DrawSwitches(Page::kPraedys);
-		}
-
-		// Illuminated's Spell & Enchantment Art page: the weapon enchantment mods first, then the art mod you run for each element
-		void __stdcall RenderArt()
-		{
-			const GlowStyle style;
-			if (!WeaponLightsOn()) {
-				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so every light here is out."));
-			}
-			DrawSwitches(Page::kArt);
-			GlowHeading("Shock");
-			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage") },
-				{ T("Skyrim's own blue-violet. Applies the next time the game starts."),
-					T("A deeper, more saturated blue.\nInstall first: Kittytail's Lightning VFX Edit.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
-			GlowHeading("Fire");
-			DrawArtPick(0, T("Fire Art"), { T("Vanilla fire"), T("Inferno"), T("Embers XD"), T("Kittytail Flame") },
-				{ T("Skyrim's orange. Applies the next time the game starts."),
-					T("A hotter, more yellow fire light.\nInstall first: Inferno - Fire Effects Redux.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A deeper amber fire light.\nInstall first: Embers XD.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A deeper, redder fire light.\nInstall first: Kittytail's Flame VFX Edit.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
-			GlowHeading("Frost");
-			DrawArtPick(1, T("Frost Art"), { T("Vanilla / Arctic"), T("Kittytail") },
-				{ T("Skyrim's pale blue. Applies the next time the game starts."),
-					T("A deeper, more saturated blue.\nInstall first: Kittytail's Frost VFX Edit.\nWrong pick and frost lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
-			GlowHeading("Healing");
-			DrawArtPick(3, T("Healing Art"), { T("Vanilla healing"), T("Kittytail healing") },
-				{ T("Healing hands keep the light Skyrim gives them. Applies the next time the game starts."),
-					T("The cooler blue healing light from Kittytail's pack.\nInstall first: Kittytail's healing VFX edit. Applies the next time the game starts.") });
+			std::unordered_set<std::string> seen;
+			DrawSwitches(Page::kPraedys, seen);
 		}
 
 #ifdef FADE_DEBUG_PAGE
@@ -803,9 +788,8 @@ namespace Plugin
 		MenuStyle::gTheme = MenuStyle::MakeTheme(0xFFD58A);  // warm spell-light gold
 		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
 		// Illuminated's order (Praedy's Staves right below Configs); the fading module adds HUD and Fading after these, then
-		// RegisterMenuTail adds Lights by Item and Performance
+		// RegisterMenuTail adds Choose Your Own Color and Performance
 		SKSEMenuFramework::AddSectionItem(T("Lights"), LightKit::GuardedDraw<RenderLights>);
-		SKSEMenuFramework::AddSectionItem(T("Spell & Enchantment Art"), LightKit::GuardedDraw<RenderArt>);
 		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
 		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
@@ -817,12 +801,8 @@ namespace Plugin
 			return;
 		}
 		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
-		// after the fading module's HUD and Fading: Lights by Item (FadeItems.cpp). A '/' in a name makes a submenu: it holds
-		// Spell (Spells Without a Patch above the spell list) and the weapons' page
-		static const std::string kSpellPage = std::string(T("Lights by Item")) + "/" + T("Spell");
-		static const std::string kWeaponPage = std::string(T("Lights by Item")) + "/" + T("Weapons and Staves");
-		SKSEMenuFramework::AddSectionItem(kSpellPage.c_str(), LightKit::GuardedDraw<RenderItems>);
-		SKSEMenuFramework::AddSectionItem(kWeaponPage.c_str(), LightKit::GuardedDraw<Fade::Items::RenderWeapons>);
+		// after the fading module's HUD and Fading
+		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
 		SKSEMenuFramework::AddSectionItem(T("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
 #ifdef FADE_DEBUG_PAGE
 		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
