@@ -563,7 +563,7 @@ namespace Fade::Items
 	}
 
 	// ------------------------------------------------------------------ the page
-	// his order 2026-10-30: spells, staves and weapons on one page, Choose Your Own Color
+	// spells, staves and weapons on one page, Choose Your Own Color
 	void Render()
 	{
 		using namespace ImGuiMCP;

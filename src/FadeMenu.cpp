@@ -801,9 +801,7 @@ namespace Fade
 		}
 		// under the mod's own section; the colour scheme is the plugin's (its Menu.cpp sets it first): one DLL, one theme
 		SKSEMenuFramework::SetSection(T(Mod::kName));
-		// the mod's own pages (up to Configs)
-		// are added before these, its later pages (Choose Your Own Color - Items::Render under the mod's own settings for that
-		// page -, then the rest) after them (its RegisterMenuTail)
+		// the mod's own pages up to Configs come before these; Choose Your Own Color and the rest after them (its RegisterMenuTail)
 		SKSEMenuFramework::AddSectionItem(T("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
 		SKSEMenuFramework::AddSectionItem(T("Fading"), LightKit::GuardedDraw<RenderSettings>);
 #ifdef FADE_DEBUG_PAGE
