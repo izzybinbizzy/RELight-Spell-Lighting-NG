@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include "ArtAuto.h"
 #include "LightKit.h"
 
 namespace Plugin
@@ -231,24 +230,18 @@ namespace Plugin
 	void               SetAutoLightsOn(bool a_on);
 	[[nodiscard]] bool AllLightsOff();  // Performance: every light of this mod off - the options' lights, hand, held and ground lights
 	void               SetAllLightsOff(bool a_off);
-	[[nodiscard]] int  ArtPick(int a_group);        // the art IN USE of a DataText::kPickGroups group (found or chosen); 0 = the game's own
-	[[nodiscard]] int  ManualArtPick(int a_group);  // the menu's pick: saved, the backup of "Find my art pack"
+	[[nodiscard]] int  ArtPick(int a_group);  // the art pick of a DataText::kPickGroups group; 0 = the game's own
 	void               SetArtPick(int a_group, int a_v);
 	// the Auto art picks (his checklist 298, "auto, manual backup"): each pick's switch and the pack the game's own files are
-	[[nodiscard]] bool                          ArtAutoOn(int a_group);
-	void                                        SetArtAuto(int a_group, bool a_on);
-	[[nodiscard]] int                           ArtFound(int a_group);  // -1: not recognised
-	void                                        NoteArtPacks();         // once at data load, before the data (main.cpp)
-	[[nodiscard]] std::array<ArtAuto::Found, 4> FindArtPacks();         // ArtPacks.cpp
-	void                                        SetDynamicLighting(bool a_on);
-	[[nodiscard]] bool                          DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
-	[[nodiscard]] bool                          DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
-	void                                        FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
-	[[nodiscard]] bool                          PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
-	void                                        SetPulseShapes(bool a_on);
-	[[nodiscard]] bool                          PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
-	[[nodiscard]] bool                          PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
-	void                                        SetPerformanceMode(bool a_on);
+	void               SetDynamicLighting(bool a_on);
+	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
+	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
+	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
+	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
+	void               SetPulseShapes(bool a_on);
+	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
+	[[nodiscard]] bool PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
+	void               SetPerformanceMode(bool a_on);
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);

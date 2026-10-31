@@ -173,10 +173,11 @@ namespace Plugin
 			RE::NiColor base;
 			const char* name{ nullptr };
 			bool        tinted{ false };  // our ward light takes its color; the Blue pick keeps the vanilla blue-white
+			const char* hand{ nullptr };  // our hand art in its color: the game's keeps blue particles no gradient reaches
 		};
 		constexpr std::array kStrangePicks{ StrangePick{ { 0.098f, 0.592f, 0.902f }, "the Blue pick", false },
-			StrangePick{ { 0.886f, 0.345f, 0.133f }, "the Amber pick", true },
-			StrangePick{ { 0.935f, 0.869f, 0.843f }, "the Sswaye Special pick", true } };
+			StrangePick{ { 0.886f, 0.345f, 0.133f }, "the Amber pick", true, "Magic\\Glow Wards\\Strange Amber\\wardinhandfx.nif" },
+			StrangePick{ { 0.935f, 0.869f, 0.843f }, "the Sswaye Special pick", true, "Magic\\Glow Wards\\Strange Sswaye\\wardinhandfx.nif" } };
 
 		struct StrangeWards
 		{
@@ -273,8 +274,10 @@ namespace Plugin
 				// textures, so no other mod's loose textures reach it
 				Point(dome, look.dome);
 			}
-			Point(hand, has360 ? look.sphereHand : StrangeWardsLook().installed ? nullptr :
-																				  look.hand);
+			const auto* strangePick = StrangeWardsLook().pick;
+			Point(hand, has360 ? look.sphereHand : !StrangeWardsLook().installed ? look.hand :
+											   strangePick                       ? strangePick->hand :
+																				   nullptr);
 			// the worn wards: their own hand always (its graph has the same fault on 360), their own dome unless 360 Ward's
 			// sphere - already on BeginLoopEnd - is the dome
 			if (!gWornDome) {

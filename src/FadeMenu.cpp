@@ -719,7 +719,7 @@ namespace Fade
 				return;
 			}
 			std::array<bool, 2> here{ false, false };
-			if (hud.gems && hud.drawn && !HideHud()) {
+			if (hud.gems && hud.drawn && !hud.hudHidden && !HideHud()) {
 				for (std::size_t i = 0; i < 2; ++i) {
 					const auto& h = hud.hands[i];
 					if (!h.shown || h.spell || (h.fraction >= 0.995f && !hud.gemFull)) {
