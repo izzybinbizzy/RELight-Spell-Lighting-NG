@@ -607,7 +607,7 @@ namespace Fade::Items
 		const RE::FormID      hands[2]{ gInHands[0].load(std::memory_order_relaxed), gInHands[1].load(std::memory_order_relaxed) };
 		std::string           group;
 		std::size_t           shown = 0;
-		constexpr std::size_t kMaxShown = 120;  // a search narrows it; the whole load order is thousands
+		constexpr std::size_t kMaxShown = 240;  // a search narrows it; the whole load order is thousands
 		for (const auto& item : gCatalog) {
 			const bool inHands = item.id && (item.id == hands[0] || item.id == hands[1]);
 			const bool changed = choices.contains(item.id);

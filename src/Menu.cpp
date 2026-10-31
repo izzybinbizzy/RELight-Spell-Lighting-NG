@@ -5,8 +5,8 @@
 // Pages in SKSE Menu Framework's Mod Control Panel, under their own section so nothing of RE::Light's own menu is touched, laid out
 // as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, daylight, sneaking, Flicker, hand and weapon lights,
 // the ward color), Configs (the weapon enchantment mods, the spells' own switches, Creation Club, then the other mods' groups) and
-// Praedy's Staves. The fading module adds HUD and Fading after them, then this file Choose Your Own Color (automatic lights, the
-// four art picks, the item list) and Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
+// Praedy's Staves. The fading module adds HUD and Fading after them, then this file Choose Your Own Color (the four art picks,
+// automatic lights, the item list) and Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
 // already lit. The look is the shared MenuStyle.h in warm spell-light gold, with this mod's glowing headings.
 
 #define WIN32_LEAN_AND_MEAN  // NOMINMAX is set for every file in xmake.lua (the fading module needs it too)

@@ -232,7 +232,6 @@ namespace Plugin
 	void               SetAllLightsOff(bool a_off);
 	[[nodiscard]] int  ArtPick(int a_group);  // the art pick of a DataText::kPickGroups group; 0 = the game's own
 	void               SetArtPick(int a_group, int a_v);
-	// the Auto art picks (his checklist 298, "auto, manual backup"): each pick's switch and the pack the game's own files are
 	void               SetDynamicLighting(bool a_on);
 	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
 	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
@@ -349,7 +348,7 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ Menu.cpp
 	void RegisterMenu();
-	void RegisterMenuTail();  // after the fading module's pages: the testing DLL's Diagnostics page last (nothing in the main DLL)
+	void RegisterMenuTail();  // after the fading module's pages: Choose Your Own Color and Performance (the testing DLL's Diagnostics last)
 
 	// ------------------------------------------------------------------ DevBench.cpp: the settings and what was made, for a test bench
 	void OfferToDevBench();  // SKSE's post-load: inspect kind=relight and relight.control, when DevBench is loaded (optional)
