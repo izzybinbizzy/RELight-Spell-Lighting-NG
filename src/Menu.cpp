@@ -202,7 +202,7 @@ namespace Plugin
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
-		void DrawSwitches(Page a_page)
+		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen)
 		{
 			auto& opts = Options();
 			struct Row
@@ -211,11 +211,10 @@ namespace Plugin
 				std::size_t index;
 				std::string key;  // A-Z without regard to case
 			};
-			std::vector<Row>                rows;
-			std::unordered_set<std::string> seen;
+			std::vector<Row> rows;
 			for (const auto i : OptionsInMenuOrder()) {
 				const auto& o = opts[i];
-				if (!o.switchable || PageOf(o) != a_page || !seen.insert(o.id).second) {
+				if (!o.switchable || PageOf(o) != a_page || !a_seen.insert(o.id).second) {
 					continue;
 				}
 				Heading heading = a_page == Page::kConfigs ? ConfigsHeading(o) : Heading{ 0, T("Weapon Enchantments") };
@@ -563,67 +562,67 @@ namespace Plugin
 				GlowHeading("Other Light Mods", Icon::kBulb);
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
 				MenuStyle::Tip(T("RELight - Spell Lighting NG does not need CS Light. Keeping it for its world lights? Untick its Magic FX, Mysticsm, Bound Weapons, Praedy Staves, Spiders, Misc Effects and Dwarven Spiders options, or those lights glow twice."));
+			}
 
-				// Illuminated's "Sprays Bolts and Wards" heading: RELight's sprays and bolts are RE::Light's, its wards' color is ours
-				GlowHeading("Sprays, Bolts and Wards", Icon::kShield);
-				if (WardsSteppedDown()) {
-					ImGuiMCP::TextDisabled("%s", T("Dynamic Wards is installed - it colors the wards, so this setting stands aside."));
-				} else {
-					const char* const kColors[] = { T("Vanilla blue"), T("White") };
-					int               c = WardColor();
-					if (ImGuiMCP::Combo(T("Ward color"), &c, kColors, 2)) {
-						SetWardColor(c);
-						SaveSettings();
-						// the art forms and lights are changed on the game's main thread; the next cast shows it
-						if (auto* tasks = SKSE::GetTaskInterface()) {
-							tasks->AddTask([]() {
-								LightKit::Guarded("menu ward color", []() {
-									ApplyWards("the menu");
-									RefindHandLights();
-								});
+			// Illuminated's "Sprays Bolts and Wards" heading: RELight's sprays and bolts are RE::Light's, its wards' color is ours
+			GlowHeading("Sprays, Bolts and Wards", Icon::kShield);
+			if (WardsSteppedDown()) {
+				ImGuiMCP::TextDisabled("%s", T("Dynamic Wards is installed - it colors the wards, so this setting stands aside."));
+			} else {
+				const char* const kColors[] = { T("Vanilla blue"), T("White") };
+				int               c = WardColor();
+				if (ImGuiMCP::Combo(T("Ward color"), &c, kColors, 2)) {
+					SetWardColor(c);
+					SaveSettings();
+					// the art forms and lights are changed on the game's main thread; the next cast shows it
+					if (auto* tasks = SKSE::GetTaskInterface()) {
+						tasks->AddTask([]() {
+							LightKit::Guarded("menu ward color", []() {
+								ApplyWards("the menu");
+								RefindHandLights();
 							});
-						}
+						});
 					}
-					MenuStyle::Tip(T(
-						"The ward's dome, the 360 Ward sphere and its flash, the art on your hand and the hand light, in one color. "
-						"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
-				}
-
-				GlowHeading("While Sneaking", Icon::kBulb);
-				const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
-				int               runes = RunesFadeOn() ? 0 : 1;
-				if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
-					SetRunesFadeOn(runes == 0);
-					SaveSettings();
-				}
-				MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
-				const char* const kSneaking[] = { T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
-				int               sneak = SneakOn() ? 0 : 1;
-				if (ImGuiMCP::Combo(T("Sneaking"), &sneak, kSneaking, 2)) {
-					SetSneakOn(sneak == 0);
-					SaveSettings();
 				}
 				MenuStyle::Tip(T(
-					"When you crouch, your spell lights fade down over half a second - hand lights, projectiles, runes, explosions, "
-					"hazards, your weapon lights and the glow on your body - and fade back up when you stand."));
-				if (SneakOn()) {
-					int dim = SneakBrightness();
-					if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
-						SetSneakBrightness(dim);
-					}
-					if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-						SaveSettings();
-					}
-					MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
+					"The ward's dome, the 360 Ward sphere and its flash, the art on your hand and the hand light, in one color. "
+					"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
+			}
+
+			GlowHeading("While Sneaking", Icon::kBulb);
+			const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
+			int               runes = RunesFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
+				SetRunesFadeOn(runes == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
+			const char* const kSneaking[] = { T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
+			int               sneak = SneakOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("Sneaking"), &sneak, kSneaking, 2)) {
+				SetSneakOn(sneak == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"When you crouch, your spell lights fade down over half a second - hand lights, projectiles, runes, explosions, "
+				"hazards, your weapon lights and the glow on your body - and fade back up when you stand."));
+			if (SneakOn()) {
+				int dim = SneakBrightness();
+				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
+					SetSneakBrightness(dim);
 				}
-				const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
-				int               hidden = InvisibleFadeOn() ? 0 : 1;
-				if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
-					SetInvisibleFadeOn(hidden == 0);
+				if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
 					SaveSettings();
 				}
-				MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
+				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
 			}
+			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
+			int               hidden = InvisibleFadeOn() ? 0 : 1;
+			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
+				SetInvisibleFadeOn(hidden == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
 		}
 
 		void DrawArtPicks()
@@ -718,10 +717,12 @@ namespace Plugin
 		{
 			const GlowStyle style;
 			if (!WeaponLightsOn()) {
-				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so every light here is out."));
+				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so weapon lights here are out."));
 			}
-			DrawSwitches(Page::kEnchantments);
-			DrawSwitches(Page::kConfigs);
+			// one row per id across both draws
+			std::unordered_set<std::string> seen;
+			DrawSwitches(Page::kEnchantments, seen);
+			DrawSwitches(Page::kConfigs, seen);
 			// a frozen body stays frozen: whether its glow fades out is the player's pick
 			if (gFecLoaded) {
 				GlowHeading("Frozen Electrocuted Combustion");
@@ -742,7 +743,8 @@ namespace Plugin
 			if (!WeaponLightsOn()) {
 				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so every light here is out."));
 			}
-			DrawSwitches(Page::kPraedys);
+			std::unordered_set<std::string> seen;
+			DrawSwitches(Page::kPraedys, seen);
 		}
 
 #ifdef FADE_DEBUG_PAGE
