@@ -255,6 +255,9 @@ namespace Plugin
 					}
 					continue;  // no casting light in this hand, or the hands are down: a twin it had is dropped with the unseen ones
 				}
+				if (KeptOutByBudget(source)) {
+					continue;  // a far caster's light kept out: no twin (one it had is dropped with the unseen ones, its light left out)
+				}
 				auto* magic = MagicNodeAbove(source);
 				// last frame's node while the hand's node is the same and it still hangs in the body: the search walks the skeleton
 				auto* anchor = it != gTwins.end() && it->second.magic.get() == magic && InBody(a_actor, it->second.anchor.get()) ?

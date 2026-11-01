@@ -585,8 +585,10 @@ namespace Plugin
 			GlowHeading("Flicker", Icon::kBulb);
 			const std::vector<const char*> kDynamic{ T("Off"), T("Regular"), T("Cinematic") };
 			const std::vector<const char*> kDynamicTips{ T("Steady lights, no pulse or flicker. Applies the next time the game starts."),
-				T("Every light breathes the same gentle way."),
-				T("Each kind of spell moves its own way: fire flickers, absorb spells beat like a heart, healing breathes slowly.") };
+				T("Lights pulse as they always have: fire crackles, absorb spells beat, the rest breathe gently. Coming from Off, it "
+				  "applies the next time the game starts."),
+				T("Each kind of spell gets a shape of its own: fire flickers in uneven bursts, shock snaps, healing breathes slowly, and "
+				  "the rows along sprays and bolts follow it. Coming from Off, it applies the next time the game starts.") };
 			int                            dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
 			                                                                                  1;
 			if (ChoiceCombo(T("Dynamic Lighting"), dynamic, kDynamic, kDynamicTips)) {
@@ -766,7 +768,7 @@ namespace Plugin
 				"lights, and sprays and bolts keep only their own light (no row along them). For big fights and slower PCs."));
 			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
 			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, you and your followers only)."),
-				T("Casters farther than about forty paces from you carry none."), T("Only you and your followers carry one."),
+				T("Casters carry one only while they are within about forty paces of you."), T("Only you and your followers carry one."),
 				T("Only your own hands carry one.") };
 			int                            who = HandLightsFor();
 			if (ChoiceCombo(T("Hand lights for"), who, kWho, kWhoTips)) {
@@ -774,8 +776,9 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby leaves "
-				"out casters farther than about forty paces from you. Reaches the next spell they ready."));
+				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby lights "
+				"only casters within about forty paces of you, as they come and go. Lights lit under Everyone nearby follow a change at "
+				"once; the others reach the next spell a caster readies."));
 			bool limit = GlowLimitOn();
 			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
 				SetGlowLimitOn(limit);
@@ -786,7 +789,12 @@ namespace Plugin
 				"past it a new one waits until another goes out. Yours always light."));
 			ImGuiMCP::BeginDisabled(!limit);
 			int count = GlowLimitCount();
-			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, T("%d lights"))) {
+			// the word translated, the number not: a % in a translation is doubled so it can never become a format of its own
+			std::string format = "%d ";
+			for (const char* c = T("lights"); *c; ++c) {
+				format += *c == '%' ? std::string("%%") : std::string(1, *c);
+			}
+			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, format.c_str())) {
 				SetGlowLimitCount(count);
 			}
 			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {

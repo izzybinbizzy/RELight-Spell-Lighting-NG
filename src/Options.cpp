@@ -388,7 +388,7 @@ namespace Plugin
 			}
 			if (Off(a_option)) {
 				HoldOut(light.get(), a_option, false);
-			} else {
+			} else if (!KeptOutByBudget(light.get())) {
 				light->SetAppCulled(false);  // the switch went back on before the main thread came round
 			}
 		}

@@ -29,11 +29,30 @@
 
 #include <Windows.h>  // VirtualQuery, GetModuleHandleExW: whose code a VR call site's call leads into
 
+#include <optional>
+
 namespace
 {
 	// every spell light the game made through the hooked call sites, so sneaking can find it again. Main thread only. Plain
 	// pointers: Keep.cpp holds each light, and ForgetSpellLights drops it here before it is freed
 	std::unordered_set<RE::NiLight*> gMagicLights;
+
+	// "Hand lights for - Everyone nearby": every other caster's casting light, its caster, and whether it is kept out now - out
+	// while the caster is far, back when near, out again when far (Illuminated's ApplyHandBudget). Main thread only; plain
+	// pointers, dropped by ForgetSpellLights
+	struct BudgetLight
+	{
+		RE::FormID caster{ 0 };
+		bool       out{ false };
+	};
+	std::unordered_map<RE::NiLight*, BudgetLight> gBudgetLights;
+	constexpr int                                 kEveryoneNearby = 1;  // the Hand lights for choice (Menu.cpp kWho)
+	// a far caster's light made on any thread, kept out until its task writes gBudgetLights (a twin must not light it before)
+	std::mutex                       gBudgetPendingLock;
+	std::unordered_set<RE::NiLight*> gBudgetPending;
+
+	// main thread: the caster now, by the id it had when its light was made (the light goes when its caster's 3D does)
+	[[nodiscard]] const RE::Actor* CasterOf(const BudgetLight& a_b) { return RE::TESForm::LookupByID<RE::Actor>(a_b.caster); }
 
 	// The sneak fade: while she sneaks with "Lights fade while sneaking", every light the sneaking pass finds fades to
 	// "Sneaking brightness" over half a second, and back up when she stands. 1 = not dimmed. Written by the player update,
@@ -434,12 +453,50 @@ namespace
 		// just before she crouched is dimmed by the next player update's sneaking pass, which reads gMagicLights
 	}
 
-	// "Hand lights for" (Illuminated's light budget for big fights, ported): a caster the setting leaves out gets
-	// no casting light at all - this is the call that would make it, ours or RE::Light's, so nothing is made and put out
+	// "Hand lights for" (Illuminated's light budget for big fights, ported): this is the call that makes a casting light, ours
+	// or RE::Light's - a caster the setting leaves out gets none, except under "Everyone nearby" (made, kept out until near)
 	[[nodiscard]] bool LeftOutCaster(const RE::TESObjectREFR* a_ref)
 	{
 		const auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr;
 		return actor && Plugin::LeftOutByBudget(actor);  // the one budget rule, for held lights too (Held.cpp)
+	}
+
+	// "Everyone nearby" only: every other caster's light is made and followed, kept out while the caster is far
+	[[nodiscard]] bool NearbyBudget() { return !Plugin::PerformanceMode() && Plugin::HandLightsFor() == kEveryoneNearby; }
+
+	// main thread, before the switches: each caster asked once a frame; a light whose caster came near is lit again here (a
+	// switched-off one goes out again in UpdateOptionLights), one whose caster is far goes out
+	void UpdateBudgetLights()
+	{
+		static std::unordered_map<RE::FormID, std::optional<bool>> leftOut;  // main thread; its storage kept between frames
+		leftOut.clear();
+		for (auto& [light, b] : gBudgetLights) {
+			const auto [it, added] = leftOut.try_emplace(b.caster);
+			if (added) {
+				if (const auto* actor = CasterOf(b)) {
+					it->second = Plugin::LeftOutByBudget(actor);
+				}
+			}
+			if (!it->second) {
+				continue;  // its caster not found: left as it is
+			}
+			if (*it->second) {
+				light->SetAppCulled(true);
+			} else if (b.out && !Plugin::HeldOutForOption(light) && !Plugin::HandLightHeldOut(light)) {
+				light->SetAppCulled(false);
+			}
+			b.out = *it->second;
+		}
+	}
+
+	// main thread, after the switches: a light a switch gave back stays out while its caster is far
+	void HoldBudgetLightsOut()
+	{
+		for (const auto& [light, b] : gBudgetLights) {
+			if (b.out) {
+				light->SetAppCulled(true);
+			}
+		}
 	}
 
 	void AdoptSneakCulled(const Plugin::LightList& a_lights);
@@ -451,9 +508,12 @@ namespace
 	RE::NiPointLight* MakeMagicLight(const REL::Relocation<MagicLightFn>& a_next, RE::TESObjectLIGH* a_light, RE::TESObjectREFR* a_ref,
 		RE::NiNode* a_node, bool a_forceDynamic, bool a_useLightRadius, bool a_affectRequesterOnly)
 	{
-		if (LeftOutCaster(a_ref)) {
+		const bool distant = LeftOutCaster(a_ref);
+		const bool nearby = NearbyBudget();
+		if (distant && !nearby) {
 			return nullptr;
 		}
+		const RE::FormID budgetCaster = nearby && a_ref && a_ref->As<RE::Actor>() && !a_ref->IsPlayerRef() ? a_ref->GetFormID() : 0;
 		// our hand lights are made with the game's own function and never reach RE::Light, which would switch off
 		// a casting light it has no config for (an in-memory record can have none)
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
@@ -485,7 +545,7 @@ namespace
 			LightKit::Guarded("spell light", [&]() {
 				const bool ours = hand || Plugin::IsSprayLight(a_light) || Plugin::IsStreamObject(a_ref);
 				const bool sneaking = SneakDimsNow() && MaybeSneakDarkens(a_ref);
-				if (sneaking) {
+				if (sneaking || distant) {
 					made->SetAppCulled(true);
 				}
 				if (auto* tasks = SKSE::GetTaskInterface()) {
@@ -504,11 +564,24 @@ namespace
 						}
 					}
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind, dressed]() {
+					const bool pending = budgetCaster != 0 && distant;
+					if (pending) {
+						std::lock_guard lock(gBudgetPendingLock);
+						gBudgetPending.insert(made);
+					}
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, budgetCaster, distant, kind, dressed, pending]() {
 						LightKit::Guarded("spell light task", [&]() {
 							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
-							if (sneaking) {
+							if (budgetCaster != 0 && gMagicLights.contains(light.get())) {
+								gBudgetLights[light.get()] = { budgetCaster, distant };
+							} else if (sneaking) {
 								AdoptSneakCulled({ light });
+							}
+						});
+						LightKit::Guarded("spell light pending", [&]() {
+							if (pending) {
+								std::lock_guard lock(gBudgetPendingLock);
+								gBudgetPending.erase(light.get());
 							}
 						});
 					});
@@ -615,7 +688,9 @@ namespace
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
 				const float sneak = StepSneakLevel(a_this, a_delta);
+				UpdateBudgetLights();
 				Plugin::UpdateOptionLights();
+				HoldBudgetLightsOut();
 				Plugin::UpdateHeldLights();
 				Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
 				Plugin::UpdateRows();        // the rows of lights along bolts, sprays and cones (Rows.cpp)
@@ -795,7 +870,19 @@ bool Plugin::WantedDark(RE::NiLight* a_light)
 {
 	// the main thread's lists (GroundLights.cpp asks from the player update). Sneaking is not here: a dimmed light's twin
 	// copies its dimmed fade
-	return HeldOutForOption(a_light) || HandLightHeldOut(a_light);
+	return HeldOutForOption(a_light) || HandLightHeldOut(a_light) || KeptOutByBudget(a_light);
+}
+
+bool Plugin::KeptOutByBudget(RE::NiLight* a_light)
+{
+	// asked live: a task between two player updates must not read the last frame's flag for a caster who has moved since
+	const auto it = gBudgetLights.find(a_light);
+	if (it == gBudgetLights.end()) {
+		std::lock_guard lock(gBudgetPendingLock);
+		return gBudgetPending.contains(a_light);
+	}
+	const auto* actor = CasterOf(it->second);
+	return actor ? LeftOutByBudget(actor) : it->second.out;
 }
 
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }
@@ -809,7 +896,7 @@ bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 	if (!who || !a_actor || a_actor->IsPlayerRef()) {
 		return false;
 	}
-	if (who == 1) {
+	if (who == kEveryoneNearby) {
 		const float nearby = gNearby.load(std::memory_order_relaxed);  // "about forty paces" - [Lights] NearbyDistance
 		const auto* player = RE::PlayerCharacter::GetSingleton();
 		return !player || a_actor->GetPosition().GetSquaredDistance(player->GetPosition()) > nearby * nearby;
@@ -820,6 +907,7 @@ bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 void Plugin::ForgetSpellLights(const GoneLights& a_gone)
 {
 	std::erase_if(gMagicLights, [&](const RE::NiLight* a_l) { return a_gone.contains(a_l); });
+	std::erase_if(gBudgetLights, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	std::erase_if(gSneakKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	{
 		std::lock_guard lock(gDimLock);
