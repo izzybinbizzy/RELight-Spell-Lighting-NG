@@ -47,6 +47,9 @@ namespace
 	};
 	std::unordered_map<RE::NiLight*, BudgetLight> gBudgetLights;
 	constexpr int                                 kEveryoneNearby = 1;  // the Hand lights for choice (Menu.cpp kWho)
+	// a far caster's light made on any thread, kept out until its task writes gBudgetLights (a twin must not light it before)
+	std::mutex                       gBudgetPendingLock;
+	std::unordered_set<RE::NiLight*> gBudgetPending;
 
 	// main thread: the caster now, by the id it had when its light was made (the light goes when its caster's 3D does)
 	[[nodiscard]] const RE::Actor* CasterOf(const BudgetLight& a_b) { return RE::TESForm::LookupByID<RE::Actor>(a_b.caster); }
@@ -561,7 +564,12 @@ namespace
 						}
 					}
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, budgetCaster, distant, kind, dressed]() {
+					const bool pending = budgetCaster != 0 && distant;
+					if (pending) {
+						std::lock_guard lock(gBudgetPendingLock);
+						gBudgetPending.insert(made);
+					}
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, budgetCaster, distant, kind, dressed, pending]() {
 						LightKit::Guarded("spell light task", [&]() {
 							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
 							if (budgetCaster != 0 && gMagicLights.contains(light.get())) {
@@ -570,6 +578,10 @@ namespace
 								AdoptSneakCulled({ light });
 							}
 						});
+						if (pending) {
+							std::lock_guard lock(gBudgetPendingLock);
+							gBudgetPending.erase(light.get());
+						}
 					});
 				}
 			});
@@ -864,7 +876,8 @@ bool Plugin::KeptOutByBudget(RE::NiLight* a_light)
 	// asked live: a task between two player updates must not read the last frame's flag for a caster who has moved since
 	const auto it = gBudgetLights.find(a_light);
 	if (it == gBudgetLights.end()) {
-		return false;
+		std::lock_guard lock(gBudgetPendingLock);
+		return gBudgetPending.contains(a_light);
 	}
 	const auto* actor = CasterOf(it->second);
 	return actor ? LeftOutByBudget(actor) : it->second.out;
