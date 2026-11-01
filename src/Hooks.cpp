@@ -14,7 +14,9 @@
 // main thread only. The hooks that may run on the game's loader and job threads (the spell-light call, a 3D load) read
 // the settings (atomics) and the caster's plain state (sneaking, position, follower), touch only the light itself (put it
 // out, so it never shows a frame it should not) and hand the bookkeeping to the main thread as an SKSE task that holds the
-// light until then - so no lock is held across a frame, and none is needed.
+// light until then - so no lock is held across a frame, and none is needed. The spell-light call also reads the names up
+// the light's node chain (which hand it is); that leans on the actor's 3D not being reparented or freed while the game makes
+// a light on it.
 
 #ifndef WIN32_LEAN_AND_MEAN
 #	define WIN32_LEAN_AND_MEAN
