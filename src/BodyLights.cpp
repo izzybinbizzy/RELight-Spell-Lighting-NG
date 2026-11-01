@@ -286,6 +286,14 @@ namespace Plugin
 			return !v.seen;
 		});
 		std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
+		// a lowered cap, or the limit switched on, takes the newest glows on others off at once; they wait like any other
+		for (auto it = gLive.end(); gLive.size() > GlowLimit() && it != gLive.begin();) {
+			--it;
+			if (!it->hers) {
+				TakeOff(*it, scene);
+				it = gLive.erase(it);
+			}
+		}
 		// the sliders and the daylight reach a light already hung
 		for (auto& v : gLive) {
 			const float fade = v.body->fade * scale * (v.hers ? sneak : 1.0f) * FrozenFade(v.art.get());

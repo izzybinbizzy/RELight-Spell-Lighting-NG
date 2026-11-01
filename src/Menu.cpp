@@ -585,8 +585,10 @@ namespace Plugin
 			GlowHeading("Flicker", Icon::kBulb);
 			const std::vector<const char*> kDynamic{ T("Off"), T("Regular"), T("Cinematic") };
 			const std::vector<const char*> kDynamicTips{ T("Steady lights, no pulse or flicker. Applies the next time the game starts."),
-				T("Every light breathes the same gentle way."),
-				T("Each kind of spell moves its own way: fire flickers, absorb spells beat like a heart, healing breathes slowly.") };
+				T("Lights pulse as they always have: fire crackles, absorb spells beat, the rest breathe gently. Coming from Off, it "
+				  "applies the next time the game starts."),
+				T("Each kind of spell gets a shape of its own: fire flickers in uneven bursts, shock snaps, healing breathes slowly, and "
+				  "the rows along sprays and bolts follow it. Coming from Off, it applies the next time the game starts.") };
 			int                            dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
 			                                                                                  1;
 			if (ChoiceCombo(T("Dynamic Lighting"), dynamic, kDynamic, kDynamicTips)) {
@@ -787,7 +789,12 @@ namespace Plugin
 				"past it a new one waits until another goes out. Yours always light."));
 			ImGuiMCP::BeginDisabled(!limit);
 			int count = GlowLimitCount();
-			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, T("%d lights"))) {
+			// the word translated, the number not: a % in a translation is doubled so it can never become a format of its own
+			std::string format = "%d ";
+			for (const char* c = T("lights"); *c; ++c) {
+				format += *c == '%' ? std::string("%%") : std::string(1, *c);
+			}
+			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, format.c_str())) {
 				SetGlowLimitCount(count);
 			}
 			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
