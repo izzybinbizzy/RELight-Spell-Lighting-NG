@@ -202,6 +202,7 @@ namespace Plugin
 
 		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
 		void DrawFrozenPick();
+		void DrawWardPick();
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
@@ -278,6 +279,9 @@ namespace Plugin
 				if (a_page == Page::kConfigs && gFecLoaded && o.name == "Frozen Electrocuted Combustion") {
 					DrawFrozenPick();
 				}
+				if (a_page == Page::kConfigs && o.name == "Wards") {
+					DrawWardPick();
+				}
 				ImGuiMCP::PopID();
 			}
 		}
@@ -320,6 +324,38 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(tips[static_cast<std::size_t>(frozen)]);
+		}
+
+		// the ward color, drawn beside the Wards switch on the Configs page (Illuminated's Ward look sits there)
+		void DrawWardPick()
+		{
+			ImGuiMCP::SameLine(0.0f, 24.0f);
+			if (WardsSteppedDown()) {
+				ImGuiMCP::TextDisabled("%s", T("Dynamic Wards colors the wards"));
+				MenuStyle::Tip(T("Dynamic Wards is installed - it colors the wards, so the ward color stands aside."));
+				return;
+			}
+			ImGuiMCP::SetNextItemWidth(220.0f);
+			const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
+			const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),
+				T("The ward, its art and your hand light in white.") };
+			int                            c = WardColor();
+			if (ChoiceCombo(T("Ward color"), c, kColors, kColorTips)) {
+				SetWardColor(c);
+				SaveSettings();
+				// the art forms and lights are changed on the game's main thread; the next cast shows it
+				if (auto* tasks = SKSE::GetTaskInterface()) {
+					tasks->AddTask([]() {
+						LightKit::Guarded("menu ward color", []() {
+							ApplyWards("the menu");
+							RefindHandLights();
+						});
+					});
+				}
+			}
+			MenuStyle::Tip(T(
+				"The ward's dome, the 360 Ward sphere and its flash, the art on your hand and the hand light, in one color. "
+				"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
 		}
 
 		// one of the four art picks (Illuminated's Shock, Fire, Frost and Healing groups): the pick, and what the chosen one does. The
@@ -611,33 +647,6 @@ namespace Plugin
 				GlowHeading("Other Light Mods", Icon::kBulb);
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
 				MenuStyle::Tip(T("RELight - Spell Lighting NG does not need CS Light. Keeping it for its world lights? Untick its Magic FX, Mysticsm, Bound Weapons, Praedy Staves, Spiders, Misc Effects and Dwarven Spiders options, or those lights glow twice."));
-			}
-
-			// Illuminated's "Sprays Bolts and Wards" heading: RELight's sprays and bolts are RE::Light's, its wards' color is ours
-			GlowHeading("Sprays, Bolts and Wards", Icon::kShield);
-			if (WardsSteppedDown()) {
-				ImGuiMCP::TextDisabled("%s", T("Dynamic Wards is installed - it colors the wards, so this setting stands aside."));
-			} else {
-				const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
-				const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),
-					T("The ward, its art and your hand light in white.") };
-				int                            c = WardColor();
-				if (ChoiceCombo(T("Ward color"), c, kColors, kColorTips)) {
-					SetWardColor(c);
-					SaveSettings();
-					// the art forms and lights are changed on the game's main thread; the next cast shows it
-					if (auto* tasks = SKSE::GetTaskInterface()) {
-						tasks->AddTask([]() {
-							LightKit::Guarded("menu ward color", []() {
-								ApplyWards("the menu");
-								RefindHandLights();
-							});
-						});
-					}
-				}
-				MenuStyle::Tip(T(
-					"The ward's dome, the 360 Ward sphere and its flash, the art on your hand and the hand light, in one color. "
-					"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
 			}
 
 			GlowHeading("While Sneaking", Icon::kBulb);
