@@ -405,7 +405,9 @@ namespace Plugin
 				                                                                                         nullptr;
 				if (h) {
 					if (live.heldOut) {
-						live.light->SetAppCulled(false);
+						if (!KeptOutByBudget(live.light)) {
+							live.light->SetAppCulled(false);  // a far caster's stays out (Hooks.cpp)
+						}
 						live.heldOut = false;
 					}
 					const auto dressed = DressHandLight(live.light, *h);

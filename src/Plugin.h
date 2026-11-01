@@ -134,6 +134,8 @@ namespace Plugin
 	[[nodiscard]] std::size_t GroundLightsMade();
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
+	// Hooks.cpp: a caster's light "Hand lights for - Everyone nearby" keeps out while the caster is far (main thread)
+	[[nodiscard]] bool KeptOutByBudget(RE::NiLight* a_light);
 	// Hooks.cpp: how far the sneak fade has her lights now, 1 = full, down to "Sneaking brightness" (any thread)
 	[[nodiscard]] float SneakLevel();
 	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (main thread: it resolves handles)
