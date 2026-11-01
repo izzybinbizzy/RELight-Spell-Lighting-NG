@@ -524,6 +524,12 @@ namespace
 			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
+			// his checklist 383 ("yes match relight with illuminated"): on Community Shaders the hand light sits 40 out from the palm,
+			// where Illuminated's does (every hand row: 0,-40,0) - in the palm her fingers threw long spread shadows
+			if (made && Plugin::LightingFound() == Plugin::Lighting::kShaders && a_node &&
+				std::string_view(a_node->name.c_str()).contains("MagicNode")) {
+				made->local.translate = RE::NiPoint3{ 0.0f, -40.0f, 0.0f };
+			}
 		} else if (Plugin::IsOurLight(a_light)) {
 			// 2.3: a spray's / bolt's raised copy, or a beam record's other users' plain copy (Streams.cpp) - the game's own
 			// function too, so RE::Light set to switch off game lights it has no config for never switches these off
