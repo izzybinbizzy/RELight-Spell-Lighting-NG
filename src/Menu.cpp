@@ -202,7 +202,7 @@ namespace Plugin
 
 		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
 		void DrawFrozenPick();
-		void DrawWardPick();
+		void DrawWardPick(bool a_beside);
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
@@ -245,6 +245,7 @@ namespace Plugin
 				}
 			}
 			std::string shown;
+			bool        wardShown = false;
 			for (const auto& row : rows) {
 				auto& o = opts[row.index];
 				if (row.heading.text != shown) {
@@ -280,9 +281,15 @@ namespace Plugin
 					DrawFrozenPick();
 				}
 				if (a_page == Page::kConfigs && o.name == "Wards") {
-					DrawWardPick();
+					DrawWardPick(true);
+					wardShown = true;
 				}
 				ImGuiMCP::PopID();
+			}
+			// no Wards row to sit beside: the color still applies, so it keeps a heading of its own
+			if (a_page == Page::kConfigs && !wardShown) {
+				GlowHeading("Wards");
+				DrawWardPick(false);
 			}
 		}
 
@@ -327,9 +334,11 @@ namespace Plugin
 		}
 
 		// the ward color, drawn beside the Wards switch on the Configs page (Illuminated's Ward look sits there)
-		void DrawWardPick()
+		void DrawWardPick(bool a_beside)
 		{
-			ImGuiMCP::SameLine(0.0f, 24.0f);
+			if (a_beside) {
+				ImGuiMCP::SameLine(0.0f, 24.0f);
+			}
 			if (WardsSteppedDown()) {
 				ImGuiMCP::TextDisabled("%s", T("Dynamic Wards colors the wards"));
 				MenuStyle::Tip(T("Dynamic Wards is installed - it colors the wards, so the ward color stands aside."));
@@ -745,7 +754,7 @@ namespace Plugin
 			const GlowStyle style;
 			GlowHeading("Performance", Icon::kBulb);
 			const std::vector<const char*> kQuality{ T("Quality"), T("Performance") };
-			const std::vector<const char*> kQualityTips{ T("Every light this mod has, for everyone."),
+			const std::vector<const char*> kQualityTips{ T("Every light this mod has; Hand lights for still picks whose hands carry one."),
 				T("Only you and your followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
 			int                            quality = PerformanceMode() ? 1 : 0;
 			if (ChoiceCombo(T("Quality"), quality, kQuality, kQualityTips)) {
@@ -753,10 +762,10 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"Quality: every light this mod has. Performance: only you and your followers carry hand, weapon and body "
+				"Quality: every light this mod has (Hand lights for still applies). Performance: only you and your followers carry hand, weapon and body "
 				"lights, and sprays and bolts keep only their own light (no row along them). For big fights and slower PCs."));
 			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
-			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light."),
+			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, you and your followers only)."),
 				T("Casters farther than about forty paces from you carry none."), T("Only you and your followers carry one."),
 				T("Only your own hands carry one.") };
 			int                            who = HandLightsFor();
