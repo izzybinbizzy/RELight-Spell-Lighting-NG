@@ -4,9 +4,9 @@
 //
 // Pages in SKSE Menu Framework's Mod Control Panel, under their own section so nothing of RE::Light's own menu is touched, laid out
 // as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, daylight, sneaking, Flicker, hand and weapon lights,
-// the ward color), Configs (the weapon enchantment mods, the spells' own switches, Creation Club, then the other mods' groups) and
-// Praedy's Staves. The fading module adds HUD and Fading after them, then this file Choose Your Own Color (the four art picks,
-// automatic lights, the item list) and Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
+// the ward color), Choose Your Own Color (the four art picks, automatic lights, the item list), Configs (the weapon enchantment
+// mods, the spells' own switches, Creation Club, then the other mods' groups) and Praedy's Staves. The fading module adds HUD and
+// Fading after them, then this file Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
 // already lit. The look is the shared MenuStyle.h in warm spell-light gold, with this mod's glowing headings.
 
 #define WIN32_LEAN_AND_MEAN  // NOMINMAX is set for every file in xmake.lua (the fading module needs it too)
@@ -200,6 +200,9 @@ namespace Plugin
 			return { 3, T("Other Mods") };
 		}
 
+		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
+		void DrawFrozenPick();
+
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
 		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen)
@@ -272,8 +275,51 @@ namespace Plugin
 				} else {
 					ImGuiMCP::TextDisabled(T("%zu lit"), lit);
 				}
+				if (a_page == Page::kConfigs && gFecLoaded && o.name == "Frozen Electrocuted Combustion") {
+					DrawFrozenPick();
+				}
 				ImGuiMCP::PopID();
 			}
+		}
+
+		// a dropdown whose every choice carries its own tip on its line of the open list (Illuminated's ChoiceCombo)
+		bool ChoiceCombo(const char* a_label, int& a_value, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
+		{
+			bool       changed = false;
+			const auto n = static_cast<int>(a_items.size());
+			if (ImGuiMCP::BeginCombo(a_label, a_value >= 0 && a_value < n ? a_items[a_value] : "")) {
+				for (int i = 0; i < n; ++i) {
+					const bool selected = i == a_value;
+					if (ImGuiMCP::Selectable(a_items[i], selected)) {
+						a_value = i;
+						changed = true;
+					}
+					if (i < static_cast<int>(a_tips.size()) && a_tips[i] && *a_tips[i]) {
+						MenuStyle::Tip(a_tips[i]);
+					}
+					if (selected) {
+						ImGuiMCP::SetItemDefaultFocus();
+					}
+				}
+				ImGuiMCP::EndCombo();
+			}
+			return changed;
+		}
+
+		// the FEC pick, drawn beside FEC's own switch on the Configs page (Illuminated's "follows")
+		void DrawFrozenPick()
+		{
+			ImGuiMCP::SameLine(0.0f, 24.0f);
+			ImGuiMCP::SetNextItemWidth(220.0f);
+			const std::vector<const char*> items{ T("Glow fades out"), T("Glow stays while frozen") };
+			const std::vector<const char*> tips{ T("A body frozen solid glows blue for a few seconds, then the glow fades out."),
+				T("The glow stays for as long as the body is frozen.") };
+			int                            frozen = FecFrozenFadesOut() ? 0 : 1;
+			if (ChoiceCombo(T("Frozen bodies"), frozen, items, tips)) {
+				SetFecFrozenFadesOut(frozen == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(tips[static_cast<std::size_t>(frozen)]);
 		}
 
 		// one of the four art picks (Illuminated's Shock, Fire, Frost and Healing groups): the pick, and what the chosen one does. The
@@ -281,7 +327,7 @@ namespace Plugin
 		void DrawArtPick(int a_group, const char* a_label, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
 		{
 			int pick = std::clamp(ArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
-			if (ImGuiMCP::Combo(a_label, &pick, a_items.data(), static_cast<int>(a_items.size()))) {
+			if (ChoiceCombo(a_label, pick, a_items, a_tips)) {
 				SetArtPick(a_group, pick);
 				SaveSettings();
 			}
@@ -492,15 +538,18 @@ namespace Plugin
 
 			// the old installer's Dynamic Lighting question, in Illuminated's place for it (its Flicker group)
 			GlowHeading("Flicker", Icon::kBulb);
-			const char* const kDynamic[] = { T("Off"), T("Regular"), T("Realistic") };
-			int               dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
-			                                                                     1;
-			if (ImGuiMCP::Combo(T("Dynamic Lighting"), &dynamic, kDynamic, 3)) {
+			const std::vector<const char*> kDynamic{ T("Off"), T("Regular"), T("Cinematic") };
+			const std::vector<const char*> kDynamicTips{ T("Steady lights, no pulse or flicker. Applies the next time the game starts."),
+				T("Every light breathes the same gentle way."),
+				T("Each kind of spell moves its own way: fire flickers, absorb spells beat like a heart, healing breathes slowly.") };
+			int                            dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
+			                                                                                  1;
+			if (ChoiceCombo(T("Dynamic Lighting"), dynamic, kDynamic, kDynamicTips)) {
 				SetDynamicLighting(dynamic != 0);
 				SetPulseShapes(dynamic == 2);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T("Off: static lights. Regular: lights breathe and flicker, and so do the rows of light along a spray or bolt. Realistic: the hand lights pulse in their own way per kind of spell - fire flickers, absorb spells beat like a heart, healing breathes slowly. Off and on apply the next time the game starts."));
+			MenuStyle::Tip(kDynamicTips[static_cast<std::size_t>(dynamic)]);
 
 			GlowHeading("Hands and Weapons", Icon::kBulb);
 			bool hands = HandLightsOn();
@@ -534,18 +583,6 @@ namespace Plugin
 				"How bright this mod's lights are, and only this mod's. 100% is the measured brightness; about 30% "
 				"is what the old Reduced download was. How far they carry does not change - that is the Reach slider."));
 
-			// Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister
-			// mods"); RE::Light lights the objects, these are what it has no setting for
-			const char* const kDaylight[] = { T("Off"), T("A little"), T("More") };
-			int               day = DimInDaylight();
-			if (ImGuiMCP::Combo(T("Dim in daylight"), &day, kDaylight, 3)) {
-				SetDimInDaylight(day);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"This mod's lights are dimmer outdoors by day and in brightly lit rooms, where a bright light looks out of place, and at "
-				"full strength at night and in the dark. Follows the time of day as it passes."));
-
 			int r = ReachPercent();
 			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
 				SetReachPercent(r);
@@ -556,6 +593,18 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far this mod's lights carry. 100% is the measured reach. How bright they are does not change - "
 				"that is the Brightness slider."));
+
+			// LightKit::Daylight dims at most a quarter / a half
+			const std::vector<const char*> kDaylight{ T("Off"), T("25% dimmer"), T("50% dimmer") };
+			const std::vector<const char*> kDaylightTips{ T("Lights stay at full strength day and night."),
+				T("By day and in bright rooms lights are up to a quarter dimmer; full strength at night and in the dark."),
+				T("By day and in bright rooms lights are up to half as bright; full strength at night and in the dark.") };
+			int                            day = std::clamp(DimInDaylight(), 0, 2);
+			if (ChoiceCombo(T("Dim in daylight"), day, kDaylight, kDaylightTips)) {
+				SetDimInDaylight(day);
+				SaveSettings();
+			}
+			MenuStyle::Tip(kDaylightTips[static_cast<std::size_t>(day)]);
 
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
 			if (const auto* cs = CSLightLoaded()) {
@@ -590,22 +639,26 @@ namespace Plugin
 			}
 
 			GlowHeading("While Sneaking", Icon::kBulb);
-			const char* const kRunes[] = { T("Fade while you sneak"), T("Stay lit") };
-			int               runes = RunesFadeOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("Runes"), &runes, kRunes, 2)) {
+			const std::vector<const char*> kRunes{ T("Fade while you sneak"), T("Stay lit") };
+			const std::vector<const char*> kRunesTips{ T("Your runes fade with your other lights while you sneak or are invisible."),
+				T("Your runes keep glowing while you sneak.") };
+			int                            runes = RunesFadeOn() ? 0 : 1;
+			if (ChoiceCombo(T("Runes"), runes, kRunes, kRunesTips)) {
 				SetRunesFadeOn(runes == 0);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T("Whether your runes fade with your other lights, while you sneak or are invisible. Stay lit keeps them glowing."));
-			const char* const kSneaking[] = { T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
-			int               sneak = SneakOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("Sneaking"), &sneak, kSneaking, 2)) {
+			MenuStyle::Tip(kRunesTips[static_cast<std::size_t>(runes)]);
+			const std::vector<const char*> kSneaking{ T("Lights fade while sneaking"), T("Lights stay on while sneaking") };
+			const std::vector<const char*> kSneakingTips{
+				T("Lights fade out smoothly while you sneak and come back when you stand. Sneaking brightness sets how far they fade."),
+				T("Lights stay on while you sneak.")
+			};
+			int sneak = SneakOn() ? 0 : 1;
+			if (ChoiceCombo(T("Sneaking"), sneak, kSneaking, kSneakingTips)) {
 				SetSneakOn(sneak == 0);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T(
-				"When you crouch, your spell lights fade down over half a second - hand lights, projectiles, runes, explosions, "
-				"hazards, your weapon lights and the glow on your body - and fade back up when you stand."));
+			MenuStyle::Tip(kSneakingTips[static_cast<std::size_t>(sneak)]);
 			if (SneakOn()) {
 				int dim = SneakBrightness();
 				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
@@ -616,13 +669,15 @@ namespace Plugin
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
 			}
-			const char* const kInvisible[] = { T("Lights fade out"), T("Lights stay on") };
-			int               hidden = InvisibleFadeOn() ? 0 : 1;
-			if (ImGuiMCP::Combo(T("While invisible or in shadow"), &hidden, kInvisible, 2)) {
-				SetInvisibleFadeOn(hidden == 0);
+			const std::vector<const char*> kInvisible{ T("Lights stay on"), T("Lights fade out") };
+			const std::vector<const char*> kInvisibleTips{ T("Your lights stay on while you are invisible or in shadow."),
+				T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark.") };
+			int                            hidden = InvisibleFadeOn() ? 1 : 0;
+			if (ChoiceCombo(T("While invisible or in shadow"), hidden, kInvisible, kInvisibleTips)) {
+				SetInvisibleFadeOn(hidden == 1);
 				SaveSettings();
 			}
-			MenuStyle::Tip(T("Your lights fade out while you are invisible, or while you have a sign or perk that only works in the dark."));
+			MenuStyle::Tip(kInvisibleTips[static_cast<std::size_t>(hidden)]);
 		}
 
 		void DrawArtPicks()
@@ -696,6 +751,24 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby leaves "
 				"out casters farther than about forty paces from you. Reaches the next spell they ready."));
+			bool limit = GlowLimitOn();
+			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
+				SetGlowLimitOn(limit);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(
+				"Cloaks, healing and other spells on people each carry a glow. On: at most the count below are lit at once - "
+				"past it a new one waits until another goes out. Yours always light."));
+			ImGuiMCP::BeginDisabled(!limit);
+			int count = GlowLimitCount();
+			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, T("%d lights"))) {
+				SetGlowLimitCount(count);
+			}
+			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
+				SaveSettings();
+			}
+			ImGuiMCP::EndDisabled();
+			MenuStyle::Tip(T("How many glows on people can be lit at the same time. Fewer keeps big fights smoother."));
 			// his list: "under performance add a toggle to turn off lights completely for the entire mod"
 			bool allOff = AllLightsOff();
 			if (ImGuiMCP::Checkbox(T("All RELight - Spell Lighting NG lights off"), &allOff)) {
@@ -711,8 +784,6 @@ namespace Plugin
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
 		// Club, the single-mod patches (Other Mods), then each author's mods under the author's name
-		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
-
 		void __stdcall RenderConfigs()
 		{
 			const GlowStyle style;
@@ -723,17 +794,6 @@ namespace Plugin
 			std::unordered_set<std::string> seen;
 			DrawSwitches(Page::kEnchantments, seen);
 			DrawSwitches(Page::kConfigs, seen);
-			// a frozen body stays frozen: whether its glow fades out is the player's pick
-			if (gFecLoaded) {
-				GlowHeading("Frozen Electrocuted Combustion");
-				const char* const kFrozen[] = { T("Glow fades out"), T("Glow stays while frozen") };
-				int               frozen = FecFrozenFadesOut() ? 0 : 1;
-				if (ImGuiMCP::Combo(T("Frozen bodies"), &frozen, kFrozen, 2)) {
-					SetFecFrozenFadesOut(frozen == 0);
-					SaveSettings();
-				}
-				MenuStyle::Tip(T("A body frozen solid glows blue for a few seconds, then the glow fades out. Stays keeps it lit for as long as the body is frozen."));
-			}
 		}
 
 		// Illuminated puts Praedy's Staves on a page of their own, right below Configs
@@ -787,9 +847,10 @@ namespace Plugin
 		}
 		MenuStyle::gTheme = MenuStyle::MakeTheme(0xFFD58A);  // warm spell-light gold
 		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
-		// Illuminated's order (Praedy's Staves right below Configs); the fading module adds HUD and Fading after these, then
-		// RegisterMenuTail adds Choose Your Own Color and Performance
+		// Illuminated's order (Choose Your Own Color right below Lights, Praedy's Staves right below Configs); the fading module adds
+		// HUD and Fading after these, then RegisterMenuTail adds Performance
 		SKSEMenuFramework::AddSectionItem(T("Lights"), LightKit::GuardedDraw<RenderLights>);
+		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
 		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
 		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
@@ -802,7 +863,6 @@ namespace Plugin
 		}
 		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
 		// after the fading module's HUD and Fading
-		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
 		SKSEMenuFramework::AddSectionItem(T("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
 #ifdef FADE_DEBUG_PAGE
 		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);

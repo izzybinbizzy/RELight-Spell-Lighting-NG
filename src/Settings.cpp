@@ -10,7 +10,9 @@
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
-//   FadeWhileInvisible=1        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
+//   FadeWhileInvisible=0        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
+//   GlowLimit=1                 1 = at most GlowLimitCount body glows on people lit at once (hers never wait - BodyLights.cpp)
+//   GlowLimitCount=16           4 to 64
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
@@ -28,6 +30,8 @@
 // Threads: the menu changes a setting on the render thread while the hooks read it on the main thread and on the game's
 // loader threads, so each one is an atomic (relaxed: no setting depends on another being written first). The file is written
 // beside itself and moved over it, so a crash or a full disk mid-write leaves the old settings, never half a file.
+
+#include <limits>
 
 #include "DataText.h"
 #include "Fade.h"
@@ -51,7 +55,9 @@ namespace Plugin
 		std::atomic<bool>               gSneak{ false };
 		std::atomic<int>                gSneakBrightness{ 0 };
 		std::atomic<bool>               gRunes{ true };
-		std::atomic<bool>               gInvisible{ true };
+		std::atomic<bool>               gInvisible{ false };
+		std::atomic<bool>               gGlowLimit{ true };
+		std::atomic<int>                gGlowCount{ 16 };
 		std::atomic<bool>               gFecFrozenFades{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
@@ -108,6 +114,8 @@ namespace Plugin
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
 			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
+			{ "GlowLimit", [] { return gGlowLimit ? 1 : 0; }, [](int v) { gGlowLimit = v != 0; } },
+			{ "GlowLimitCount", [] { return gGlowCount.load(); }, [](int v) { gGlowCount = std::clamp(v, 4, 64); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
@@ -390,6 +398,30 @@ namespace Plugin
 	{
 		if (gInvisible.exchange(a_on) != a_on) {
 			SKSE::log::info("lights fade while invisible or in shadow turned {}", a_on ? "on" : "off");
+		}
+	}
+
+	std::size_t GlowLimit()
+	{
+		return gGlowLimit ? static_cast<std::size_t>((std::max)(gGlowCount.load(), 1)) : (std::numeric_limits<std::size_t>::max)();
+	}
+
+	bool GlowLimitOn() { return gGlowLimit; }
+
+	int GlowLimitCount() { return gGlowCount; }
+
+	void SetGlowLimitOn(bool a_on)
+	{
+		if (gGlowLimit.exchange(a_on) != a_on) {
+			SKSE::log::info("glow lights on people limited: {}", a_on ? "on" : "off");
+		}
+	}
+
+	void SetGlowLimitCount(int a_count)
+	{
+		a_count = std::clamp(a_count, 4, 64);
+		if (gGlowCount.exchange(a_count) != a_count) {
+			SKSE::log::info("most glow lights on people set to {}", a_count);
 		}
 	}
 
