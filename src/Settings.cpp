@@ -10,7 +10,7 @@
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
-//   FadeWhileInvisible=0        1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
+//   InShadow=0                  1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
 //   GlowLimit=1                 1 = at most GlowLimitCount body glows on people lit at once (hers never wait - BodyLights.cpp)
 //   GlowLimitCount=16           4 to 64
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
@@ -113,7 +113,8 @@ namespace Plugin
 			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
-			{ "FadeWhileInvisible", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
+			// a new key: 2.9 saved "fade out" (its default) under FadeWhileInvisible into every file, which 3.0 must not carry over
+			{ "InShadow", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
 			{ "GlowLimit", [] { return gGlowLimit ? 1 : 0; }, [](int v) { gGlowLimit = v != 0; } },
 			{ "GlowLimitCount", [] { return gGlowCount.load(); }, [](int v) { gGlowCount = std::clamp(v, 4, 64); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
@@ -487,8 +488,9 @@ namespace Plugin
 						SetOptionOn(i, v != 0);
 					}
 				}
-			} else {
-				ApplySetting(key, v);
+			} else if (!ApplySetting(key, v)) {
+				// an older preset's FadeWhileInvisible is left out on purpose: 2.9 saved its old default there, not a pick
+				SKSE::log::info("a preset names the setting {}, which this version does not have - left out", key);
 			}
 		}
 	}
