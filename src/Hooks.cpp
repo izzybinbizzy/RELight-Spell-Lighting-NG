@@ -578,10 +578,12 @@ namespace
 								AdoptSneakCulled({ light });
 							}
 						});
-						if (pending) {
-							std::lock_guard lock(gBudgetPendingLock);
-							gBudgetPending.erase(light.get());
-						}
+						LightKit::Guarded("spell light pending", [&]() {
+							if (pending) {
+								std::lock_guard lock(gBudgetPendingLock);
+								gBudgetPending.erase(light.get());
+							}
+						});
 					});
 				}
 			});
