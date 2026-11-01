@@ -35,6 +35,10 @@ namespace
 	// pointers: Keep.cpp holds each light, and ForgetSpellLights drops it here before it is freed
 	std::unordered_set<RE::NiLight*> gMagicLights;
 
+	// "Hand lights for - Everyone nearby": a far caster's casting light is made but kept out until the caster comes near
+	// (Illuminated gives it back the same way). Main thread only; plain pointers, dropped by ForgetSpellLights
+	std::unordered_set<RE::NiLight*> gFarLights;
+
 	// The sneak fade: while she sneaks with "Lights fade while sneaking", every light the sneaking pass finds fades to
 	// "Sneaking brightness" over half a second, and back up when she stands. 1 = not dimmed. Written by the player update,
 	// read on any thread
@@ -434,12 +438,32 @@ namespace
 		// just before she crouched is dimmed by the next player update's sneaking pass, which reads gMagicLights
 	}
 
-	// "Hand lights for" (Illuminated's light budget for big fights, ported): a caster the setting leaves out gets
-	// no casting light at all - this is the call that would make it, ours or RE::Light's, so nothing is made and put out
+	// "Hand lights for" (Illuminated's light budget for big fights, ported): this is the call that makes a casting light, ours
+	// or RE::Light's - a caster the setting leaves out gets none, except under "Everyone nearby" (made, kept out until near)
 	[[nodiscard]] bool LeftOutCaster(const RE::TESObjectREFR* a_ref)
 	{
 		const auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr;
 		return actor && Plugin::LeftOutByBudget(actor);  // the one budget rule, for held lights too (Held.cpp)
+	}
+
+	// "Everyone nearby" only: the left-out caster's light is still made, kept out until it comes near
+	[[nodiscard]] bool NearbyBudget() { return !Plugin::PerformanceMode() && Plugin::HandLightsFor() == 1; }
+
+	// main thread: a far caster's light comes on once the caster is near (or a choice keeps it no longer), unless a switch holds it out
+	void UpdateFarLights()
+	{
+		std::erase_if(gFarLights, [](RE::NiLight* a_light) {
+			auto*       ref = Plugin::ReferenceOf(a_light);
+			const auto* actor = ref ? ref->As<RE::Actor>() : nullptr;
+			if (actor && Plugin::LeftOutByBudget(actor)) {
+				a_light->SetAppCulled(true);  // another pass may have lit it this frame
+				return false;
+			}
+			if (!Plugin::HeldOutForOption(a_light) && !Plugin::HandLightHeldOut(a_light)) {
+				a_light->SetAppCulled(false);
+			}
+			return true;
+		});
 	}
 
 	void AdoptSneakCulled(const Plugin::LightList& a_lights);
@@ -451,7 +475,8 @@ namespace
 	RE::NiPointLight* MakeMagicLight(const REL::Relocation<MagicLightFn>& a_next, RE::TESObjectLIGH* a_light, RE::TESObjectREFR* a_ref,
 		RE::NiNode* a_node, bool a_forceDynamic, bool a_useLightRadius, bool a_affectRequesterOnly)
 	{
-		if (LeftOutCaster(a_ref)) {
+		const bool distant = LeftOutCaster(a_ref);
+		if (distant && !NearbyBudget()) {
 			return nullptr;
 		}
 		// our hand lights are made with the game's own function and never reach RE::Light, which would switch off
@@ -485,7 +510,7 @@ namespace
 			LightKit::Guarded("spell light", [&]() {
 				const bool ours = hand || Plugin::IsSprayLight(a_light) || Plugin::IsStreamObject(a_ref);
 				const bool sneaking = SneakDimsNow() && MaybeSneakDarkens(a_ref);
-				if (sneaking) {
+				if (sneaking || distant) {
 					made->SetAppCulled(true);
 				}
 				if (auto* tasks = SKSE::GetTaskInterface()) {
@@ -504,10 +529,12 @@ namespace
 						}
 					}
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind, dressed]() {
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, distant, kind, dressed]() {
 						LightKit::Guarded("spell light task", [&]() {
 							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
-							if (sneaking) {
+							if (distant && gMagicLights.contains(light.get())) {
+								gFarLights.insert(light.get());
+							} else if (sneaking) {
 								AdoptSneakCulled({ light });
 							}
 						});
@@ -550,7 +577,8 @@ namespace
 	{
 		const float level = gSneakLevel.load(std::memory_order_relaxed);
 		for (const auto& light : a_lights) {
-			if (light->GetRefCount() <= 1 || Plugin::HeldOutForOption(light.get()) || Plugin::HandLightHeldOut(light.get())) {
+			if (light->GetRefCount() <= 1 || Plugin::HeldOutForOption(light.get()) || Plugin::HandLightHeldOut(light.get()) ||
+				gFarLights.contains(light.get())) {
 				continue;  // already gone from the game, or held out
 			}
 			if (!SneakDarkens(Plugin::ReferenceOf(light.get()))) {
@@ -616,6 +644,7 @@ namespace
 				Plugin::SweepKeptLights();
 				const float sneak = StepSneakLevel(a_this, a_delta);
 				Plugin::UpdateOptionLights();
+				UpdateFarLights();  // after the switches: a far caster's light stays out whatever they gave back
 				Plugin::UpdateHeldLights();
 				Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
 				Plugin::UpdateRows();        // the rows of lights along bolts, sprays and cones (Rows.cpp)
@@ -795,7 +824,7 @@ bool Plugin::WantedDark(RE::NiLight* a_light)
 {
 	// the main thread's lists (GroundLights.cpp asks from the player update). Sneaking is not here: a dimmed light's twin
 	// copies its dimmed fade
-	return HeldOutForOption(a_light) || HandLightHeldOut(a_light);
+	return HeldOutForOption(a_light) || HandLightHeldOut(a_light) || gFarLights.contains(a_light);
 }
 
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }
@@ -820,6 +849,7 @@ bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 void Plugin::ForgetSpellLights(const GoneLights& a_gone)
 {
 	std::erase_if(gMagicLights, [&](const RE::NiLight* a_l) { return a_gone.contains(a_l); });
+	std::erase_if(gFarLights, [&](const RE::NiLight* a_l) { return a_gone.contains(a_l); });
 	std::erase_if(gSneakKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	{
 		std::lock_guard lock(gDimLock);

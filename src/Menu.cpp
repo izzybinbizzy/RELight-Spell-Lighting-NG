@@ -766,7 +766,7 @@ namespace Plugin
 				"lights, and sprays and bolts keep only their own light (no row along them). For big fights and slower PCs."));
 			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
 			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, you and your followers only)."),
-				T("Casters farther than about forty paces from you carry none."), T("Only you and your followers carry one."),
+				T("Casters farther than about forty paces from you carry none until they come near."), T("Only you and your followers carry one."),
 				T("Only your own hands carry one.") };
 			int                            who = HandLightsFor();
 			if (ChoiceCombo(T("Hand lights for"), who, kWho, kWhoTips)) {
@@ -775,7 +775,7 @@ namespace Plugin
 			}
 			MenuStyle::Tip(T(
 				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby leaves "
-				"out casters farther than about forty paces from you. Reaches the next spell they ready."));
+				"out casters farther than about forty paces from you until they come near. Reaches the next spell they ready."));
 			bool limit = GlowLimitOn();
 			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
 				SetGlowLimitOn(limit);
