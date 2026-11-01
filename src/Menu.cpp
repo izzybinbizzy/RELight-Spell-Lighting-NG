@@ -618,9 +618,11 @@ namespace Plugin
 			if (WardsSteppedDown()) {
 				ImGuiMCP::TextDisabled("%s", T("Dynamic Wards is installed - it colors the wards, so this setting stands aside."));
 			} else {
-				const char* const kColors[] = { T("Vanilla blue"), T("White") };
-				int               c = WardColor();
-				if (ImGuiMCP::Combo(T("Ward color"), &c, kColors, 2)) {
+				const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
+				const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),
+					T("The ward, its art and your hand light in white.") };
+				int                            c = WardColor();
+				if (ChoiceCombo(T("Ward color"), c, kColors, kColorTips)) {
 					SetWardColor(c);
 					SaveSettings();
 					// the art forms and lights are changed on the game's main thread; the next cast shows it
@@ -733,18 +735,23 @@ namespace Plugin
 		{
 			const GlowStyle style;
 			GlowHeading("Performance", Icon::kBulb);
-			const char* const kQuality[] = { T("Quality"), T("Performance") };
-			int               quality = PerformanceMode() ? 1 : 0;
-			if (ImGuiMCP::Combo(T("Quality"), &quality, kQuality, 2)) {
+			const std::vector<const char*> kQuality{ T("Quality"), T("Performance") };
+			const std::vector<const char*> kQualityTips{ T("Every light this mod has, for everyone."),
+				T("Only you and your followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
+			int                            quality = PerformanceMode() ? 1 : 0;
+			if (ChoiceCombo(T("Quality"), quality, kQuality, kQualityTips)) {
 				SetPerformanceMode(quality == 1);
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
 				"Quality: every light this mod has. Performance: only you and your followers carry hand, weapon and body "
 				"lights, and sprays and bolts keep only their own light (no row along them). For big fights and slower PCs."));
-			const char* const kWho[] = { T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
-			int               who = HandLightsFor();
-			if (ImGuiMCP::Combo(T("Hand lights for"), &who, kWho, 4)) {
+			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
+			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light."),
+				T("Casters farther than about forty paces from you carry none."), T("Only you and your followers carry one."),
+				T("Only your own hands carry one.") };
+			int                            who = HandLightsFor();
+			if (ChoiceCombo(T("Hand lights for"), who, kWho, kWhoTips)) {
 				SetHandLightsFor(who);
 				SaveSettings();
 			}

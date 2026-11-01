@@ -488,8 +488,9 @@ namespace Plugin
 						SetOptionOn(i, v != 0);
 					}
 				}
-			} else {
-				ApplySetting(key, v);
+			} else if (!ApplySetting(key, v)) {
+				// an older preset's FadeWhileInvisible is left out on purpose: 2.9 saved its old default there, not a pick
+				SKSE::log::info("a preset names the setting {}, which this version does not have - left out", key);
 			}
 		}
 	}

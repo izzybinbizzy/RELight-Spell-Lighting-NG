@@ -488,7 +488,19 @@ namespace
 				}
 				if (auto* tasks = SKSE::GetTaskInterface()) {
 					// the spell in the hand now, when its light is made - a spell swapped before the task runs is not this light's
-					const bool left = a_node && std::string_view(a_node->name.c_str()).contains("L MagicNode");
+					// the light may hang on a node inside the hand art (its AttachLight), so the hand is read off the first magic node
+					// or hand above it (the review's hostile M3)
+					bool left = false;
+					for (const RE::NiAVObject* up = a_node; up; up = up->parent) {
+						const std::string_view name = up->name.c_str() ? up->name.c_str() : "";
+						if (name.contains("L MagicNode") || name.contains("L Hand")) {
+							left = true;
+							break;
+						}
+						if (name.contains("R MagicNode") || name.contains("R Hand")) {
+							break;
+						}
+					}
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
 					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, kind, dressed]() {
 						LightKit::Guarded("spell light task", [&]() {
