@@ -29,6 +29,8 @@
 
 #include <Windows.h>  // VirtualQuery, GetModuleHandleExW: whose code a VR call site's call leads into
 
+#include <optional>
+
 namespace
 {
 	// every spell light the game made through the hooked call sites, so sneaking can find it again. Main thread only. Plain
@@ -463,20 +465,24 @@ namespace
 	// switched-off one goes out again in UpdateOptionLights), one whose caster is far goes out
 	void UpdateBudgetLights()
 	{
-		static std::unordered_map<RE::FormID, bool> leftOut;  // main thread; its storage kept between frames
+		static std::unordered_map<RE::FormID, std::optional<bool>> leftOut;  // main thread; its storage kept between frames
 		leftOut.clear();
 		for (auto& [light, b] : gBudgetLights) {
-			const auto [it, added] = leftOut.try_emplace(b.caster, false);
+			const auto [it, added] = leftOut.try_emplace(b.caster);
 			if (added) {
-				const auto* actor = CasterOf(b);
-				it->second = actor && Plugin::LeftOutByBudget(actor);
+				if (const auto* actor = CasterOf(b)) {
+					it->second = Plugin::LeftOutByBudget(actor);
+				}
 			}
-			if (it->second) {
+			if (!it->second) {
+				continue;  // its caster not found: left as it is
+			}
+			if (*it->second) {
 				light->SetAppCulled(true);
 			} else if (b.out && !Plugin::HeldOutForOption(light) && !Plugin::HandLightHeldOut(light)) {
 				light->SetAppCulled(false);
 			}
-			b.out = it->second;
+			b.out = *it->second;
 		}
 	}
 
@@ -504,7 +510,7 @@ namespace
 		if (distant && !nearby) {
 			return nullptr;
 		}
-		const RE::FormID budgeted = nearby && a_ref && a_ref->As<RE::Actor>() && !a_ref->IsPlayerRef() ? a_ref->GetFormID() : 0;
+		const RE::FormID budgetCaster = nearby && a_ref && a_ref->As<RE::Actor>() && !a_ref->IsPlayerRef() ? a_ref->GetFormID() : 0;
 		// our hand lights are made with the game's own function and never reach RE::Light, which would switch off
 		// a casting light it has no config for (an in-memory record can have none)
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
@@ -555,11 +561,11 @@ namespace
 						}
 					}
 					const auto kind = hand && a_ref ? LightKit::PulseKindOfHand(a_ref->As<RE::Actor>(), left) : Pulse::Kind::kNone;
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, budgeted, distant, kind, dressed]() {
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, sneaking, budgetCaster, distant, kind, dressed]() {
 						LightKit::Guarded("spell light task", [&]() {
 							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
-							if (budgeted && gMagicLights.contains(light.get())) {
-								gBudgetLights[light.get()] = { budgeted, distant };
+							if (budgetCaster != 0 && gMagicLights.contains(light.get())) {
+								gBudgetLights[light.get()] = { budgetCaster, distant };
 							} else if (sneaking) {
 								AdoptSneakCulled({ light });
 							}
