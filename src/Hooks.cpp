@@ -35,11 +35,19 @@ namespace
 	// pointers: Keep.cpp holds each light, and ForgetSpellLights drops it here before it is freed
 	std::unordered_set<RE::NiLight*> gMagicLights;
 
-	// "Hand lights for - Everyone nearby": every other caster's casting light, and whether it is kept out now - out while the
-	// caster is far, back when near, out again when far (Illuminated's ApplyHandBudget). Main thread only; plain pointers,
-	// dropped by ForgetSpellLights
-	std::unordered_map<RE::NiLight*, bool> gBudgetLights;
-	constexpr int                          kEveryoneNearby = 1;  // the Hand lights for choice (Menu.cpp kWho)
+	// "Hand lights for - Everyone nearby": every other caster's casting light, its caster, and whether it is kept out now - out
+	// while the caster is far, back when near, out again when far (Illuminated's ApplyHandBudget). Main thread only; plain
+	// pointers, dropped by ForgetSpellLights
+	struct BudgetLight
+	{
+		RE::FormID caster{ 0 };
+		bool       out{ false };
+	};
+	std::unordered_map<RE::NiLight*, BudgetLight> gBudgetLights;
+	constexpr int                                 kEveryoneNearby = 1;  // the Hand lights for choice (Menu.cpp kWho)
+
+	// main thread: the caster now, by the id it had when its light was made (the light goes when its caster's 3D does)
+	[[nodiscard]] const RE::Actor* CasterOf(const BudgetLight& a_b) { return RE::TESForm::LookupByID<RE::Actor>(a_b.caster); }
 
 	// The sneak fade: while she sneaks with "Lights fade while sneaking", every light the sneaking pass finds fades to
 	// "Sneaking brightness" over half a second, and back up when she stands. 1 = not dimmed. Written by the player update,
@@ -455,32 +463,28 @@ namespace
 	// switched-off one goes out again in UpdateOptionLights), one whose caster is far goes out
 	void UpdateBudgetLights()
 	{
-		static std::unordered_map<const RE::Actor*, bool> leftOut;  // main thread; its storage kept between frames
+		static std::unordered_map<RE::FormID, bool> leftOut;  // main thread; its storage kept between frames
 		leftOut.clear();
-		for (auto& [light, out] : gBudgetLights) {
-			auto*       ref = Plugin::ReferenceOf(light);
-			const auto* actor = ref ? ref->As<RE::Actor>() : nullptr;
-			if (!actor) {
-				continue;  // not under its caster this frame: left as it is
-			}
-			const auto [it, added] = leftOut.try_emplace(actor, false);
+		for (auto& [light, b] : gBudgetLights) {
+			const auto [it, added] = leftOut.try_emplace(b.caster, false);
 			if (added) {
-				it->second = Plugin::LeftOutByBudget(actor);
+				const auto* actor = CasterOf(b);
+				it->second = actor && Plugin::LeftOutByBudget(actor);
 			}
 			if (it->second) {
 				light->SetAppCulled(true);
-			} else if (out && !Plugin::HeldOutForOption(light) && !Plugin::HandLightHeldOut(light)) {
+			} else if (b.out && !Plugin::HeldOutForOption(light) && !Plugin::HandLightHeldOut(light)) {
 				light->SetAppCulled(false);
 			}
-			out = it->second;
+			b.out = it->second;
 		}
 	}
 
 	// main thread, after the switches: a light a switch gave back stays out while its caster is far
 	void HoldBudgetLightsOut()
 	{
-		for (const auto& [light, out] : gBudgetLights) {
-			if (out) {
+		for (const auto& [light, b] : gBudgetLights) {
+			if (b.out) {
 				light->SetAppCulled(true);
 			}
 		}
@@ -500,7 +504,7 @@ namespace
 		if (distant && !nearby) {
 			return nullptr;
 		}
-		const bool budgeted = nearby && a_ref && a_ref->As<RE::Actor>() && !a_ref->IsPlayerRef();
+		const RE::FormID budgeted = nearby && a_ref && a_ref->As<RE::Actor>() && !a_ref->IsPlayerRef() ? a_ref->GetFormID() : 0;
 		// our hand lights are made with the game's own function and never reach RE::Light, which would switch off
 		// a casting light it has no config for (an in-memory record can have none)
 		const Plugin::Hand* hand = Plugin::HandOfLight(a_light);
@@ -555,7 +559,7 @@ namespace
 						LightKit::Guarded("spell light task", [&]() {
 							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
 							if (budgeted && gMagicLights.contains(light.get())) {
-								gBudgetLights[light.get()] = distant;
+								gBudgetLights[light.get()] = { budgeted, distant };
 							} else if (sneaking) {
 								AdoptSneakCulled({ light });
 							}
@@ -851,8 +855,13 @@ bool Plugin::WantedDark(RE::NiLight* a_light)
 
 bool Plugin::KeptOutByBudget(RE::NiLight* a_light)
 {
+	// asked live: a task between two player updates must not read the last frame's flag for a caster who has moved since
 	const auto it = gBudgetLights.find(a_light);
-	return it != gBudgetLights.end() && it->second;
+	if (it == gBudgetLights.end()) {
+		return false;
+	}
+	const auto* actor = CasterOf(it->second);
+	return actor ? LeftOutByBudget(actor) : it->second.out;
 }
 
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }

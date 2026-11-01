@@ -775,7 +775,8 @@ namespace Plugin
 			}
 			MenuStyle::Tip(T(
 				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby lights "
-				"only casters within about forty paces of you, as they come and go. The other choices reach the next spell a caster readies."));
+				"only casters within about forty paces of you, as they come and go. Lights lit under Everyone nearby follow a change at "
+				"once; the others reach the next spell a caster readies."));
 			bool limit = GlowLimitOn();
 			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
 				SetGlowLimitOn(limit);
