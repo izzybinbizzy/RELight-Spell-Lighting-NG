@@ -503,6 +503,28 @@ namespace
 
 	using MagicLightFn = RE::NiPointLight*(RE::TESObjectLIGH*, RE::TESObjectREFR*, RE::NiNode*, bool, bool, bool);
 
+	// On Community Shaders a hand light sits out from the palm, where Illuminated's does. Only the fresh light's own fields are
+	// written (this runs on loader and job threads). Under a billboard, which turns with the view, it stays put; VR's hand frame is unmeasured.
+	void OutOfThePalm(RE::NiPointLight* a_light, const RE::NiNode* a_node)
+	{
+		if (!a_light || !a_node || !Plugin::InverseSquare() || REL::Module::IsVR()) {
+			return;
+		}
+		RE::NiTransform chain;
+		for (const RE::NiAVObject* at = a_node; at; at = at->parent) {
+			const std::string_view name(at->name.c_str());
+			if (name.contains("L MagicNode") || name.contains("R MagicNode")) {
+				a_light->local.translate = chain.Invert() * LightKit::kHandPoint;
+				a_light->world.translate = a_node->world * a_light->local.translate;
+				return;
+			}
+			if (name.contains("Billboard")) {
+				return;
+			}
+			chain = at->local * chain;
+		}
+	}
+
 	// the spell-light call, at every hooked site; a_next is what that site called before us (the game's function, or another
 	// plugin's hook - RE::Light's)
 	RE::NiPointLight* MakeMagicLight(const REL::Relocation<MagicLightFn>& a_next, RE::TESObjectLIGH* a_light, RE::TESObjectREFR* a_ref,
@@ -524,12 +546,7 @@ namespace
 			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
-			// his checklist 383 ("yes match relight with illuminated"): on Community Shaders the hand light sits 40 out from the palm,
-			// where Illuminated's does (every hand row: 0,-40,0) - in the palm her fingers threw long spread shadows
-			if (made && Plugin::LightingFound() == Plugin::Lighting::kShaders && a_node &&
-				std::string_view(a_node->name.c_str()).contains("MagicNode")) {
-				made->local.translate = RE::NiPoint3{ 0.0f, -40.0f, 0.0f };
-			}
+			OutOfThePalm(made, a_node);
 		} else if (Plugin::IsOurLight(a_light)) {
 			// 2.3: a spray's / bolt's raised copy, or a beam record's other users' plain copy (Streams.cpp) - the game's own
 			// function too, so RE::Light set to switch off game lights it has no config for never switches these off
