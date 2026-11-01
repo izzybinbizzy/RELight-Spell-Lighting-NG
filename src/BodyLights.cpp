@@ -27,7 +27,6 @@ namespace Plugin
 {
 	namespace
 	{
-		constexpr std::size_t kMaxLive = 16;
 		constexpr const char* kLightName = "RSABody";
 		constexpr float       kFrozenHold = 4.0f;  // seconds at full strength, then out over kFrozenOut
 		constexpr float       kFrozenOut = 2.0f;
@@ -248,10 +247,10 @@ namespace Plugin
 				}
 			}
 			// her own art is never left out by the cap: a fight's cloaks and heals on others wait instead
-			if (gLive.size() >= kMaxLive && !hers) {
+			if (gLive.size() >= GlowLimit() && !hers) {
 				if (!gCapLogged) {
 					gCapLogged = true;
-					SKSE::log::info("[BODY] {} body lights are lit at once, the most there may be: the rest wait for one to go out", kMaxLive);
+					SKSE::log::info("[BODY] {} body lights are lit at once, the most there may be: the rest wait for one to go out", gLive.size());
 				}
 				continue;
 			}

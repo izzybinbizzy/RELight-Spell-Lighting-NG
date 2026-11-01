@@ -195,31 +195,36 @@ namespace Plugin
 	[[nodiscard]] std::size_t AutoHandEffects();  // spells lit by an automatic hand light now
 
 	// ------------------------------------------------------------------ Settings.cpp: the settings file
-	void                LoadSettings(bool a_log = true);  // a_log false: the quiet early read before the data (main.cpp)
-	void                SaveSettings();
-	[[nodiscard]] int   BrightnessPercent();
-	void                SetBrightnessPercent(int a_percent);
-	[[nodiscard]] float Brightness();
-	[[nodiscard]] int   ReachPercent();
-	void                SetReachPercent(int a_percent);
-	[[nodiscard]] float Reach();
-	[[nodiscard]] bool  SneakOn();
-	void                SetSneakOn(bool a_on);
-	[[nodiscard]] int   SneakBrightness();  // percent, 0 to 100
-	void                SetSneakBrightness(int a_percent);
-	[[nodiscard]] bool  RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
-	void                SetRunesFadeOn(bool a_on);
-	[[nodiscard]] bool  InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
-	void                SetInvisibleFadeOn(bool a_on);
-	[[nodiscard]] bool  FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
-	void                SetFecFrozenFadesOut(bool a_on);
-	[[nodiscard]] bool  HandLightsOn();
-	void                SetHandLightsOn(bool a_on);
-	[[nodiscard]] bool  WeaponLightsOn();
-	void                SetWeaponLightsOn(bool a_on);
-	[[nodiscard]] int   WardColor();  // 0 vanilla blue, 1 white (Wards.cpp)
-	void                SetWardColor(int a_color);
-	void                SetOptionOn(std::size_t a_index, bool a_on);
+	void                      LoadSettings(bool a_log = true);  // a_log false: the quiet early read before the data (main.cpp)
+	void                      SaveSettings();
+	[[nodiscard]] int         BrightnessPercent();
+	void                      SetBrightnessPercent(int a_percent);
+	[[nodiscard]] float       Brightness();
+	[[nodiscard]] int         ReachPercent();
+	void                      SetReachPercent(int a_percent);
+	[[nodiscard]] float       Reach();
+	[[nodiscard]] bool        SneakOn();
+	void                      SetSneakOn(bool a_on);
+	[[nodiscard]] int         SneakBrightness();  // percent, 0 to 100
+	void                      SetSneakBrightness(int a_percent);
+	[[nodiscard]] std::size_t GlowLimit();  // the most body glows on people lit at once; no limit when its switch is off
+	[[nodiscard]] bool        GlowLimitOn();
+	[[nodiscard]] int         GlowLimitCount();
+	void                      SetGlowLimitOn(bool a_on);
+	void                      SetGlowLimitCount(int a_count);
+	[[nodiscard]] bool        RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
+	void                      SetRunesFadeOn(bool a_on);
+	[[nodiscard]] bool        InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
+	void                      SetInvisibleFadeOn(bool a_on);
+	[[nodiscard]] bool        FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
+	void                      SetFecFrozenFadesOut(bool a_on);
+	[[nodiscard]] bool        HandLightsOn();
+	void                      SetHandLightsOn(bool a_on);
+	[[nodiscard]] bool        WeaponLightsOn();
+	void                      SetWeaponLightsOn(bool a_on);
+	[[nodiscard]] int         WardColor();  // 0 vanilla blue, 1 white (Wards.cpp)
+	void                      SetWardColor(int a_color);
+	void                      SetOptionOn(std::size_t a_index, bool a_on);
 	// Illuminated's settings, ported (his "add everything from illuminated into relight ... sister mods"). The lighting is
 	// never a pick here: it is found by itself (LightingFound, Lighting.cpp), as his later word asked
 	[[nodiscard]] int  DimInDaylight();  // 0 off, 1 a little, 2 more
@@ -236,7 +241,7 @@ namespace Plugin
 	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
 	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
 	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
-	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Realistic (Off / Regular / Realistic)
+	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Cinematic (Off / Regular / Cinematic)
 	void               SetPulseShapes(bool a_on);
 	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
 	[[nodiscard]] bool PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
