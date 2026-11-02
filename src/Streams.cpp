@@ -21,13 +21,14 @@ namespace Plugin
 		std::unordered_set<const RE::TESObjectLIGH*> gPlain;      // every plain copy made here (those and the other users')
 		std::atomic<bool>                            gReady{ false };
 
-		// each spray's / bolt's copy with the projectile that decides its hand color and the color it had before it: an art pick
-		// changed in the menu recolors it (RecolorStreamLights, main thread)
+		// each spray's / bolt's copy with every projectile that wears it and the color it had: the first of them with a hand color
+		// for the art pick on now colors it, so a pick changed in the menu recolors it (RecolorStreamLights, main thread) - a copy
+		// whose projectiles had no hand color at the start too
 		struct HandColored
 		{
-			RE::TESObjectLIGH*       copy{ nullptr };
-			const RE::BGSProjectile* proj{ nullptr };
-			RE::Color                own{};
+			RE::TESObjectLIGH*                    copy{ nullptr };
+			std::vector<const RE::BGSProjectile*> projs;
+			RE::Color                             own{};
 		};
 		std::vector<HandColored> gHandColored;
 
@@ -37,6 +38,17 @@ namespace Plugin
 			a_copy->data.color.red = byte(a_color.red);
 			a_copy->data.color.green = byte(a_color.green);
 			a_copy->data.color.blue = byte(a_color.blue);
+		}
+
+		void ApplyHandColor(const HandColored& a_h)
+		{
+			for (const auto* proj : a_h.projs) {
+				if (const auto* pick = HandColorOf(proj)) {
+					SetColor(a_h.copy, *pick);
+					return;
+				}
+			}
+			a_h.copy->data.color = a_h.own;
 		}
 
 		// how many of each kind of user a claim changed
@@ -166,7 +178,7 @@ namespace Plugin
 		}
 		std::unordered_map<const RE::TESObjectLIGH*, RE::TESObjectLIGH*> plainOf, rowPlainOf;  // a record's plain copy: its other users', its rows' projectiles'
 		std::unordered_map<RE::FormID, RowRecipe>                        rows;
-		std::unordered_set<const RE::TESObjectLIGH*>                     handTinted;  // plain copies already in the hand's color
+		std::unordered_map<const RE::TESObjectLIGH*, std::size_t>        handTinted;  // each plain copy's place in gHandColored
 		std::unordered_map<RE::FormID, const RE::TESObjectLIGH*>         rowCopy;     // each row's projectile -> the copy it wears
 		std::unordered_map<const RE::TESObjectLIGH*, const SprayLook*>   looks;
 		for (const auto& look : kSprayLooks) {
@@ -190,14 +202,13 @@ namespace Plugin
 				// the game's own art: the hand's color for the art pick, as every other light of the spell - whichever of the
 				// record's projectiles comes first, the copy is shared by all of them
 				const auto handColor = [&](RE::TESObjectLIGH* a_copy) {
-					const auto* pick = handTinted.contains(a_copy) ? nullptr : HandColorOf(a_proj);
-					if (!pick) {
-						return false;
+					auto [at, first] = handTinted.try_emplace(a_copy, gHandColored.size());
+					if (first) {
+						gHandColored.push_back({ a_copy, {}, a_copy->data.color });
 					}
-					gHandColored.push_back({ a_copy, a_proj, a_copy->data.color });
-					SetColor(a_copy, *pick);
-					handTinted.insert(a_copy);
-					return true;
+					auto& h = gHandColored[at->second];
+					h.projs.push_back(a_proj);
+					ApplyHandColor(h);
 				};
 				if (fresh) {
 					it->second = CopyOf(a_light);
@@ -291,11 +302,7 @@ namespace Plugin
 			return;
 		}
 		for (const auto& h : gHandColored) {
-			if (const auto* pick = HandColorOf(h.proj)) {
-				SetColor(h.copy, *pick);
-			} else {
-				h.copy->data.color = h.own;
-			}
+			ApplyHandColor(h);
 		}
 		SKSE::log::info("stream lights: {} spray / bolt light(s) in the art pick's hand color again", gHandColored.size());
 	}

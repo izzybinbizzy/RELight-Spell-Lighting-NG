@@ -223,14 +223,13 @@ namespace Plugin
 			std::map<RE::ActorValue, std::map<std::uint32_t, std::size_t>> byGroup;
 			const auto                                                     pack = [](const std::uint8_t a_rgb[3]) { return (std::uint32_t{ a_rgb[0] } << 16) | (std::uint32_t{ a_rgb[1] } << 8) | a_rgb[2]; };
 			const auto                                                     packColor = [](const RE::Color& c) { return (std::uint32_t{ c.red } << 16) | (std::uint32_t{ c.green } << 8) | c.blue; };
-			// counted off the data's colors (each key's first layer), not off the switches that are on now: a menu switch then
-			// changes no group's color, so nothing goes stale between re-finds (CodeRabbit, RELight #27)
+			// counted off the data's colors (each key's first layer that is no art pick's), not off the switches or the picks on
+			// now: a menu switch or pick then changes no group's color, so nothing goes stale between re-finds (RELight #27, #52)
 			for (const auto& t : gTargets) {
 				if (const auto group = t.effect->data.resistVariable; group != RE::ActorValue::kNone) {
-					if (const auto it = Hands().find(t.key); it != Hands().end()) {
-						if (const auto* h = FirstOfPick(it->second)) {
-							++byGroup[group][pack(h->rgb)];
-						}
+					if (const auto it = Hands().find(t.key); it != Hands().end() && !it->second.empty()) {
+						const auto base = std::ranges::find_if(it->second, [](const Hand& a_h) { return a_h.pickGroup < 0; });
+						++byGroup[group][pack((base != it->second.end() ? *base : it->second.front()).rgb)];
 					}
 				}
 			}

@@ -344,10 +344,11 @@ namespace Plugin
 			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
 			const float reach = rec.reach * Reach() * RowReachFor(LightingFound());
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
-			RE::NiColor color = VanillaLook(rec.color);
+			RE::NiColor color = rec.color;
 			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
 				color = *own;  // the spell's Lights by Item color
 			}
+			color = VanillaLook(color);  // after the override, as the caster light (Brightness.cpp)
 			Dress(light, color, steady * left * (a_c.hers ? SneakLevel() : 1.0f), reach, isl);
 			light->local.translate = a_c.holder->world.Invert() * a_c.spot;
 			RE::NiUpdateData update{};
@@ -490,7 +491,7 @@ namespace Plugin
 					live.tint = base ? TintOf(base) : nullptr;
 					live.tintEpoch = epoch;
 				}
-				RE::NiColor color = VanillaLook(live.tint ? *live.tint : rec.color);
+				RE::NiColor color = live.tint ? *live.tint : rec.color;
 				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
 				auto*       spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
 				if (spell) {
@@ -498,6 +499,7 @@ namespace Plugin
 						color = *own;  // the spell's Lights by Item color reaches its row too
 					}
 				}
+				color = VanillaLook(color);
 				// under Realistic the row pulses in its spell's shape, as the hand casting it does (BeamRow::Pulsing)
 				const auto kind = flickers && PulseRealistic() ? LightKit::PulseKindOfSpell(spell) : Pulse::Kind::kNone;
 				const auto seed = static_cast<std::uint32_t>(std::hash<const void*>{}(live.root.get()));
