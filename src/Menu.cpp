@@ -355,6 +355,11 @@ namespace Plugin
 				MenuStyle::Tip(T("Dynamic Wards is installed - it colors the wards, so the ward color stands aside."));
 				return;
 			}
+			if (Other360Color()) {
+				ImGuiMCP::TextDisabled("%s", T("360 Ward - Other colors colors the ward"));
+				MenuStyle::Tip(T("360 Ward - Other colors is installed - its sphere keeps its own color and the ward's light takes it, so the ward color stands aside."));
+				return;
+			}
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
 			const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),

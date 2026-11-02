@@ -191,29 +191,39 @@ namespace Plugin
 			return std::abs(a_a.red - a_b.red) < 0.02f && std::abs(a_a.green - a_b.green) < 0.02f && std::abs(a_a.blue - a_b.blue) < 0.02f;
 		}
 
-		// the model loader resolves on VR too (its id is in the VR Address Library), as Dynamic Wards' VR build uses it
-		StrangeWards ReadStrangeWards()
+		// every effect-shader material of a model; false when it does not load. The model loader resolves on VR too (its id is in
+		// the VR Address Library), as Dynamic Wards' VR build uses it
+		bool ForEachEffectMaterial(const char* a_model, const std::function<void(RE::BSEffectShaderMaterial&)>& a_fn)
 		{
-			StrangeWards              s;
 			RE::NiPointer<RE::NiNode> root;
-			if (RE::BSModelDB::Demand("magic\\wardbodyfx.nif", root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone || !root) {
-				return s;
+			if (!a_model || !*a_model || RE::BSModelDB::Demand(a_model, root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone || !root) {
+				return false;
 			}
 			RE::BSVisit::TraverseScenegraphGeometries(root.get(), [&](RE::BSGeometry* a_geometry) {
 				auto* shader = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
 				auto* effect = netimmerse_cast<RE::BSEffectShaderProperty*>(shader);
-				auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr;
-				if (!material || (!LightKit::Lower(material->sourceTexturePath.c_str()).contains("po3_strangerunes") &&
-									 !LightKit::Lower(material->greyscaleTexturePath.c_str()).contains("po3_strangerunes"))) {
-					return RE::BSVisit::BSVisitControl::kContinue;  // only Strange Wards' own blocks tell its pick
+				if (auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr) {
+					a_fn(*material);
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+			return true;
+		}
+
+		StrangeWards ReadStrangeWards()
+		{
+			StrangeWards s;
+			ForEachEffectMaterial("magic\\wardbodyfx.nif", [&](RE::BSEffectShaderMaterial& a_material) {
+				if (!LightKit::Lower(a_material.sourceTexturePath.c_str()).contains("po3_strangerunes") &&
+					!LightKit::Lower(a_material.greyscaleTexturePath.c_str()).contains("po3_strangerunes")) {
+					return;  // only Strange Wards' own blocks tell its pick
 				}
 				s.installed = true;
-				const RE::NiColor base{ material->baseColor.red, material->baseColor.green, material->baseColor.blue };
+				const RE::NiColor base{ a_material.baseColor.red, a_material.baseColor.green, a_material.baseColor.blue };
 				if (!s.pick) {
 					const auto found = std::ranges::find_if(kStrangePicks, [&](const StrangePick& a_pick) { return Near(base, a_pick.base); });
 					s.pick = found != kStrangePicks.end() ? &*found : nullptr;  // the first block that names a pick decides
 				}
-				return RE::BSVisit::BSVisitControl::kContinue;
 			});
 			if (s.pick && s.pick->tinted) {
 				s.color = s.pick->base;
@@ -236,22 +246,13 @@ namespace Plugin
 		// the average base color of a model's effect-shader blocks; none when it does not load or has none
 		std::optional<RE::NiColor> ReadBaseColor(const char* a_model)
 		{
-			RE::NiPointer<RE::NiNode> root;
-			if (!a_model || !*a_model || RE::BSModelDB::Demand(a_model, root, RE::BSModelDB::DBTraits::ArgsType{}) != RE::BSResource::ErrorCode::kNone || !root) {
-				return std::nullopt;
-			}
 			RE::NiColor sum{};
 			int         count = 0;
-			RE::BSVisit::TraverseScenegraphGeometries(root.get(), [&](RE::BSGeometry* a_geometry) {
-				auto* shader = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
-				auto* effect = netimmerse_cast<RE::BSEffectShaderProperty*>(shader);
-				if (auto* material = effect ? static_cast<RE::BSEffectShaderMaterial*>(effect->material) : nullptr) {
-					sum.red += material->baseColor.red;
-					sum.green += material->baseColor.green;
-					sum.blue += material->baseColor.blue;
-					++count;
-				}
-				return RE::BSVisit::BSVisitControl::kContinue;
+			ForEachEffectMaterial(a_model, [&](RE::BSEffectShaderMaterial& a_material) {
+				sum.red += a_material.baseColor.red;
+				sum.green += a_material.baseColor.green;
+				sum.blue += a_material.baseColor.blue;
+				++count;
 			});
 			if (count == 0) {
 				return std::nullopt;
@@ -296,16 +297,26 @@ namespace Plugin
 			return it != gOriginal.end() ? it->second.c_str() : a_art->GetModel();
 		}
 
-		// read once, off the models the load order gives the dome and flash, whoever asks first (Paint or a hand light)
-		const Other360& Other360Look(RE::BGSArtObject* a_dome, RE::BGSArtObject* a_flash)
+		// loaded, not merely present: LookupModByName also finds a plugin that is installed but not enabled
+		[[nodiscard]] bool Has360()
 		{
-			static const Other360 look = [&] {
+			auto* dh = RE::TESDataHandler::GetSingleton();
+			return dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
+		}
+
+		// read once after data load, off the models the load order gives the dome and flash, whoever asks first (Paint or a hand light)
+		const Other360& Other360Look()
+		{
+			static const Other360 look = [] {
 				Other360 o;
-				if (!a_dome) {
+				auto*    dh = RE::TESDataHandler::GetSingleton();
+				auto*    dome = dh && Has360() ? dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm") : nullptr;
+				if (!dome) {
 					return o;
 				}
-				o.color = RecoloredAt(OriginalModel(a_dome));
-				o.flash = o.color && a_flash && RecoloredAt(OriginalModel(a_flash));
+				auto* flash = dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin);
+				o.color = RecoloredAt(OriginalModel(dome));
+				o.flash = o.color && flash && RecoloredAt(OriginalModel(flash));
 				SKSE::log::info("wards: 360 Ward's sphere {}", o.color ? "is recolored by another mod - left as it is, the ward's light in its color" : "is its own");
 				return o;
 			}();
@@ -336,17 +347,16 @@ namespace Plugin
 			if (!dh) {
 				return;
 			}
-			// loaded, not merely present: LookupModByName also finds a plugin that is installed but not enabled
-			const bool     has360 = dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin);
+			const bool     has360 = Has360();
 			const bool     white = WardColor() == 1;
 			auto*          dome = dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm");
 			auto*          hand = dh->LookupForm<RE::BGSArtObject>(kHandArt, "Skyrim.esm");
 			auto*          flash = has360 ? dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin) : nullptr;
 			const Look&    look = white ? kWhite : kVanillaBlue;
-			const Other360 other = has360 ? Other360Look(dome, flash) : Other360{};
+			const Other360 other = Other360Look();  // empty without 360 Ward
 			if (has360 && other.color) {
 				Point(dome, nullptr);
-				Point(flash, other.flash ? nullptr : kVanillaBlue.flash);  // the stock orange flash would not match the sphere
+				Point(flash, other.flash ? nullptr : look.flash);  // the stock orange flash would not match the sphere
 			} else if (has360) {
 				Point(dome, look.sphere);
 				Point(flash, look.flash);
@@ -397,7 +407,9 @@ namespace Plugin
 					light->data.color = white && !(strange.installed && !has360) ? RE::Color{ 255, 255, 255, 0 } : *gWardLightColor;
 				}
 			}
-			SKSE::log::info("wards: {} {} ({}), hand {}", has360 ? "360 sphere" : "dome", white ? "white" : "vanilla blue",
+			SKSE::log::info("wards: {} {} ({}), hand {}", has360 ? "360 sphere" : "dome",
+				other.color ? "in its own recolor" : white ? "white" :
+															 "vanilla blue",
 				dome && dome->GetModel() ? dome->GetModel() : "no art form", hand && hand->GetModel() ? hand->GetModel() : "no art form");
 		}
 	}
@@ -407,9 +419,7 @@ namespace Plugin
 	bool StrangeWardsHandShows()
 	{
 		static const bool shows = [] {
-			auto*      dh = RE::TESDataHandler::GetSingleton();
-			const bool has360 = dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
-			return !has360 && StrangeWardsLook().installed;
+			return !Has360() && StrangeWardsLook().installed;
 		}();
 		return shows;
 	}
@@ -418,11 +428,7 @@ namespace Plugin
 
 	std::optional<RE::NiColor> Other360Color()
 	{
-		auto* dh = RE::TESDataHandler::GetSingleton();
-		if (!dh || DynamicWardsLoaded() || !(dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin))) {
-			return std::nullopt;
-		}
-		return Other360Look(dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm"), dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin)).color;
+		return DynamicWardsLoaded() ? std::nullopt : Other360Look().color;
 	}
 
 	void ApplyWards(const char* a_why)
