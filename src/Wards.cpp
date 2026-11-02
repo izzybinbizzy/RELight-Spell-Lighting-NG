@@ -276,7 +276,7 @@ namespace Plugin
 		// and the ward's light takes its color; its hit flash too when that file is recolored, else the flash is our vanilla blue
 		struct Other360
 		{
-			std::optional<RE::NiColor> color;         // none = 360 Ward's own orange, or no 360 Ward
+			std::optional<RE::NiColor> color;           // none = 360 Ward's own orange, or no 360 Ward
 			bool                       flash{ false };  // its hit flash recolored as well
 		};
 
@@ -289,8 +289,11 @@ namespace Plugin
 		// the model the load order gave an art form, also once Point has pointed it at ours
 		[[nodiscard]] const char* OriginalModel(RE::BGSArtObject* a_art)
 		{
-			const auto it = a_art ? gOriginal.find(a_art) : gOriginal.end();
-			return it != gOriginal.end() ? it->second.c_str() : a_art ? a_art->GetModel() : nullptr;
+			if (!a_art) {
+				return nullptr;
+			}
+			const auto it = gOriginal.find(a_art);
+			return it != gOriginal.end() ? it->second.c_str() : a_art->GetModel();
 		}
 
 		// read once, off the models the load order gives the dome and flash, whoever asks first (Paint or a hand light)
@@ -334,12 +337,12 @@ namespace Plugin
 				return;
 			}
 			// loaded, not merely present: LookupModByName also finds a plugin that is installed but not enabled
-			const bool  has360 = dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin);
-			const bool  white = WardColor() == 1;
-			auto*       dome = dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm");
-			auto*       hand = dh->LookupForm<RE::BGSArtObject>(kHandArt, "Skyrim.esm");
-			auto*       flash = has360 ? dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin) : nullptr;
-			const Look& look = white ? kWhite : kVanillaBlue;
+			const bool     has360 = dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin);
+			const bool     white = WardColor() == 1;
+			auto*          dome = dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm");
+			auto*          hand = dh->LookupForm<RE::BGSArtObject>(kHandArt, "Skyrim.esm");
+			auto*          flash = has360 ? dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin) : nullptr;
+			const Look&    look = white ? kWhite : kVanillaBlue;
 			const Other360 other = has360 ? Other360Look(dome, flash) : Other360{};
 			if (has360 && other.color) {
 				Point(dome, nullptr);
@@ -356,8 +359,8 @@ namespace Plugin
 			}
 			const auto* strangePick = StrangeWardsLook().pick;
 			Point(hand, has360 ? (other.color ? nullptr : look.sphereHand) : !StrangeWardsLook().installed ? look.hand :
-											   strangePick                       ? strangePick->hand :
-																				   nullptr);
+																		 strangePick                       ? strangePick->hand :
+																											 nullptr);
 			// the worn wards: their own hand always (its graph has the same fault on 360), their own dome unless 360 Ward's
 			// sphere - already on BeginLoopEnd - is the dome
 			if (!gWornDome) {
@@ -385,7 +388,8 @@ namespace Plugin
 					gWardLightColor = light->data.color;
 				}
 				const auto& strange = StrangeWardsLook();
-				if (const auto tint = has360 ? other.color : strange.installed ? strange.color : std::nullopt; tint) {
+				// a Strange Wards color exists only while it is installed
+				if (const auto tint = has360 ? other.color : strange.color; tint) {
 					const auto byte = [](float a_value) { return static_cast<std::uint8_t>(std::lround(std::clamp(a_value, 0.0f, 1.0f) * 255.0f)); };
 					light->data.color = RE::Color{ byte(tint->red), byte(tint->green), byte(tint->blue), 0 };
 				} else {
