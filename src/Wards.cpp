@@ -243,34 +243,21 @@ namespace Plugin
 			return look;
 		}
 
-		// the average base color of a model's effect-shader blocks; none when it does not load or has none
-		std::optional<RE::NiColor> ReadBaseColor(const char* a_model)
+		// 360 Ward's own orange, the base color of its sphere's and flash's coloured blocks (read off its meshes 2026-11-02)
+		constexpr RE::NiColor kStockOrange{ 1.0f, 0.6f, 0.3f };
+
+		[[nodiscard]] bool NearStock(const RE::NiColor& a_color)
 		{
-			RE::NiColor sum{};
-			int         count = 0;
-			ForEachEffectMaterial(a_model, [&](RE::BSEffectShaderMaterial& a_material) {
-				sum.red += a_material.baseColor.red;
-				sum.green += a_material.baseColor.green;
-				sum.blue += a_material.baseColor.blue;
-				++count;
-			});
-			if (count == 0) {
-				return std::nullopt;
-			}
-			return RE::NiColor{ sum.red / count, sum.green / count, sum.blue / count };
+			return std::abs(a_color.red - kStockOrange.red) < 0.05f && std::abs(a_color.green - kStockOrange.green) < 0.05f &&
+			       std::abs(a_color.blue - kStockOrange.blue) < 0.05f;
 		}
 
-		// 360 Ward's own orange: a saturated hue between red and yellow (about 10 to 45 degrees), so a red or yellow recolor
-		// counts as another color
-		[[nodiscard]] bool IsOrange(const RE::NiColor& a_color)
+		// a block that carries a hue, not a white or grey one
+		[[nodiscard]] bool Coloured(const RE::NiColor& a_color)
 		{
 			const float hi = (std::max)({ a_color.red, a_color.green, a_color.blue });
 			const float lo = (std::min)({ a_color.red, a_color.green, a_color.blue });
-			if (hi <= 0.0f || hi != a_color.red || (hi - lo) / hi < 0.5f) {
-				return false;
-			}
-			const float hue = 60.0f * (a_color.green - a_color.blue) / (hi - lo);
-			return hue >= 10.0f && hue <= 45.0f;
+			return hi > 0.0f && (hi - lo) / hi > 0.2f;
 		}
 
 		// 360 Ward - Other colors (Nexus 156803) recolors 360 Ward's sphere in place (Illuminated's way): the sphere is left as it is
@@ -281,10 +268,38 @@ namespace Plugin
 			bool                       flash{ false };  // its hit flash recolored as well
 		};
 
+		// a model that is 360 Ward's, recolored: no block keeps its orange. Its color = its coloured blocks' (a White recolor has
+		// none: all its blocks). None for our own copies, Strange Wards' dome (the same path, handled apart) or a stock model
 		[[nodiscard]] std::optional<RE::NiColor> RecoloredAt(const char* a_model)
 		{
-			const auto color = a_model && !LightKit::Lower(a_model).contains("glow wards") ? ReadBaseColor(a_model) : std::nullopt;
-			return color && !IsOrange(*color) ? color : std::nullopt;
+			if (!a_model || LightKit::Lower(a_model).contains("glow wards")) {
+				return std::nullopt;
+			}
+			RE::NiColor all{}, hue{};
+			int         blocks = 0, hued = 0;
+			bool        stock = false, strange = false;
+			const bool  loaded = ForEachEffectMaterial(a_model, [&](RE::BSEffectShaderMaterial& a_material) {
+				const RE::NiColor c{ a_material.baseColor.red, a_material.baseColor.green, a_material.baseColor.blue };
+				strange = strange || LightKit::Lower(a_material.sourceTexturePath.c_str()).contains("po3_strangerunes") ||
+				          LightKit::Lower(a_material.greyscaleTexturePath.c_str()).contains("po3_strangerunes");
+				stock = stock || NearStock(c);
+				all.red += c.red;
+				all.green += c.green;
+				all.blue += c.blue;
+				++blocks;
+				if (Coloured(c)) {
+					hue.red += c.red;
+					hue.green += c.green;
+					hue.blue += c.blue;
+					++hued;
+				}
+			});
+			if (!loaded || strange || stock || blocks == 0) {
+				return std::nullopt;
+			}
+			const auto& sum = hued ? hue : all;
+			const float n = static_cast<float>(hued ? hued : blocks);
+			return RE::NiColor{ sum.red / n, sum.green / n, sum.blue / n };
 		}
 
 		// the model the load order gave an art form, also once Point has pointed it at ours
@@ -304,23 +319,31 @@ namespace Plugin
 			return dh && (dh->LookupLoadedModByName(k360Plugin) || dh->LookupLoadedLightModByName(k360Plugin));
 		}
 
-		// read once after data load, off the models the load order gives the dome and flash, whoever asks first (Paint or a hand light)
-		const Other360& Other360Look()
+		// read once the data has loaded (the dome's form resolves), off the models the load order gives the dome and flash, whoever
+		// asks first (Paint or a hand light); asked earlier it answers "no recolor" without keeping that answer
+		Other360 Other360Look()
 		{
-			static const Other360 look = [] {
-				Other360 o;
-				auto*    dh = RE::TESDataHandler::GetSingleton();
-				auto*    dome = dh && Has360() ? dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm") : nullptr;
-				if (!dome) {
-					return o;
-				}
+			// a hand light can ask from a loader thread while Paint asks on the main thread
+			static std::mutex              lock;
+			static std::optional<Other360> look;
+			const std::scoped_lock         guard(lock);
+			if (look) {
+				return *look;
+			}
+			auto* dh = RE::TESDataHandler::GetSingleton();
+			auto* dome = dh ? dh->LookupForm<RE::BGSArtObject>(kDomeArt, "Skyrim.esm") : nullptr;
+			if (!dome) {
+				return {};
+			}
+			Other360 o;
+			if (Has360()) {
 				auto* flash = dh->LookupForm<RE::BGSArtObject>(kFlashArt, k360Plugin);
 				o.color = RecoloredAt(OriginalModel(dome));
 				o.flash = o.color && flash && RecoloredAt(OriginalModel(flash));
 				SKSE::log::info("wards: 360 Ward's sphere {}", o.color ? "is recolored by another mod - left as it is, the ward's light in its color" : "is its own");
-				return o;
-			}();
-			return look;
+			}
+			look = o;
+			return o;
 		}
 
 		// point an art form at our copy, or back at the model it had
@@ -356,7 +379,7 @@ namespace Plugin
 			const Other360 other = Other360Look();  // empty without 360 Ward
 			if (has360 && other.color) {
 				Point(dome, nullptr);
-				Point(flash, other.flash ? nullptr : look.flash);  // the stock orange flash would not match the sphere
+				Point(flash, other.flash ? nullptr : kVanillaBlue.flash);  // the stock orange flash would not match it; the pick is hidden here
 			} else if (has360) {
 				Point(dome, look.sphere);
 				Point(flash, look.flash);
