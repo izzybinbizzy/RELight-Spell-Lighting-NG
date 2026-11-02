@@ -618,6 +618,12 @@ namespace
 				gHerShadowsMaking += shadow ? 1 : 0;
 			}
 			auto* use = shadow ? Plugin::ShadowTwinOf(a_light) : a_light;
+			if (shadow && use == a_light) {
+				// no twin was made: the shadow slot stays free for the other hand
+				shadow = false;
+				std::lock_guard lock(gHerShadowLock);
+				--gHerShadowsMaking;
+			}
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			if (shadow) {
 				std::lock_guard lock(gHerShadowLock);
