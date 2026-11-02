@@ -331,7 +331,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(tips[static_cast<std::size_t>(frozen)]);
-			ImGuiMCP::SameLine(0.0f, 24.0f);
+			// its own line under Frozen bodies: a fourth item on the FEC row falls off a narrow window
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
 			const std::vector<const char*> burnTips{ T("A burned body glows orange while its flames die down, then the glow fades out."),
