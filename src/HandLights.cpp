@@ -505,7 +505,7 @@ namespace Plugin
 		if (auto* point = netimmerse_cast<RE::NiPointLight*>(a_light)) {
 			point->SetLightAttenuation(plain.radius);
 		}
-		data.ambient = LightKit::Tenth(a_hand.color);  // after the attenuation's words
+		data.ambient = LightKit::Tenth(VanillaLook(a_hand.color));  // after the attenuation's words
 		return { data.fade, data.radius.x };
 	}
 
