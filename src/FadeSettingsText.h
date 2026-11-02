@@ -340,7 +340,8 @@ namespace Fade
 		}
 
 		// The file to read: a_path, or - while a_path is not there yet - the same file under the mod's old name (RELight - Spell
-		// Lighting NG kept its settings as RelightSpellAddon up to 2.5). The old file is only ever read - never written, moved or deleted: every write goes to a_path, so
+		// Lighting NG kept its settings as RelightSpellAddon up to 2.5). The old file is only ever read - never written, moved or
+		// deleted: every write goes to a_path, so
 		// the first save makes the new file and the old one stays as the player left it. An empty a_old (Illuminated, never
 		// renamed) is a_path itself.
 		[[nodiscard]] inline std::string ReadFrom(std::string_view a_path, std::string_view a_old)
