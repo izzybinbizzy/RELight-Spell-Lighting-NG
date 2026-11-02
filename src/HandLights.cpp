@@ -120,6 +120,10 @@ namespace Plugin
 			if (!a_hand || WardsSteppedDown() || MeshKey(a_hand->key) != "wardinhandfx") {
 				return a_hand;
 			}
+			if (const auto other = Other360Color()) {
+				static std::unordered_map<const Hand*, Hand> recolored;
+				return Tinted(recolored, a_hand, *other);  // 360 Ward - Other colors: the hand light in the sphere's color
+			}
 			if (StrangeWardsHandShows()) {
 				static std::unordered_map<const Hand*, Hand> strange;
 				const auto                                   pick = StrangeWardsPick();
