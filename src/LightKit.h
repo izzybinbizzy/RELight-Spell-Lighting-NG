@@ -90,6 +90,7 @@ namespace LightKit
 
 	// Community Shaders' inverse-square flag on a light RECORD (TESObjectLIGH): its falloff is then the cutoff
 	inline constexpr std::uint32_t kRecordInverseSquare = 1u << 14;
+	inline constexpr RE::NiPoint3  kHandPoint{ 0.0f, -40.0f, 0.0f };  // a hand light out of the palm, in the magic node's frame: in it the fingers throw long shadows
 
 	// Community Shaders' inverse-square lighting reads a flag and the cutoff from the first eight bytes of a light's runtime
 	// data (its ambient color's red and green, as the game lays them out); without Community Shaders those words are plain
