@@ -226,6 +226,8 @@ namespace Plugin
 	void                      SetInvisibleFadeOn(bool a_on);
 	[[nodiscard]] bool        FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
 	void                      SetFecFrozenFadesOut(bool a_on);
+	[[nodiscard]] bool        FecBurningFadesOut();  // a body FEC burned: its glow fades once its flames die down
+	void                      SetFecBurningFadesOut(bool a_on);
 	[[nodiscard]] bool        HandLightsOn();
 	void                      SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool        WeaponLightsOn();
@@ -313,11 +315,12 @@ namespace Plugin
 	// ------------------------------------------------------------------ Rows.cpp: a row of small lights along a bolt / spray / cone
 	struct RowRecipe
 	{
-		RE::NiColor color{ 1.0f, 1.0f, 1.0f };
-		float       fade{ 1.0f }, reach{ 300.0f };  // the projectile's own light: the row's middle glows as it would right under it
-		bool        beam{ true };                   // a bolt (along its model) - else a flame spray or cone (along its aim)
-		std::size_t option{ kNone };                // its switch
-		bool        cloud{ false };                 // a cone's cloud: one light on its path, held where the cloud is after the cone ends
+		RE::NiColor              color{ 1.0f, 1.0f, 1.0f };
+		float                    fade{ 1.0f }, reach{ 300.0f };  // the projectile's own light: the row's middle glows as it would right under it
+		bool                     beam{ true };                   // a bolt (along its model) - else a flame spray or cone (along its aim)
+		std::size_t              option{ kNone };                // its switch
+		bool                     cloud{ false };                 // a cone's cloud: one light on its path, held where the cloud is after the cone ends
+		const RE::TESObjectLIGH* copy{ nullptr };                // the plain copy the projectile wears: a row with no tint follows its color now
 	};
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
 	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
