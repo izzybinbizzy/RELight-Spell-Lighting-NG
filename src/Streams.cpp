@@ -21,6 +21,24 @@ namespace Plugin
 		std::unordered_set<const RE::TESObjectLIGH*> gPlain;      // every plain copy made here (those and the other users')
 		std::atomic<bool>                            gReady{ false };
 
+		// each spray's / bolt's copy with the projectile that decides its hand color and the color it had before it: an art pick
+		// changed in the menu recolors it (RecolorStreamLights, main thread)
+		struct HandColored
+		{
+			RE::TESObjectLIGH*       copy{ nullptr };
+			const RE::BGSProjectile* proj{ nullptr };
+			RE::Color                own{};
+		};
+		std::vector<HandColored> gHandColored;
+
+		void SetColor(RE::TESObjectLIGH* a_copy, const RE::NiColor& a_color)
+		{
+			const auto byte = [](float a_v) { return static_cast<std::uint8_t>(std::clamp(std::lround(a_v * 255.0f), 0L, 255L)); };
+			a_copy->data.color.red = byte(a_color.red);
+			a_copy->data.color.green = byte(a_color.green);
+			a_copy->data.color.blue = byte(a_color.blue);
+		}
+
 		// how many of each kind of user a claim changed
 		struct LightUsers
 		{
@@ -176,9 +194,8 @@ namespace Plugin
 					if (!pick) {
 						return false;
 					}
-					a_copy->data.color.red = static_cast<std::uint8_t>(std::clamp(std::lround(pick->red * 255.0f), 0L, 255L));
-					a_copy->data.color.green = static_cast<std::uint8_t>(std::clamp(std::lround(pick->green * 255.0f), 0L, 255L));
-					a_copy->data.color.blue = static_cast<std::uint8_t>(std::clamp(std::lround(pick->blue * 255.0f), 0L, 255L));
+					gHandColored.push_back({ a_copy, a_proj, a_copy->data.color });
+					SetColor(a_copy, *pick);
 					handTinted.insert(a_copy);
 					return true;
 				};
@@ -266,6 +283,21 @@ namespace Plugin
 			sprays, bolts, gRowCopies.size(), n.projectiles - sprays - bolts, n.muzzles,
 			n.effects, n.explosions, n.hazards, dark, gPlain.size(),
 			failed ? std::format("; {} copy(ies) could not be made - those users keep the record", failed) : std::string{});
+	}
+
+	void RecolorStreamLights()
+	{
+		if (!gReady.load(std::memory_order_acquire)) {
+			return;
+		}
+		for (const auto& h : gHandColored) {
+			if (const auto* pick = HandColorOf(h.proj)) {
+				SetColor(h.copy, *pick);
+			} else {
+				h.copy->data.color = h.own;
+			}
+		}
+		SKSE::log::info("stream lights: {} spray / bolt light(s) in the art pick's hand color again", gHandColored.size());
 	}
 
 	bool IsOurLight(const RE::TESObjectLIGH* a_light)

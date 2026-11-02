@@ -69,7 +69,15 @@ namespace Plugin
 			return std::ranges::any_of(kSkipPrefixes, [&](std::string_view p) { return low.starts_with(p); });
 		}
 
-		// the layer that lights this hand now: the highest order whose option is not switched off
+		// the first layer of the art pick chosen now (every layer that is no pick's counts), or nullptr
+		const Hand* FirstOfPick(const std::vector<Hand>& a_layers)
+		{
+			const auto it = std::ranges::find_if(a_layers, [](const Hand& a_h) { return PickActive(a_h.pickGroup, a_h.pickChoice); });
+			return it != a_layers.end() ? &*it : nullptr;
+		}
+
+		// the layer that lights this hand now: the highest order whose option is not switched off, of the art pick chosen now -
+		// else, for a hand only another pick lit when the game started, that pick's light until the next start
 		const Hand* Winner(const std::string& a_key)
 		{
 			const auto& hands = Hands();
@@ -77,12 +85,17 @@ namespace Plugin
 			if (it == hands.end()) {
 				return nullptr;
 			}
+			const Hand* other = nullptr;
 			for (const auto& h : it->second) {
-				if (OptionLit(h.option)) {
+				if (!OptionLit(h.option)) {
+					continue;
+				}
+				if (PickActive(h.pickGroup, h.pickChoice)) {
 					return &h;
 				}
+				other = other ? other : &h;
 			}
-			return nullptr;
+			return other;
 		}
 
 		// a copy of a hand in another color, made once per hand (under gLock, like every caller)
@@ -201,9 +214,9 @@ namespace Plugin
 			// color as most of the tuned spells of that group wear it (every group - his ruling 2026-10-18; a spell no
 			// resistance applies to is in none)
 			std::vector<const Hand*> tuned;
-			for (const auto& [key, list] : Hands()) {
-				if (!list.empty()) {
-					tuned.push_back(&list.front());
+			for (const auto& list : Hands() | std::views::values) {
+				if (const auto* h = FirstOfPick(list)) {
+					tuned.push_back(h);
 				}
 			}
 			std::ranges::sort(tuned, {}, [](const Hand* h) { return h->fade * h->radius * h->radius; });
@@ -214,8 +227,10 @@ namespace Plugin
 			// changes no group's color, so nothing goes stale between re-finds (CodeRabbit, RELight #27)
 			for (const auto& t : gTargets) {
 				if (const auto group = t.effect->data.resistVariable; group != RE::ActorValue::kNone) {
-					if (const auto it = Hands().find(t.key); it != Hands().end() && !it->second.empty()) {
-						++byGroup[group][pack(it->second.front().rgb)];
+					if (const auto it = Hands().find(t.key); it != Hands().end()) {
+						if (const auto* h = FirstOfPick(it->second)) {
+							++byGroup[group][pack(h->rgb)];
+						}
 					}
 				}
 			}
@@ -322,8 +337,11 @@ namespace Plugin
 			std::lock_guard l{ gLock };
 			gCopies.clear();
 			gTargets.clear();
+			// a hand only another art pick lights gets no light this session (its pick switched to in the menu lights it from the
+			// next start): its spells keep the automatic light they had
 			for (const auto& [key, list] : Hands()) {
-				if (list.empty()) {
+				const auto* first = FirstOfPick(list);
+				if (!first) {
 					continue;
 				}
 				auto* copy = LightKit::NewForm<RE::TESObjectLIGH>();
@@ -331,7 +349,7 @@ namespace Plugin
 					++failed;
 					continue;
 				}
-				Fill(copy, list.front());
+				Fill(copy, *first);
 				gCopies.emplace(key, copy);
 				++made;
 			}

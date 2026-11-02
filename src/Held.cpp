@@ -206,7 +206,7 @@ namespace Plugin
 	OwnScale OwnLightScale()
 	{
 		const bool isl = InverseSquare();
-		return { Brightness() * DaylightFactor() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
+		return { Brightness() * DaylightFactor() * VanillaStrength() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
 	}
 
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
@@ -220,8 +220,9 @@ namespace Plugin
 		}
 		light->name = a_name;
 		light->fadeAmount = kMovingLightMark;
-		auto& data = light->GetLightRuntimeData();
-		data.diffuse = a_s.color;
+		auto&      data = light->GetLightRuntimeData();
+		const auto color = VanillaLook(a_s.color);
+		data.diffuse = color;
 		data.fade = a_fade;
 		data.radius = { a_reach, a_reach, a_s.size };  // x and y are the reach; z carries the light's size
 		if (InverseSquare()) {
@@ -235,7 +236,7 @@ namespace Plugin
 		} else {
 			// off Community Shaders: an ambient of a tenth of its color, RE::Light's rule (Truman); the caller hands a plain
 			// fade and reach (fade x 1.14, reach x 178 / 133)
-			SetPlainReach(light, a_reach, a_s.color);
+			SetPlainReach(light, a_reach, color);
 		}
 		light->local.translate = a_s.at;
 		light->local.scale = 1.0f;
@@ -259,7 +260,7 @@ namespace Plugin
 		if (InverseSquare()) {  // without it these words are ambient color (Plugin.h)
 			Isl::SetCutoff(a_light, CutoffFor(a_fade, a_reach, a_s.size));
 		} else if (a_reachMoved) {
-			SetPlainReach(a_light, a_reach, a_s.color);
+			SetPlainReach(a_light, a_reach, VanillaLook(a_s.color));
 		}
 	}
 

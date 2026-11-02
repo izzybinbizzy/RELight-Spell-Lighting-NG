@@ -46,6 +46,7 @@ namespace Plugin
 			const RowRecipe*                        recipe{ nullptr };
 			std::vector<RE::NiPointer<RE::BSLight>> lights;
 			const RE::NiColor*                      tint{ nullptr };  // the art pick's color for this projectile, as its own light wears it (Brightness.cpp)
+			std::uint32_t                           tintEpoch{ 0 };   // an art pick changed in the menu: the tint is read again
 			bool                                    hers{ false };    // cast by the player: it fades with her lights while she sneaks
 		};
 		std::unordered_map<const RE::NiAVObject*, Live> gLive;  // main thread
@@ -340,10 +341,10 @@ namespace Plugin
 			}
 			const auto& rec = *a_c.recipe;
 			const bool  isl = InverseSquare();
-			const float brightNow = Brightness() * DaylightFactor();
+			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
 			const float reach = rec.reach * Reach() * RowReachFor(LightingFound());
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
-			RE::NiColor color = rec.color;
+			RE::NiColor color = VanillaLook(rec.color);
 			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
 				color = *own;  // the spell's Lights by Item color
 			}
@@ -400,6 +401,7 @@ namespace Plugin
 			const auto n = (std::min)(want.size(), kMostRowLights - gLights);
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };
 			live.tint = TintOf(base);
+			live.tintEpoch = TintEpoch();
 			live.hers = CastByPlayer(a_ref);
 			for (std::size_t i = 0; i < n; ++i) {
 				auto* light = LightKit::CloneLight();
@@ -458,8 +460,9 @@ namespace Plugin
 			const bool isl = InverseSquare();
 			// the two sliders and Dim in daylight, then the per-lighting strength the rows were tuned with (no plain-drawing step:
 			// RowStrengthFor already holds the Vanilla / ENB difference)
-			const float brightNow = Brightness() * DaylightFactor();
+			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
 			const float bright = brightNow * RowStrengthFor(LightingFound()), reachPct = Reach();
+			const auto  epoch = TintEpoch();
 			// Dynamic Lighting (this session's, as the data was read with) makes the row flicker: a spray's own light is steady
 			// on its own, so the row shimmers by itself while the switch is on
 			static const auto start = std::chrono::steady_clock::now();
@@ -482,7 +485,12 @@ namespace Plugin
 				const auto                        toLocal = live.root->world.Invert();
 				static std::vector<BeamRow::Spot> row;  // main thread; its storage kept from row to row and frame to frame
 				BeamRow::Lay(row, length, static_cast<int>(live.lights.size()), rec.reach, kRowHeight);
-				RE::NiColor color = live.tint ? *live.tint : rec.color;
+				if (live.tintEpoch != epoch) {
+					const auto* base = live.ref ? live.ref->GetBaseObject() : nullptr;
+					live.tint = base ? TintOf(base) : nullptr;
+					live.tintEpoch = epoch;
+				}
+				RE::NiColor color = VanillaLook(live.tint ? *live.tint : rec.color);
 				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
 				auto*       spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
 				if (spell) {

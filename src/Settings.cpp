@@ -125,10 +125,10 @@ namespace Plugin
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
 			{ "AllLightsOff", [] { return gAllOff ? 1 : 0; }, [](int v) { gAllOff = v != 0; } },
-			{ "FireArt", [] { return gArt[0].load(); }, [](int v) { gArt[0] = ClampPick(0, v); } },
-			{ "FrostArt", [] { return gArt[1].load(); }, [](int v) { gArt[1] = ClampPick(1, v); } },
-			{ "ShockArt", [] { return gArt[2].load(); }, [](int v) { gArt[2] = ClampPick(2, v); } },
-			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { gArt[3] = ClampPick(3, v); } },
+			{ "FireArt", [] { return gArt[0].load(); }, [](int v) { SetArtPick(0, v); } },
+			{ "FrostArt", [] { return gArt[1].load(); }, [](int v) { SetArtPick(1, v); } },
+			{ "ShockArt", [] { return gArt[2].load(); }, [](int v) { SetArtPick(2, v); } },
+			{ "HealingArt", [] { return gArt[3].load(); }, [](int v) { SetArtPick(3, v); } },
 			{ "DynamicLighting", [] { return gDynamic ? 1 : 0; }, [](int v) { gDynamic = v != 0; } },
 			{ "PulseShapes", [] { return gPulse ? 1 : 0; }, [](int v) { gPulse = v != 0; } },
 			{ "Quality", [] { return gPerformance ? 1 : 0; }, [](int v) { gPerformance = v != 0; } },
@@ -505,10 +505,26 @@ namespace Plugin
 	void SetAllLightsOff(bool a_off) { gAllOff = a_off; }
 	int  ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
 
+	// read before the data at a start; once the data is read, a change recolors at once: the tints and the lights already lit
+	// re-read their colors, and the hand lights and the sprays' copies are dressed again on the main thread
 	void SetArtPick(int a_group, int a_v)
 	{
-		if (a_group >= 0 && a_group < 4) {
-			gArt[static_cast<std::size_t>(a_group)] = ClampPick(a_group, a_v);
+		if (a_group < 0 || a_group >= 4) {
+			return;
+		}
+		const int v = ClampPick(a_group, a_v);
+		if (gArt[static_cast<std::size_t>(a_group)].exchange(v) == v || DataFiles() == 0) {
+			return;
+		}
+		ArtPickChanged();
+		SKSE::log::info("art pick {} set to {}: its colors change now", a_group, v);
+		if (auto* tasks = SKSE::GetTaskInterface()) {
+			tasks->AddTask([]() {
+				LightKit::Guarded("art pick", []() {
+					RecolorStreamLights();
+					ApplyHandLights(false);
+				});
+			});
 		}
 	}
 

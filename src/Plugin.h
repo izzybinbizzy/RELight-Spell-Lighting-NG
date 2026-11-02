@@ -30,6 +30,8 @@ namespace Plugin
 	inline std::atomic<float> gNearby{ 2800.0f };          // [Lights] NearbyDistance: Hand lights for - Everyone nearby
 	inline std::atomic<float> gGroundLightsOn{ 1.0f };     // [Vanilla and ENB] GroundLights
 	inline std::atomic<float> gGroundLightVRHand{ 0.0f };  // [Vanilla and ENB] GroundLightAtVRHand - VR only (Illuminated's)
+	inline std::atomic<float> gVanillaSaturation{ 1.4f };  // [Vanilla and ENB] VanillaColorStrength - Vanilla only (Illuminated's)
+	inline std::atomic<float> gVanillaStrength{ 1.35f };   // [Vanilla and ENB] VanillaBrightness - Vanilla only (Illuminated's)
 
 	struct Option
 	{
@@ -67,6 +69,7 @@ namespace Plugin
 		bool         inverseSquare{ true }, portalStrict{ true };
 		int          order{ 0 };
 		std::size_t  option{ kNone };
+		int          pickGroup{ -1 }, pickChoice{ -1 };  // an art pick's line: it counts while that pick is chosen
 	};
 
 	// a hand light's Dynamic Lighting: a Pulse (breathe) or a Flicker (crackle), run on our hand light (Brightness.cpp)
@@ -125,6 +128,9 @@ namespace Plugin
 	// has how); off it they are drawn plain (LightKit::PlainOf) and those words are ambient color
 	[[nodiscard]] bool        InverseSquare();
 	[[nodiscard]] std::string LightingReport();  // the same as JSON, for DevBench
+	// his 384 (Illuminated's look): on Vanilla every light of ours a third brighter under the slider and its color stronger
+	[[nodiscard]] float       VanillaStrength();
+	[[nodiscard]] RE::NiColor VanillaLook(RE::NiColor a_color);
 	namespace Isl = LightKit::Isl;
 
 	// GroundLights.cpp: a twin of each hand's casting light that lights the ground, off Community Shaders (Illuminated's)
@@ -239,15 +245,19 @@ namespace Plugin
 	void               SetAllLightsOff(bool a_off);
 	[[nodiscard]] int  ArtPick(int a_group);  // the art pick of a DataText::kPickGroups group; 0 = the game's own
 	void               SetArtPick(int a_group, int a_v);
-	void               SetDynamicLighting(bool a_on);
-	[[nodiscard]] bool DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
-	[[nodiscard]] bool DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
-	void               FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
-	[[nodiscard]] bool PulseShapes();                 // Dynamic Lighting's third choice, Cinematic (Off / Regular / Cinematic)
-	void               SetPulseShapes(bool a_on);
-	[[nodiscard]] bool PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
-	[[nodiscard]] bool PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
-	void               SetPerformanceMode(bool a_on);
+	[[nodiscard]] bool PickActive(int a_group, int a_choice);  // a line of art pick a_choice counts now (a_group -1: no pick's)
+	// Data.cpp: an art pick changed in the menu - its colors reach the next lookup, and the lights already lit re-read them
+	void                        ArtPickChanged();
+	[[nodiscard]] std::uint32_t TintEpoch();  // moves on with each pick change
+	void                        SetDynamicLighting(bool a_on);
+	[[nodiscard]] bool          DynamicLighting();             // the saved choice (the menu): the RE::Light lights flicker as their configs say
+	[[nodiscard]] bool          DynamicLightingThisSession();  // the choice this session's data was read with - it applies at the next start
+	void                        FixDynamicLighting();          // main.cpp, before the data: the session takes the saved choice
+	[[nodiscard]] bool          PulseShapes();                 // Dynamic Lighting's third choice, Cinematic (Off / Regular / Cinematic)
+	void                        SetPulseShapes(bool a_on);
+	[[nodiscard]] bool          PulseRealistic();   // Realistic this session: hand lights and rows pulse in their kind's shape (Pulse.h)
+	[[nodiscard]] bool          PerformanceMode();  // the Performance page's Quality pick on Performance (his 2026-10-20 order)
+	void                        SetPerformanceMode(bool a_on);
 	// every setting and switch as (key, value), and back - the menu's presets (Menu.cpp)
 	[[nodiscard]] std::vector<std::pair<std::string, int>> SettingsSnapshot();
 	void                                                   ApplySettingsSnapshot(const std::vector<std::pair<std::string, int>>& a_values);
@@ -288,7 +298,8 @@ namespace Plugin
 	[[nodiscard]] float DaylightFactor();
 
 	// ------------------------------------------------------------------ Streams.cpp: sprays, beams, breath shouts
-	void RaiseStreamLights();  // once, after the data is read and the lighting found, BEFORE MakeHandLights
+	void RaiseStreamLights();    // once, after the data is read and the lighting found, BEFORE MakeHandLights
+	void RecolorStreamLights();  // main thread: the sprays' and bolts' copies in the hand color of the art pick chosen now
 	// a light record of ours (a spray's / bolt's plain copy, a beam record's other users' plain copy): made by the game's own
 	// function, never RE::Light's (Hooks.cpp), and dressed by DressStreamLight - any thread
 	[[nodiscard]] bool        IsOurLight(const RE::TESObjectLIGH* a_light);
