@@ -151,11 +151,13 @@ namespace Plugin
 		return gFound.load() == Lighting::kVanilla ? gVanillaStrength.load(std::memory_order_relaxed) : 1.0f;
 	}
 
-	// each channel pushed away from the color's grey by VanillaColorStrength (1 as made, above 1 deeper)
+	// each channel pushed away from the color's grey by VanillaColorStrength (1 as made, above 1 deeper), on Vanilla and ENB
+	// (ENB drew a blue light green-white)
 	RE::NiColor VanillaLook(RE::NiColor a_color)
 	{
 		const float k = gVanillaSaturation.load(std::memory_order_relaxed);
-		if (gFound.load() != Lighting::kVanilla || k == 1.0f) {
+		const auto  lighting = gFound.load();
+		if ((lighting != Lighting::kVanilla && lighting != Lighting::kEnb) || k == 1.0f) {
 			return a_color;
 		}
 		const float grey = (a_color.red + a_color.green + a_color.blue) / 3.0f;

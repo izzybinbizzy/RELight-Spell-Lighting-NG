@@ -334,7 +334,7 @@ namespace Plugin
 			// its own line under Frozen bodies: a fourth item on the FEC row falls off a narrow window
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
-			const std::vector<const char*> burnTips{ T("A burned body glows orange while its flames die down, then the glow fades out."),
+			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if they never end."),
 				T("The glow stays for as long as the body burns.") };
 			int                            burning = FecBurningFadesOut() ? 0 : 1;
 			if (ChoiceCombo(T("Burning bodies"), burning, burnItems, burnTips)) {

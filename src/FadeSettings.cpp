@@ -72,6 +72,10 @@ namespace Fade
 			SKSE::log::warn("settings: {}", p);
 		}
 		SetConfig(s);
+		if (read.moved) {
+			SKSE::log::info("settings: brought to the current fading defaults (stamp {}) and saved", s.defaults);
+			SaveSettings();
+		}
 		const auto& t = s.tuning;
 		SKSE::log::info(
 			"settings: {} line(s) read from {}; enabled {}, empty brightness {}%, curve {}, reach follows {}%, "
