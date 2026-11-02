@@ -64,7 +64,7 @@ namespace
 		Fade::Tuning::Register("Vanilla and ENB", "GroundLights", 1.0f, 0.0f, 1.0f,
 			"1: off Community Shaders a hand light lights the ground too (its twin, made with land lighting on); 0: off", Plugin::gGroundLightsOn);
 		Fade::Tuning::Register("Vanilla and ENB", "VanillaColorStrength", 1.4f, 0.5f, 3.0f,
-			"Vanilla only - how strong a spell light's color is: 1 as made, above 1 deeper, below paler", Plugin::gVanillaSaturation);
+			"Vanilla and ENB - how strong a spell light's color is: 1 as made, above 1 deeper, below paler", Plugin::gVanillaSaturation);
 		Fade::Tuning::Register("Vanilla and ENB", "VanillaBrightness", 1.35f, 0.5f, 3.0f,
 			"Vanilla only - every light this strong before the Brightness slider: 1 as made", Plugin::gVanillaStrength);
 		if (REL::Module::IsVR()) {

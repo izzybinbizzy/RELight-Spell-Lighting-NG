@@ -35,10 +35,10 @@ namespace Glow
 
 	struct Tuning
 	{
-		float floor{ 0.10f };  // brightness left at 0% charge
-		Curve curve{ Curve::kGentle };
-		float reachFollows{ 0.5f };  // 0: reach never changes, 1: reach follows the brightness curve fully
-		float minReach{ 0.35f };     // reach never drops below this share of the light's own
+		float floor{ 0.10f };           // brightness left at 0% charge
+		Curve curve{ Curve::kLinear };  // the light shrinks and dims evenly with the magicka, seen while casting
+		float reachFollows{ 1.0f };     // 0: reach never changes, 1: reach follows the brightness curve fully
+		float minReach{ 0.35f };        // reach never drops below this share of the light's own
 		bool  sputter{ true };
 		float sputterBelow{ 0.15f };    // fraction under which the light sputters
 		float sputterStrength{ 0.6f };  // deepest dip, at the bottom of the sputter band

@@ -30,7 +30,7 @@ namespace Plugin
 	inline std::atomic<float> gNearby{ 2800.0f };          // [Lights] NearbyDistance: Hand lights for - Everyone nearby
 	inline std::atomic<float> gGroundLightsOn{ 1.0f };     // [Vanilla and ENB] GroundLights
 	inline std::atomic<float> gGroundLightVRHand{ 0.0f };  // [Vanilla and ENB] GroundLightAtVRHand - VR only (Illuminated's)
-	inline std::atomic<float> gVanillaSaturation{ 1.4f };  // [Vanilla and ENB] VanillaColorStrength - Vanilla only (Illuminated's)
+	inline std::atomic<float> gVanillaSaturation{ 1.4f };  // [Vanilla and ENB] VanillaColorStrength - Vanilla and ENB (Illuminated's)
 	inline std::atomic<float> gVanillaStrength{ 1.35f };   // [Vanilla and ENB] VanillaBrightness - Vanilla only (Illuminated's)
 
 	struct Option
