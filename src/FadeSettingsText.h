@@ -278,7 +278,7 @@ namespace Fade
 		inline ReadResult Read(std::istream& a_in, Settings& a_s)
 		{
 			ReadResult  r;
-			bool        versioned = false;
+			bool        versioned = false, setFade = false;  // setFade: the file set Curve or ReachFollows
 			std::string line;
 			bool        inSettings = false, first = true;
 			while (std::getline(a_in, line)) {
@@ -310,8 +310,10 @@ namespace Fade
 				}
 				if (SameText(key, "Defaults")) {
 					if (ReadInt(val, v)) {
-						a_s.defaults = std::clamp(v, 0, kDefaultsVersion);
+						a_s.defaults = (std::max)(v, 0);  // a newer build's stamp is kept, never walked back
 						versioned = true;
+					} else {
+						r.problems.push_back(std::string(key) + "=" + std::string(val) + ": not a whole number; read as unstamped");
 					}
 					continue;
 				}
@@ -321,6 +323,7 @@ namespace Fade
 					r.problems.push_back(std::string(key) + "=" + std::string(val) + ": not a whole number; the default stays");
 				} else {
 					Apply(a_s, key, v);
+					setFade = setFade || SameText(key, "Curve") || SameText(key, "ReachFollows");
 					++r.taken;
 				}
 			}
@@ -329,20 +332,19 @@ namespace Fade
 				a_s.defaults = 0;
 			}
 			if (r.taken > 0 && a_s.defaults < kDefaultsVersion) {
-				if (a_s.defaults < 2) {
+				if (a_s.defaults < 2 && setFade) {
 					a_s.tuning.curve = Glow::Curve::kLinear;
 					a_s.tuning.reachFollows = 1.0f;
 				}
+				r.moved = setFade || a_s.defaults != 0;
 				a_s.defaults = kDefaultsVersion;
-				r.moved = true;
 			}
 			return r;
 		}
 
 		// The file to read: a_path, or - while a_path is not there yet - the same file under the mod's old name (RELight - Spell
 		// Lighting NG kept its settings as RelightSpellAddon up to 2.5). The old file is only ever read - never written, moved or
-		// deleted: every write goes to a_path, so
-		// the first save makes the new file and the old one stays as the player left it. An empty a_old (Illuminated, never
+		// deleted: every write goes to a_path, so the first save makes the new file and the old one stays as the player left it. An empty a_old (Illuminated, never
 		// renamed) is a_path itself.
 		[[nodiscard]] inline std::string ReadFrom(std::string_view a_path, std::string_view a_old)
 		{
