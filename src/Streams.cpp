@@ -270,6 +270,7 @@ namespace Plugin
 			if (const auto copy = rowCopy.find(id); copy != rowCopy.end()) {
 				const auto& c = copy->second->data.color;
 				recipe.color = { c.red / 255.0f, c.green / 255.0f, c.blue / 255.0f };
+				recipe.copy = copy->second;
 			}
 		}
 		// a cone our data lights as a cloud: one light held where its cloud is (Rows.cpp) - RE::Light has no config for it

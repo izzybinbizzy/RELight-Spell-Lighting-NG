@@ -14,6 +14,7 @@
 //   GlowLimit=1                 1 = at most GlowLimitCount body glows on people lit at once (hers never wait - BodyLights.cpp)
 //   GlowLimitCount=16           4 to 64
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
+//   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
@@ -59,6 +60,7 @@ namespace Plugin
 		std::atomic<bool>               gGlowLimit{ true };
 		std::atomic<int>                gGlowCount{ 16 };
 		std::atomic<bool>               gFecFrozenFades{ true };
+		std::atomic<bool>               gFecBurningFades{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
@@ -118,6 +120,7 @@ namespace Plugin
 			{ "GlowLimit", [] { return gGlowLimit ? 1 : 0; }, [](int v) { gGlowLimit = v != 0; } },
 			{ "GlowLimitCount", [] { return gGlowCount.load(); }, [](int v) { gGlowCount = std::clamp(v, 4, 64); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
+			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
@@ -387,6 +390,15 @@ namespace Plugin
 	bool PulseRealistic() { return gPulse && DynamicLightingThisSession(); }
 
 	bool FecFrozenFadesOut() { return gFecFrozenFades; }
+
+	bool FecBurningFadesOut() { return gFecBurningFades; }
+
+	void SetFecBurningFadesOut(bool a_on)
+	{
+		if (gFecBurningFades.exchange(a_on) != a_on) {
+			SKSE::log::info("burning bodies' glow {}", a_on ? "fades out" : "stays while burning");
+		}
+	}
 
 	void SetFecFrozenFadesOut(bool a_on)
 	{

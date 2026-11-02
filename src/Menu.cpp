@@ -317,7 +317,7 @@ namespace Plugin
 			return changed;
 		}
 
-		// the FEC pick, drawn beside FEC's own switch on the Configs page (Illuminated's "follows")
+		// the FEC picks, drawn beside FEC's own switch on the Configs page (Illuminated's "follows")
 		void DrawFrozenPick()
 		{
 			ImGuiMCP::SameLine(0.0f, 24.0f);
@@ -331,6 +331,17 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(tips[static_cast<std::size_t>(frozen)]);
+			ImGuiMCP::SameLine(0.0f, 24.0f);
+			ImGuiMCP::SetNextItemWidth(220.0f);
+			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
+			const std::vector<const char*> burnTips{ T("A burned body glows orange while its flames die down, then the glow fades out."),
+				T("The glow stays for as long as the body burns.") };
+			int                            burning = FecBurningFadesOut() ? 0 : 1;
+			if (ChoiceCombo(T("Burning bodies"), burning, burnItems, burnTips)) {
+				SetFecBurningFadesOut(burning == 0);
+				SaveSettings();
+			}
+			MenuStyle::Tip(burnTips[static_cast<std::size_t>(burning)]);
 		}
 
 		// the ward color, drawn beside the Wards switch on the Configs page (Illuminated's Ward look sits there)

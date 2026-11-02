@@ -14,7 +14,8 @@
 // weapon's enchantment art (held lights, Truman's enchantments) never get one. Body art that outlived its spell once kept a
 // light on for a day (Illuminated's CLAUDE.md, the lighting data's rules): this light lives exactly as long as the art does.
 // Frozen Electrocuted Combustion's lit shaders on a body (a `body` line naming the shader's form) the same way; a frozen body
-// stays frozen, so on "Frozen bodies" fades out its frozen shader's light goes out a few seconds in (FrozenFade).
+// stays frozen and a burned one keeps smouldering, so on the "Frozen bodies" / "Burning bodies" fade-out picks their light
+// goes out a few seconds in (FecBodyFade).
 //
 // CREDIT: the way ReLight by Truman (github.com/TrumanGIT/ReLight, GPL-3.0-or-later, used with his permission) lights an
 // effect on an actor (LightAttachmentHooks.cpp ReferenceEffect::Init): the effect's attach root, swapped for the third-person
@@ -28,26 +29,38 @@ namespace Plugin
 	namespace
 	{
 		constexpr const char* kLightName = "RSABody";
-		constexpr float       kFrozenHold = 4.0f;  // seconds at full strength, then out over kFrozenOut
-		constexpr float       kFrozenOut = 2.0f;
-		constexpr RE::FormID  kFrozenLocal = 0x80D;  // FEC_FrostFXS in FEC.esp (an ESL - its id moves with the load order)
+		constexpr float       kFrozenHold = 4.0f;   // seconds at full strength, then out over kFecOut
+		constexpr float       kBurningHold = 8.0f;  // the shader's char darkening ends at 8 s
+		constexpr float       kFecOut = 2.0f;
 
-		[[nodiscard]] const RE::TESEffectShader* FrozenShader()
+		// FEC.esp is an ESL - its ids move with the load order: FEC_FrostFXS, then FEC_FireFXS and FEC_FireHeavyFXS
+		[[nodiscard]] const std::array<const RE::TESEffectShader*, 3>& FecShaders()
 		{
-			static const auto* shader = [] {
-				auto* data = RE::TESDataHandler::GetSingleton();
-				return data ? data->LookupForm<RE::TESEffectShader>(kFrozenLocal, "FEC.esp") : nullptr;
+			static const auto shaders = [] {
+				std::array<const RE::TESEffectShader*, 3> out{};
+				if (auto* data = RE::TESDataHandler::GetSingleton()) {
+					out = { data->LookupForm<RE::TESEffectShader>(0x80D, "FEC.esp"),
+						data->LookupForm<RE::TESEffectShader>(0x806, "FEC.esp"), data->LookupForm<RE::TESEffectShader>(0x826, "FEC.esp") };
+				}
+				return out;
 			}();
-			return shader;
+			return shaders;
 		}
 
-		[[nodiscard]] float FrozenFade(const RE::ReferenceEffect* a_effect)
+		// a frozen body stays frozen and a burned one keeps smouldering: on their fade-out picks the light goes out a few seconds in
+		[[nodiscard]] float FecBodyFade(const RE::ReferenceEffect* a_effect)
 		{
 			const auto* shader = netimmerse_cast<const RE::ShaderReferenceEffect*>(a_effect);
-			if (!shader || !FecFrozenFadesOut() || !FrozenShader() || shader->effectData != FrozenShader()) {
+			const auto& fec = FecShaders();
+			if (!shader || !shader->effectData) {
 				return 1.0f;
 			}
-			return std::clamp(1.0f - (shader->age - kFrozenHold) / kFrozenOut, 0.0f, 1.0f);
+			const bool frozen = shader->effectData == fec[0];
+			const bool burning = shader->effectData == fec[1] || shader->effectData == fec[2];
+			if (!(frozen && FecFrozenFadesOut()) && !(burning && FecBurningFadesOut())) {
+				return 1.0f;
+			}
+			return std::clamp(1.0f - (shader->age - (frozen ? kFrozenHold : kBurningHold)) / kFecOut, 0.0f, 1.0f);
 		}
 
 		struct Live
@@ -254,7 +267,7 @@ namespace Plugin
 				}
 				continue;
 			}
-			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FrozenFade(art);
+			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FecBodyFade(art);
 			const float       reach = body->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
 			// her Candlelight casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
@@ -296,7 +309,7 @@ namespace Plugin
 		}
 		// the sliders and the daylight reach a light already hung
 		for (auto& v : gLive) {
-			const float fade = v.body->fade * scale * (v.hers ? sneak : 1.0f) * FrozenFade(v.art.get());
+			const float fade = v.body->fade * scale * (v.hers ? sneak : 1.0f) * FecBodyFade(v.art.get());
 			const float reach = v.body->radius * reachScale;
 			if (fade != v.written || reach != v.wroteReach) {
 				RetuneOwnLight(v.light.get(), *v.body, fade, reach, reach != v.wroteReach);

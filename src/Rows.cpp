@@ -491,9 +491,13 @@ namespace Plugin
 					live.tint = base ? TintOf(base) : nullptr;
 					live.tintEpoch = epoch;
 				}
-				RE::NiColor color = live.tint ? *live.tint : rec.color;
-				auto*       fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
-				auto*       spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
+				// no tint of its own: the shared copy's color now, which a menu pick may have changed (RecolorStreamLights)
+				const RE::Color worn = rec.copy ? rec.copy->data.color : RE::Color{};
+				RE::NiColor     color = live.tint ? *live.tint :
+				                        rec.copy  ? RE::NiColor{ worn.red / 255.0f, worn.green / 255.0f, worn.blue / 255.0f } :
+				                                    rec.color;
+				auto*           fired = live.ref ? live.ref->As<RE::Projectile>() : nullptr;
+				auto*           spell = fired ? fired->GetProjectileRuntimeData().spell : nullptr;
 				if (spell) {
 					if (const auto own = Fade::Items::ChoiceColor(spell->GetFormID())) {
 						color = *own;  // the spell's Lights by Item color reaches its row too
