@@ -525,6 +525,68 @@ namespace
 		}
 	}
 
+	// Her hand lights that cast a shadow (the Bottled shadow download): one at a time, or her two hands throw two crossed shadows.
+	// Filled on any thread, pruned on the main thread; Keep.cpp holds each light, ForgetSpellLights drops it here first
+	std::mutex                       gHerShadowLock;
+	std::unordered_set<RE::NiLight*> gHerShadows;
+	int                              gHerShadowsMaking{ 0 };     // a shadow caster being made right now
+	RE::NiLight*                     gShadowBetween{ nullptr };  // the caster moved between her hands; main thread only
+
+	[[nodiscard]] bool HasLitHandLight(RE::NiAVObject* a_magic)
+	{
+		bool lit = false;
+		RE::BSVisit::TraverseScenegraphLights(a_magic, [&](RE::NiPointLight* a_light) {
+			lit = gMagicLights.contains(a_light) && !a_light->GetAppCulled();
+			return lit ? RE::BSVisit::BSVisitControl::kStop : RE::BSVisit::BSVisitControl::kContinue;
+		});
+		return lit;
+	}
+
+	// main thread, each frame: with both her hands lit the one shadow caster sits between them, so she throws one shadow;
+	// with one hand lit it goes back out of its own palm (OutOfThePalm's place)
+	void PlaceHerShadow()
+	{
+		RE::NiLight* light = nullptr;
+		{
+			std::lock_guard lock(gHerShadowLock);
+			std::erase_if(gHerShadows, [](const RE::NiLight* a_l) { return !a_l->parent; });
+			if (gHerShadows.size() == 1) {
+				light = *gHerShadows.begin();
+			}
+		}
+		if (light != gShadowBetween) {
+			gShadowBetween = nullptr;
+		}
+		if (!light || !Plugin::InverseSquare() || REL::Module::IsVR()) {
+			return;
+		}
+		RE::NiAVObject* own = light->parent;
+		while (own && !std::string_view(own->name.c_str()).contains("MagicNode")) {
+			own = own->parent;
+		}
+		const auto* strings = RE::FixedStrings::GetSingleton();
+		if (!own || !strings) {
+			return;
+		}
+		RE::NiAVObject* root = own;
+		while (root->parent) {
+			root = root->parent;
+		}
+		const bool left = std::string_view(own->name.c_str()).contains("L MagicNode");
+		auto*      other = root->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode);
+		const auto mine = own->world * LightKit::kHandPoint;
+		if (other && HasLitHandLight(other)) {
+			const auto point = (mine + other->world * LightKit::kHandPoint) * 0.5f;
+			light->local.translate = light->parent->world.Invert() * point;
+			light->world.translate = point;
+			gShadowBetween = light;
+		} else if (gShadowBetween == light) {
+			light->local.translate = light->parent->world.Invert() * mine;
+			light->world.translate = mine;
+			gShadowBetween = nullptr;
+		}
+	}
+
 	// the spell-light call, at every hooked site; a_next is what that site called before us (the game's function, or another
 	// plugin's hook - RE::Light's)
 	RE::NiPointLight* MakeMagicLight(const REL::Relocation<MagicLightFn>& a_next, RE::TESObjectLIGH* a_light, RE::TESObjectREFR* a_ref,
@@ -542,9 +604,22 @@ namespace
 		RE::NiPointLight*   made = nullptr;
 		Plugin::Dressed     dressed{};  // what a hand light's dress wrote: its Brightness bases (the task carries them)
 		if (hand) {
-			// her own hand lights cast a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
-			auto* use = a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch() ? Plugin::ShadowTwinOf(a_light) : a_light;
+			// her own hand light casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b"), one at a time
+			bool shadow = false;
+			if (a_ref && a_ref->IsPlayerRef() && Plugin::ShadowPatch()) {
+				std::lock_guard lock(gHerShadowLock);
+				shadow = gHerShadows.empty() && gHerShadowsMaking == 0;
+				gHerShadowsMaking += shadow ? 1 : 0;
+			}
+			auto* use = shadow ? Plugin::ShadowTwinOf(a_light) : a_light;
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
+			if (shadow) {
+				std::lock_guard lock(gHerShadowLock);
+				--gHerShadowsMaking;
+				if (made) {
+					gHerShadows.insert(made);
+				}
+			}
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 			OutOfThePalm(made, a_node);
 		} else if (Plugin::IsOurLight(a_light)) {
@@ -605,6 +680,10 @@ namespace
 							if (pending) {
 								std::lock_guard lock(gBudgetPendingLock);
 								gBudgetPending.erase(light.get());
+							}
+							if (!gMagicLights.contains(light.get())) {  // let go before the main thread came round: never kept
+								std::lock_guard lock(gHerShadowLock);
+								gHerShadows.erase(light.get());
 							}
 						});
 					});
@@ -717,6 +796,7 @@ namespace
 				Plugin::UpdateHeldLights();
 				Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
 				Plugin::UpdateRows();        // the rows of lights along bolts, sprays and cones (Rows.cpp)
+				PlaceHerShadow();
 				// RE::Light has already written this frame's fades (its update runs inside `func` above): the sliders next, then
 				// the fading module as the final pass, on what the sliders wrote (each fade it writes is reported back -
 				// Brightness.cpp's NoteFadeWrite)
@@ -932,6 +1012,13 @@ void Plugin::ForgetSpellLights(const GoneLights& a_gone)
 	std::erase_if(gMagicLights, [&](const RE::NiLight* a_l) { return a_gone.contains(a_l); });
 	std::erase_if(gBudgetLights, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	std::erase_if(gSneakKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+	{
+		std::lock_guard lock(gHerShadowLock);
+		std::erase_if(gHerShadows, [&](const RE::NiLight* a_l) { return a_gone.contains(a_l); });
+	}
+	if (a_gone.contains(gShadowBetween)) {
+		gShadowBetween = nullptr;
+	}
 	{
 		std::lock_guard lock(gDimLock);
 		std::erase_if(gDim, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
