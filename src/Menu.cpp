@@ -368,7 +368,8 @@ namespace Plugin
 		}
 
 		// one of the four art picks (Illuminated's Shock, Fire, Frost and Healing groups): the pick, and what the chosen one does. The
-		// choices follow DataText::kPickNames (the game's own art first); a pick applies the next time the game starts
+		// choices follow DataText::kPickNames (the game's own art first); its colors change at once, the lights only that art
+		// brings at the next start (Data.cpp)
 		void DrawArtPick(int a_group, const char* a_label, const std::vector<const char*>& a_items, const std::vector<const char*>& a_tips)
 		{
 			int pick = std::clamp(ArtPick(a_group), 0, static_cast<int>(a_items.size()) - 1);
@@ -706,23 +707,23 @@ namespace Plugin
 		{
 			GlowHeading("Fire");
 			DrawArtPick(0, T("Fire Art"), { T("Vanilla fire"), T("Inferno"), T("Embers XD"), T("Kittytail Flame") },
-				{ T("Skyrim's orange. Applies the next time the game starts."),
-					T("A hotter, more yellow fire light.\nInstall first: Inferno - Fire Effects Redux.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A deeper amber fire light.\nInstall first: Embers XD.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A deeper, redder fire light.\nInstall first: Kittytail's Flame VFX Edit.\nWrong pick and fire lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+				{ T("Skyrim's orange. Colors change at once; the rest at the next start."),
+					T("A hotter, more yellow fire light.\nInstall first: Inferno - Fire Effects Redux.\nWrong pick and fire lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start."),
+					T("A deeper amber fire light.\nInstall first: Embers XD.\nWrong pick and fire lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start."),
+					T("A deeper, redder fire light.\nInstall first: Kittytail's Flame VFX Edit.\nWrong pick and fire lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start.") });
 			GlowHeading("Frost");
 			DrawArtPick(1, T("Frost Art"), { T("Vanilla / Arctic"), T("Kittytail") },
-				{ T("Skyrim's pale blue. Applies the next time the game starts."),
-					T("A deeper, more saturated blue.\nInstall first: Kittytail's Frost VFX Edit.\nWrong pick and frost lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+				{ T("Skyrim's pale blue. Colors change at once; the rest at the next start."),
+					T("A deeper, more saturated blue.\nInstall first: Kittytail's Frost VFX Edit.\nWrong pick and frost lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start.") });
 			GlowHeading("Healing");
 			DrawArtPick(3, T("Healing Art"), { T("Vanilla healing"), T("Kittytail healing") },
-				{ T("Healing hands keep the light Skyrim gives them. Applies the next time the game starts."),
-					T("The cooler blue healing light from Kittytail's pack.\nInstall first: Kittytail's healing VFX edit. Applies the next time the game starts.") });
+				{ T("Healing hands keep the light Skyrim gives them. Colors change at once; the rest at the next start."),
+					T("The cooler blue healing light from Kittytail's pack.\nInstall first: Kittytail's healing VFX edit. Colors change at once; the rest at the next start.") });
 			GlowHeading("Shock");
 			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage") },
-				{ T("Skyrim's own blue-violet. Applies the next time the game starts."),
-					T("A deeper, more saturated blue.\nInstall first: Kittytail's Lightning VFX Edit.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts."),
-					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Applies the next time the game starts.") });
+				{ T("Skyrim's own blue-violet. Colors change at once; the rest at the next start."),
+					T("A deeper, more saturated blue.\nInstall first: Kittytail's Lightning VFX Edit.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start."),
+					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start.") });
 		}
 
 		// Spells Without a Patch and the art picks above the fading module's item list

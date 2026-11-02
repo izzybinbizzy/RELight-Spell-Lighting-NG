@@ -35,23 +35,25 @@ namespace Plugin
 		// keyed by the light, which Keep.cpp holds; ForgetSliderLights drops the row before the light is freed
 		struct Seen
 		{
-			const HandFx*        fx{ nullptr };
-			Pulse::Kind          kind{ Pulse::Kind::kNone };  // its spell's kind, for Realistic
-			const RE::NiColor*   tint{ nullptr };
-			float                base{ 0.0f };        // the fade RE::Light last gave it
-			float                peak{ 0.0f };        // the most it gave: held while Dynamic Lighting is off, if it flickers
-			float                rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
-			bool                 flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
-			bool                 ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
-			bool                 rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
-			float                written{ -1.0f };    // the fade we last wrote
-			float                baseRadius{ 0.0f };  // the reach RE::Light last gave it
-			float                wroteRadius{ -1.0f };
-			float                baseCutoff{ -1.0f };  // the cutoff RE::Light (or its editor) last gave it
-			float                wroteCutoff{ -2.0f };
-			std::array<float, 3> phase{};
-			RE::NiColor          baseDiffuse{};  // the color RE::Light (or the hand light) last gave it
-			RE::NiColor          wroteDiffuse{ -1.0f, -1.0f, -1.0f };
+			const HandFx*             fx{ nullptr };
+			Pulse::Kind               kind{ Pulse::Kind::kNone };  // its spell's kind, for Realistic
+			const RE::NiColor*        tint{ nullptr };
+			const RE::TESBoundObject* from{ nullptr };  // the object its tint was read for: an art pick changed in the menu reads it again
+			std::uint32_t             tintEpoch{ 0 };
+			float                     base{ 0.0f };        // the fade RE::Light last gave it
+			float                     peak{ 0.0f };        // the most it gave: held while Dynamic Lighting is off, if it flickers
+			float                     rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
+			bool                      flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
+			bool                      ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
+			bool                      rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
+			float                     written{ -1.0f };    // the fade we last wrote
+			float                     baseRadius{ 0.0f };  // the reach RE::Light last gave it
+			float                     wroteRadius{ -1.0f };
+			float                     baseCutoff{ -1.0f };  // the cutoff RE::Light (or its editor) last gave it
+			float                     wroteCutoff{ -2.0f };
+			std::array<float, 3>      phase{};
+			RE::NiColor               baseDiffuse{};  // the color RE::Light (or the hand light) last gave it
+			RE::NiColor               wroteDiffuse{ -1.0f, -1.0f, -1.0f };
 		};
 
 		[[nodiscard]] bool SameColor(const RE::NiColor& a, const RE::NiColor& b) noexcept
@@ -212,7 +214,8 @@ namespace Plugin
 				a_s.baseDiffuse = data.diffuse;  // RE::Light (or the hand light) gave it this color: the new base
 			}
 			const RE::NiColor own = a_s.tint ? *a_s.tint : a_s.baseDiffuse;
-			const RE::NiColor color = a_hue ? LightKit::FleshFx::Shown(*a_hue, own) : own;  // every light keeps its own color
+			// every light keeps its own color, on Vanilla stronger (his 384, as Illuminated)
+			const RE::NiColor color = VanillaLook(a_hue ? LightKit::FleshFx::Shown(*a_hue, own) : own);
 			data.diffuse = color;
 			a_s.wroteDiffuse = color;
 			// the cutoff follows the same rule, so an edit in RE::Light's editor sticks: a cutoff we did not write is the
@@ -334,8 +337,9 @@ namespace Plugin
 			gDaylightClock = 0.0f;
 			gDaylight = LightKit::Daylight(DimInDaylight());
 		}
-		const float scale = Brightness() * gDaylight;
+		const float scale = Brightness() * gDaylight * VanillaStrength();
 		const float reach = Reach();
+		const auto  epoch = TintEpoch();
 		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
 			if (!bsLight || !bsLight->light) {
 				continue;
@@ -369,7 +373,10 @@ namespace Plugin
 					niLight->fadeAmount = kMovingLightMark;
 				}
 				KeepLight(niLight);
-				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base) }).first;
+				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base), .from = base, .tintEpoch = epoch }).first;
+			} else if (it->second.tintEpoch != epoch && it->second.from) {
+				it->second.tint = TintOf(it->second.from);
+				it->second.tintEpoch = epoch;
 			}
 			Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
 		}

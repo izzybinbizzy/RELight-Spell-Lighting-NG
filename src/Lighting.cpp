@@ -146,6 +146,23 @@ namespace Plugin
 		return gFound.load() == Lighting::kShaders && gIslShader.load();
 	}
 
+	float VanillaStrength()
+	{
+		return gFound.load() == Lighting::kVanilla ? gVanillaStrength.load(std::memory_order_relaxed) : 1.0f;
+	}
+
+	// each channel pushed away from the color's grey by VanillaColorStrength (1 as made, above 1 deeper)
+	RE::NiColor VanillaLook(RE::NiColor a_color)
+	{
+		const float k = gVanillaSaturation.load(std::memory_order_relaxed);
+		if (gFound.load() != Lighting::kVanilla || k == 1.0f) {
+			return a_color;
+		}
+		const float grey = (a_color.red + a_color.green + a_color.blue) / 3.0f;
+		const auto  push = [&](float a_c) { return std::clamp(grey + (a_c - grey) * k, 0.0f, 1.0f); };
+		return { push(a_color.red), push(a_color.green), push(a_color.blue) };
+	}
+
 	std::string LightingReport()
 	{
 		return std::format(

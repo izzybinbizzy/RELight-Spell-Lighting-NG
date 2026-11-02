@@ -47,6 +47,7 @@ namespace Plugin
 		{
 			RE::NiColor color;
 			int         order{ 0 };
+			int         pickGroup{ -1 }, pickChoice{ -1 };  // an art pick's line: it counts while that pick is chosen
 		};
 
 		std::vector<Option>                         gOptions;
@@ -70,21 +71,24 @@ namespace Plugin
 		};
 		// his color for a spray / beam record, where the data names one (highest order wins, as every other per-key line -
 		// CodeRabbit on #18: the file read last decided it before)
-		std::unordered_map<RE::FormID, RecordTint>  gRecordColors;
-		StringMap<HandFx>                           gHandFx;
-		StringMap<Tint>                             gMeshTints;
-		std::unordered_map<RE::FormID, std::size_t> gShaderOwner;  // effect shader -> option, by its editor ID (enchantments)
-		std::unordered_map<RE::FormID, Tint>        gBaseTints;
-		std::vector<std::string>                    gKeysLongestFirst, gStreamKeysLongestFirst, gTintKeysLongestFirst;
-		std::size_t                                 gFiles = 0;
+		std::unordered_map<RE::FormID, RecordTint> gRecordColors;
+		StringMap<HandFx>                          gHandFx;
+		// key -> every layer's tint, highest order first: every art pick's is kept, the chosen one's counts (an art pick changed in
+		// the menu recolors at once)
+		StringMap<std::vector<Tint>>                      gMeshTints;
+		std::unordered_map<RE::FormID, std::size_t>       gShaderOwner;  // effect shader -> option, by its editor ID (enchantments)
+		std::unordered_map<RE::FormID, std::vector<Tint>> gBaseTints;
+		std::atomic<std::uint32_t>                        gTintEpoch{ 0 };
+		std::vector<std::string>                          gKeysLongestFirst, gStreamKeysLongestFirst, gTintKeysLongestFirst;
+		std::size_t                                       gFiles = 0;
 
 		// what a base form resolves to never changes after the data has loaded; Load3D asks from loader threads too
-		std::mutex                                         gCacheLock;
-		std::unordered_map<RE::FormID, std::size_t>        gOwnerCache;
-		std::unordered_map<RE::FormID, const Stream*>      gStreamCache;
-		std::unordered_map<RE::FormID, const RE::NiColor*> gTintCache;
-		std::unordered_map<RE::FormID, const Stream*>      gHeldCache[2];  // [first person]: asked every frame per drawn weapon
-		std::unordered_map<RE::FormID, const Stream*>      gBodyCache;     // art object -> its body light: asked every frame per art
+		std::mutex                                                                   gCacheLock;
+		std::unordered_map<RE::FormID, std::size_t>                                  gOwnerCache;
+		std::unordered_map<RE::FormID, const Stream*>                                gStreamCache;
+		std::unordered_map<RE::FormID, std::pair<std::uint32_t, const RE::NiColor*>> gTintCache;     // with the art-pick epoch it was read in
+		std::unordered_map<RE::FormID, const Stream*>                                gHeldCache[2];  // [first person]: asked every frame per drawn weapon
+		std::unordered_map<RE::FormID, const Stream*>                                gBodyCache;     // art object -> its body light: asked every frame per art
 
 		// a bad data line never gives a negative or over-bright light
 		[[nodiscard]] RE::NiColor ColorOf(float a_r, float a_g, float a_b)
@@ -116,6 +120,51 @@ namespace Plugin
 			}
 		}
 
+		// the first layer that counts now, or nullptr
+		template <class L>
+		[[nodiscard]] const L* FirstActive(const std::vector<L>& a_layers)
+		{
+			const auto it = std::ranges::find_if(a_layers, [](const L& a_l) { return PickActive(a_l.pickGroup, a_l.pickChoice); });
+			return it != a_layers.end() ? &*it : nullptr;
+		}
+
+		void AddTints(const DataText::File& a_file, int a_order, int a_group, int a_choice)
+		{
+			for (const auto& tint : a_file.tints) {
+				const auto& key = tint.key;
+				const Tint  t{ ColorOf(tint.rgb[0], tint.rgb[1], tint.rgb[2]), a_order, a_group, a_choice };
+				if (const auto id = key.find('~') != std::string::npos ? ResolveBase(key) : 0) {
+					gBaseTints[id].push_back(t);
+				} else {
+					gMeshTints[key].push_back(t);
+				}
+			}
+		}
+
+		void AddHands(const DataText::File& a_file, int a_order, std::size_t a_option, int a_group, int a_choice)
+		{
+			for (const auto& hand : a_file.hands) {
+				const auto& v = hand.v;
+				Hand        h;
+				h.key = hand.key;
+				for (std::size_t i = 0; i < 3; ++i) {
+					h.rgb[i] = static_cast<std::uint8_t>(std::clamp(v[i], 0.0f, 255.0f));
+				}
+				h.color = ColorOf(v[0], v[1], v[2]);
+				h.fade = v[3];
+				h.radius = v[4];
+				h.size = v[5];
+				h.cutoff = v[6];
+				h.inverseSquare = v[7] != 0.0f;
+				h.portalStrict = v[8] != 0.0f;
+				h.order = a_order;
+				h.option = a_option;
+				h.pickGroup = a_group;
+				h.pickChoice = a_choice;
+				gHands[h.key].push_back(std::move(h));
+			}
+		}
+
 		// one file -> one option; false when it does not read, and nothing of it is kept. The text is read by DataText.h
 		// (game-free, tested off the game); here its forms are resolved and its lights become the game's values
 		[[nodiscard]] bool ReadFile(const fs::path& a_path)
@@ -134,8 +183,15 @@ namespace Plugin
 			}
 			const auto& file = read.file;
 			// an art pick's file counts only while that pick is chosen, a Dynamic Lighting file only while it is on (the installer's
-			// questions until 2.6 - his order to move them into the menu)
-			if (const int g = DataText::PickGroup(file.option.pickGroup); g >= 0 && ArtPick(g) != DataText::PickChoice(g, file.option.pickName)) {
+			// questions until 2.6 - his order to move them into the menu). Another pick's file still gives its colors, so a pick
+			// changed in the menu recolors at once; the lights only that pick brings wait for the next start
+			const int group = DataText::PickGroup(file.option.pickGroup);
+			const int choice = group >= 0 ? DataText::PickChoice(group, file.option.pickName) : -1;
+			if (group >= 0 && ArtPick(group) != choice) {
+				if (!file.option.dynamic) {
+					AddTints(file, file.option.order, group, choice);
+					AddHands(file, file.option.order, kNone, group, choice);
+				}
 				return true;
 			}
 			if (file.option.dynamic && !DynamicLightingThisSession()) {
@@ -259,33 +315,8 @@ namespace Plugin
 			for (const auto& fx : file.fx) {
 				KeepHighest(gHandFx, fx.key, HandFx{ fx.flicker, fx.perSecond, fx.intensity, opt.order }, opt.order);
 			}
-			for (const auto& tint : file.tints) {
-				const auto& key = tint.key;
-				const Tint  t{ ColorOf(tint.rgb[0], tint.rgb[1], tint.rgb[2]), opt.order };
-				if (const auto id = key.find('~') != std::string::npos ? ResolveBase(key) : 0) {
-					KeepHighest(gBaseTints, id, t, opt.order);
-				} else {
-					KeepHighest(gMeshTints, key, t, opt.order);
-				}
-			}
-			for (const auto& hand : file.hands) {
-				const auto& v = hand.v;
-				Hand        h;
-				h.key = hand.key;
-				for (std::size_t i = 0; i < 3; ++i) {
-					h.rgb[i] = static_cast<std::uint8_t>(std::clamp(v[i], 0.0f, 255.0f));
-				}
-				h.color = ColorOf(v[0], v[1], v[2]);
-				h.fade = v[3];
-				h.radius = v[4];
-				h.size = v[5];
-				h.cutoff = v[6];
-				h.inverseSquare = v[7] != 0.0f;
-				h.portalStrict = v[8] != 0.0f;
-				h.order = opt.order;
-				h.option = idx;
-				gHands[h.key].push_back(std::move(h));
-			}
+			AddTints(file, opt.order, group, choice);
+			AddHands(file, opt.order, idx, group, choice);
 			return true;
 		}
 
@@ -476,6 +507,12 @@ namespace Plugin
 		for (auto& list : gHands | std::views::values) {
 			std::ranges::stable_sort(list, std::greater{}, &Hand::order);
 		}
+		for (auto& list : gMeshTints | std::views::values) {
+			std::ranges::stable_sort(list, std::greater{}, &Tint::order);
+		}
+		for (auto& list : gBaseTints | std::views::values) {
+			std::ranges::stable_sort(list, std::greater{}, &Tint::order);
+		}
 		gMenuOrder.resize(gOptions.size());
 		std::iota(gMenuOrder.begin(), gMenuOrder.end(), std::size_t{ 0 });
 		std::ranges::stable_sort(gMenuOrder, [](std::size_t a, std::size_t b) {
@@ -622,13 +659,13 @@ namespace Plugin
 				return nullptr;
 			}
 			if (const auto t = gMeshTints.find(hand); t != gMeshTints.end()) {
-				return &t->second.color;
+				if (const auto* layer = FirstActive(t->second)) {
+					return &layer->color;
+				}
 			}
-			const auto h = gHands.find(hand);
-			if (h == gHands.end() || h->second.empty()) {
-				return nullptr;
-			}
-			return &std::ranges::max_element(h->second, {}, &Hand::order)->color;
+			const auto  h = gHands.find(hand);
+			const auto* layer = h != gHands.end() ? FirstActive(h->second) : nullptr;
+			return layer ? &layer->color : nullptr;
 		}
 	}
 
@@ -642,18 +679,63 @@ namespace Plugin
 		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty())) {
 			return nullptr;
 		}
-		return Cached(gTintCache, a_base, [&]() -> const RE::NiColor* {
+		const auto work = [&]() -> const RE::NiColor* {
 			const auto key = KeyOf(a_base);
 			if (const auto* hand = ElementHandColor(a_base, key)) {
 				return hand;
 			}
 			if (auto it = gBaseTints.find(a_base->GetFormID()); it != gBaseTints.end()) {
-				return &it->second.color;
+				if (const auto* layer = FirstActive(it->second)) {
+					return &layer->color;
+				}
 			}
-			const auto it = key.empty() ? gMeshTints.cend() : Find(gMeshTints, gTintKeysLongestFirst, key);
-			return it != gMeshTints.cend() ? &it->second.color : nullptr;
-		});
+			if (key.empty()) {
+				return nullptr;
+			}
+			// RE::Light's rule (Find), over the keys a layer that counts now lights: the exact key, else the longest contained
+			const auto active = [](const auto a_it) { return a_it != gMeshTints.cend() ? FirstActive(a_it->second) : nullptr; };
+			if (const auto* layer = active(gMeshTints.find(key))) {
+				return &layer->color;
+			}
+			for (const auto& k : gTintKeysLongestFirst) {
+				if (k.size() < key.size() && key.find(k) != std::string::npos) {
+					if (const auto* layer = active(gMeshTints.find(k))) {
+						return &layer->color;
+					}
+				}
+			}
+			return nullptr;
+		};
+		// cached as Cached does, with the epoch: an answer worked out while a pick changed is read again on the next ask
+		const auto id = a_base->GetFormID();
+		if ((id >> 24) == 0xFF) {
+			return work();
+		}
+		const auto epoch = TintEpoch();
+		{
+			std::lock_guard l{ gCacheLock };
+			if (const auto it = gTintCache.find(id); it != gTintCache.end() && it->second.first == epoch) {
+				return it->second.second;
+			}
+		}
+		const auto*     value = work();
+		std::lock_guard l{ gCacheLock };
+		gTintCache.insert_or_assign(id, std::pair{ epoch, value });
+		return value;
 	}
+
+	bool PickActive(int a_group, int a_choice) { return a_group < 0 || ArtPick(a_group) == a_choice; }
+
+	void ArtPickChanged()
+	{
+		{
+			std::lock_guard l{ gCacheLock };
+			gTintCache.clear();
+		}
+		gTintEpoch.fetch_add(1, std::memory_order_release);
+	}
+
+	std::uint32_t TintEpoch() { return gTintEpoch.load(std::memory_order_acquire); }
 
 	const Stream* HeldOf(const RE::TESObjectWEAP* a_weapon, bool a_firstPerson)
 	{
