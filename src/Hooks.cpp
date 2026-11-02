@@ -532,14 +532,17 @@ namespace
 	int                              gHerShadowsMaking{ 0 };     // a shadow caster being made right now
 	RE::NiLight*                     gShadowBetween{ nullptr };  // the caster moved between her hands; main thread only
 
-	[[nodiscard]] bool HasLitHandLight(RE::NiAVObject* a_magic)
+	// a spell light of ours hangs in that hand (a culled one counts: sneaking or a switch dims both hands alike)
+	[[nodiscard]] bool HasHandLight(const RE::NiAVObject* a_magic)
 	{
-		bool lit = false;
-		RE::BSVisit::TraverseScenegraphLights(a_magic, [&](RE::NiPointLight* a_light) {
-			lit = gMagicLights.contains(a_light) && !a_light->GetAppCulled();
-			return lit ? RE::BSVisit::BSVisitControl::kStop : RE::BSVisit::BSVisitControl::kContinue;
+		return std::ranges::any_of(gMagicLights, [a_magic](const RE::NiLight* a_light) {
+			for (const RE::NiAVObject* up = a_light->parent; up; up = up->parent) {
+				if (up == a_magic) {
+					return true;
+				}
+			}
+			return false;
 		});
-		return lit;
 	}
 
 	// main thread, each frame: with both her hands lit the one shadow caster sits between them, so she throws one shadow;
@@ -562,6 +565,9 @@ namespace
 		}
 		RE::NiAVObject* own = light->parent;
 		while (own && !std::string_view(own->name.c_str()).contains("MagicNode")) {
+			if (std::string_view(own->name.c_str()).contains("Billboard")) {
+				return;  // turns with the view: OutOfThePalm left it in place, so does this
+			}
 			own = own->parent;
 		}
 		const auto* strings = RE::FixedStrings::GetSingleton();
@@ -575,7 +581,7 @@ namespace
 		const bool left = std::string_view(own->name.c_str()).contains("L MagicNode");
 		auto*      other = root->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode);
 		const auto mine = own->world * LightKit::kHandPoint;
-		if (other && HasLitHandLight(other)) {
+		if (other && HasHandLight(other)) {
 			const auto point = (mine + other->world * LightKit::kHandPoint) * 0.5f;
 			light->local.translate = light->parent->world.Invert() * point;
 			light->world.translate = point;
