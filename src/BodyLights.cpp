@@ -30,8 +30,9 @@ namespace Plugin
 	{
 		constexpr const char* kLightName = "RSABody";
 		constexpr float       kFrozenHold = 4.0f;   // seconds at full strength, then out over kFecOut
-		constexpr float       kBurningHold = 8.0f;  // the shader's char darkening ends at 8 s
+		constexpr float       kBurningHold = 8.0f;  // a fire played with no end: the char darkening ends at 8 s
 		constexpr float       kFecOut = 2.0f;
+		constexpr float       kBurningOut = 1.0f;  // the flames die over this
 
 		// FEC.esp is an ESL - its ids move with the load order: FEC_FrostFXS, then FEC_FireFXS and FEC_FireHeavyFXS
 		[[nodiscard]] const std::array<const RE::TESEffectShader*, 3>& FecShaders()
@@ -60,7 +61,14 @@ namespace Plugin
 			if (!(frozen && FecFrozenFadesOut()) && !(burning && FecBurningFadesOut())) {
 				return 1.0f;
 			}
-			return std::clamp(1.0f - (shader->age - (frozen ? kFrozenHold : kBurningHold)) / kFecOut, 0.0f, 1.0f);
+			if (frozen) {
+				return std::clamp(1.0f - (shader->age - kFrozenHold) / kFecOut, 0.0f, 1.0f);
+			}
+			// FEC times its own fire (2-5 s): the light ends with the effect; only a fire played with no end fades
+			if (shader->lifetime > 0.0f) {
+				return 1.0f;
+			}
+			return std::clamp(1.0f - (shader->age - kBurningHold) / kBurningOut, 0.0f, 1.0f);
 		}
 
 		struct Live
@@ -220,7 +228,8 @@ namespace Plugin
 				} else if (shader && !shader->finished) {
 					body = BodyOf(shader->effectData);
 				}
-				if (!body || !OptionLit(body->option)) {
+				// a faded-out FEC body is not seen: its light comes off and leaves the glow cap
+				if (!body || !OptionLit(body->option) || FecBodyFade(art) <= 0.0f) {
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
 				const auto ref = art->target.get();

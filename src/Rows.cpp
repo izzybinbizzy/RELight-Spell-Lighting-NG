@@ -84,7 +84,8 @@ namespace Plugin
 			std::uint32_t                    frames{ 0 };
 		};
 		std::vector<CloudWait>  gCloudWait;
-		constexpr std::uint32_t kCloudTries = 600;  // about ten seconds of frames: a cone's cast and its cloud's life
+		constexpr std::uint32_t kCloudTries = 600;          // about ten seconds of frames: a cone's cast and its cloud's life
+		constexpr float         kCloudReachShaders = 3.0f;  // Illuminated's: a row's x1 left Ice Storm's cloud faint on Community Shaders
 
 		// Illuminated's row, the same numbers (its 1.4: the row came off its cap, so Vanilla and ENB were trimmed to Community
 		// Shaders' lift)
@@ -342,7 +343,8 @@ namespace Plugin
 			const auto& rec = *a_c.recipe;
 			const bool  isl = InverseSquare();
 			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
-			const float reach = rec.reach * Reach() * RowReachFor(LightingFound());
+			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
+			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
 			RE::NiColor color = rec.color;
 			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
