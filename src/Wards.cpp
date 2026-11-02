@@ -252,12 +252,12 @@ namespace Plugin
 			       std::abs(a_color.blue - kStockOrange.blue) < 0.05f;
 		}
 
-		// a block that carries a hue, not a white or grey one
+		// a block that carries a hue (a pale tint too), not a white or grey one
 		[[nodiscard]] bool Coloured(const RE::NiColor& a_color)
 		{
 			const float hi = (std::max)({ a_color.red, a_color.green, a_color.blue });
 			const float lo = (std::min)({ a_color.red, a_color.green, a_color.blue });
-			return hi > 0.0f && (hi - lo) / hi > 0.2f;
+			return hi > 0.0f && (hi - lo) / hi > 0.05f;
 		}
 
 		// 360 Ward - Other colors (Nexus 156803) recolors 360 Ward's sphere in place (Illuminated's way): the sphere is left as it is
