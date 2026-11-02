@@ -73,7 +73,7 @@ namespace Fade
 		}
 		SetConfig(s);
 		if (read.moved) {
-			SKSE::log::info("settings: moved to the new fading defaults once (curve linear, reach follows 100%)");
+			SKSE::log::info("settings: brought to the current fading defaults (stamp {}) and saved", s.defaults);
 			SaveSettings();
 		}
 		const auto& t = s.tuning;
