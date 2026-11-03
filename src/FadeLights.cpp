@@ -612,6 +612,7 @@ namespace Fade
 			gHands.clear();
 			gActiveList.clear();
 			gActiveHands = 0;
+			gActiveSpellHands = 0;
 		}
 
 		// one spell hand, one frame (from UpdateHands, under the lock)

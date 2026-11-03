@@ -233,6 +233,17 @@ namespace
 		return level;
 	}
 
+	// her weapons' swirls follow sneaking alone, never the invisible / shadow fade (the pick is named for sneaking)
+	float StepSwirlLevel(const RE::PlayerCharacter* a_player, float a_delta)
+	{
+		static float level = 1.0f;
+		const bool   fade = Plugin::SwirlsFadeOn() && Plugin::SneakOn() && a_player && a_player->IsSneaking();
+		const float  target = fade ? static_cast<float>(Plugin::SneakBrightness()) / 100.0f : 1.0f;
+		const float  step = std::clamp(a_delta, 0.0f, 0.25f) / kSneakFadeSeconds;
+		level = level < target ? (std::min)(level + step, target) : (std::max)(level - step, target);
+		return level;
+	}
+
 	// The projectiles, explosions and hazards that are MAGIC: what a magic effect fires or sets off (its projectile, its
 	// explosion, its projectile's explosion, the hazard such an explosion leaves), worked out once at data load before
 	// the hooks go in, read-only after (the 3D-load hooks ask from loader threads). An arrow, a trap's explosion or a
@@ -802,7 +813,7 @@ namespace
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
 				const float sneak = StepSneakLevel(a_this, a_delta);
-				Fade::SetSneakArt(Plugin::SwirlsFadeOn() ? sneak : 1.0f);
+				Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
 				UpdateBudgetLights();
 				Plugin::UpdateOptionLights();
 				HoldBudgetLightsOut();
