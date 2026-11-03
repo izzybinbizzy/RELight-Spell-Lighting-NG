@@ -94,6 +94,7 @@ namespace Fade
 			Glow::Scaled                             fill, rim;
 			RE::NiPointer<RE::NiAVObject>            enbGlow;  // ENB Lights For Effect Shaders' particle add-on on this glow
 			Glow::Scaled                             glowScale;
+			bool                                     enbSearched{ false };
 			std::uint32_t                            frame{ 0 };
 		};
 
@@ -170,6 +171,8 @@ namespace Fade
 		std::atomic<bool> gEnabled{ false }, gDimShader{ false };
 		// how far her weapons' enchantment art dims while she sneaks (the mod sets it every frame; 1 = untouched)
 		std::atomic<float> gSneakArt{ 1.0f };
+		// spell hands followed this frame (a self-cast glow fades with them; gActiveHands counts weapon hands only)
+		std::atomic<std::size_t> gActiveSpellHands{ 0 };
 		// Lights by Item's own record of each weapon hand's enchantment-effect roots, for a hand the fading pass does not follow
 		// (Fading off, the weapon exempt): filled by the effect hooks, under gLock, only while Items asked for it the frame before
 		// (gItemRootsWanted, set by EffectRootsOf, cleared by UpdateHands). Never filled by walking the game's own list of magic
@@ -492,6 +495,17 @@ namespace Fade
 			for (auto* h : gActiveList) {
 				if (h->left == a_left && h->actorSeen == a_actor) {
 					return h;
+				}
+			}
+			return nullptr;
+		}
+
+		// this frame's spell hand of an actor, by its address (a self-cast glow; the effect hooks run on any thread). Under gLock.
+		HandTrack* ActiveSpellHand(const RE::Actor* a_actor, bool a_left)
+		{
+			for (auto& [key, h] : gHands) {
+				if (h.spell && h.active && h.left == a_left && h.actorSeen == a_actor && gFrame - h.frame <= 1) {
+					return &h;
 				}
 			}
 			return nullptr;
@@ -954,12 +968,15 @@ namespace Fade
 		}
 		Sweep();
 		gActiveList.clear();
+		std::size_t spells = 0;
 		for (auto& [key, hand] : gHands) {
 			if (hand.active && !hand.spell) {
 				gActiveList.push_back(&hand);
 			}
+			spells += hand.active && hand.spell ? 1 : 0;
 		}
 		gActiveHands = gActiveList.size();
+		gActiveSpellHands = spells;
 		PublishHud(s, hudHidden);
 		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
 	}
@@ -1031,18 +1048,20 @@ namespace Fade
 	void AfterShaderEffect(RE::ShaderReferenceEffect* a_effect)
 	{
 		// the cheap test first: every effect shader in the loaded world comes through here every frame
-		if (gActiveHands.load(std::memory_order_relaxed) == 0 || !gDimShader.load(std::memory_order_relaxed)) {
+		const bool weapons = gActiveHands.load(std::memory_order_relaxed) > 0;
+		const bool spells = gActiveSpellHands.load(std::memory_order_relaxed) > 0;
+		if ((!weapons && !spells) || !gDimShader.load(std::memory_order_relaxed) || !a_effect || !a_effect->effectShaderData) {
 			return;
 		}
 		RE::Actor*      actor = nullptr;
 		bool            left = false;
 		RE::NiAVObject* root = nullptr;
-		if (!a_effect || !a_effect->effectShaderData ||
-			(!HandOfEffect(a_effect, actor, left, root) && !HandOfSelfSpell(a_effect, actor, left))) {
+		const bool      enchantment = weapons && HandOfEffect(a_effect, actor, left, root);
+		if (!enchantment && !(spells && HandOfSelfSpell(a_effect, actor, left))) {
 			return;
 		}
 		std::lock_guard lock(gLock);
-		const auto*     hand = ActiveHand(actor, left);
+		const auto*     hand = enchantment ? ActiveHand(actor, left) : ActiveSpellHand(actor, left);
 		if (!hand) {
 			return;
 		}
@@ -1059,7 +1078,8 @@ namespace Fade
 		data->rimColor.alpha = std::clamp(seen.rim.Apply(data->rimColor.alpha, k), 0.0f, 1.0f);
 		// ENB Lights For Effect Shaders lights a glow through a particle add-on; ENB's light follows the particles' size, late
 		// and only once they are small (measured), so the size falls with the cube of the fade
-		if (!seen.enbGlow) {
+		if (!seen.enbSearched) {
+			seen.enbSearched = true;
 			for (const auto& addon : a_effect->addonObjects) {
 				if (auto* node = addon ? addon->GetObjectByName(kEnbGlowNode) : nullptr) {
 					seen.enbGlow.reset(node);
