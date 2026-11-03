@@ -59,6 +59,7 @@ namespace
 	// read on any thread
 	std::atomic<float> gSneakLevel{ 1.0f };
 	constexpr float    kSneakFadeSeconds = 0.5f;
+	float              gSwirlLevel{ 1.0f };  // her weapons' art (StepSwirlLevel, main thread); full again at a load
 
 	// Our write is the LAST word on a dimmed light's fade and never a base for anyone else's: each light remembers the fade
 	// the other passes left it (`pre`) and what we wrote over it. Before any of them writes again - the player update, an
@@ -236,10 +237,10 @@ namespace
 	// her weapons' swirls follow sneaking alone, never the invisible / shadow fade (the pick is named for sneaking)
 	float StepSwirlLevel(const RE::PlayerCharacter* a_player, float a_delta)
 	{
-		static float level = 1.0f;
-		const bool   fade = Plugin::SwirlsFadeOn() && Plugin::SneakOn() && a_player && a_player->IsSneaking();
-		const float  target = fade ? static_cast<float>(Plugin::SneakBrightness()) / 100.0f : 1.0f;
-		const float  step = std::clamp(a_delta, 0.0f, 0.25f) / kSneakFadeSeconds;
+		float&      level = gSwirlLevel;
+		const bool  fade = Plugin::SwirlsFadeOn() && Plugin::SneakOn() && a_player && a_player->IsSneaking();
+		const float target = fade ? static_cast<float>(Plugin::SneakBrightness()) / 100.0f : 1.0f;
+		const float step = std::clamp(a_delta, 0.0f, 0.25f) / kSneakFadeSeconds;
 		level = level < target ? (std::min)(level + step, target) : (std::max)(level - step, target);
 		return level;
 	}
@@ -990,6 +991,11 @@ namespace Plugin
 	{
 		InstallLoadHooks();
 		static_cast<void>(Signs());  // the perks and abilities that need the dark, found once here - never on the first frame of play
+	}
+	void DropSwirlLevel()
+	{
+		gSwirlLevel = 1.0f;
+		Fade::SetSneakArt(1.0f);
 	}
 }
 

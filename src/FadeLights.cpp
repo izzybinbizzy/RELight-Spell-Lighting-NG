@@ -173,6 +173,8 @@ namespace Fade
 		std::atomic<float> gSneakArt{ 1.0f };
 		// spell hands followed this frame (a self-cast glow fades with them; gActiveHands counts weapon hands only)
 		std::atomic<std::size_t> gActiveSpellHands{ 0 };
+		// this frame's settings, for the effect hooks (under gLock)
+		Settings gFrameSettings{};
 		// Lights by Item's own record of each weapon hand's enchantment-effect roots, for a hand the fading pass does not follow
 		// (Fading off, the weapon exempt): filled by the effect hooks, under gLock, only while Items asked for it the frame before
 		// (gItemRootsWanted, set by EffectRootsOf, cleared by UpdateHands). Never filled by walking the game's own list of magic
@@ -548,8 +550,9 @@ namespace Fade
 			return first == vtbl.address() ? static_cast<RE::ActiveEffectReferenceEffectController*>(a_ctrl) : nullptr;
 		}
 
-		// a spell's glow on the one who cast it from a hand (a self heal): that hand and its caster; false for anything else
-		bool HandOfSelfSpell(RE::ReferenceEffect* a_effect, RE::Actor*& a_actor, bool& a_left)
+		// a spell's glow on the one who cast it from a hand (a self heal): that hand, its caster and the glow's own spell; false
+		// for anything else
+		bool HandOfSelfSpell(RE::ReferenceEffect* a_effect, RE::Actor*& a_actor, bool& a_left, const RE::MagicItem*& a_spell)
 		{
 			using Source = RE::MagicSystem::CastingSource;
 			auto* ctrl = a_effect ? SpellEffectOf(a_effect->controller) : nullptr;
@@ -564,6 +567,7 @@ namespace Fade
 			}
 			a_actor = target;
 			a_left = effect->castingSource == Source::kLeftHand;
+			a_spell = effect->spell;
 			return true;
 		}
 
@@ -841,6 +845,7 @@ namespace Fade
 		const bool      hudHidden = s.enabled && s.hudGems && HudMovieHidden();
 		std::lock_guard lock(gLock);
 		++gFrame;
+		gFrameSettings = s;
 		// Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen for a
 		// few frames are let go (they hold the effects' 3D)
 		gItemRootsWanted.store(false, std::memory_order_relaxed);
@@ -1054,16 +1059,26 @@ namespace Fade
 		if ((!weapons && !spells) || !gDimShader.load(std::memory_order_relaxed) || !a_effect || !a_effect->effectShaderData) {
 			return;
 		}
-		RE::Actor*      actor = nullptr;
-		bool            left = false;
-		RE::NiAVObject* root = nullptr;
-		const bool      enchantment = weapons && HandOfEffect(a_effect, actor, left, root);
-		if (!enchantment && !(spells && HandOfSelfSpell(a_effect, actor, left))) {
+		RE::Actor*           actor = nullptr;
+		bool                 left = false;
+		RE::NiAVObject*      root = nullptr;
+		const bool           enchantment = weapons && HandOfEffect(a_effect, actor, left, root);
+		const RE::MagicItem* glowSpell = nullptr;
+		if (!enchantment && !(spells && HandOfSelfSpell(a_effect, actor, left, glowSpell))) {
 			return;
 		}
 		std::lock_guard lock(gLock);
 		const auto*     hand = enchantment ? ActiveHand(actor, left) : ActiveSpellHand(actor, left);
 		if (!hand) {
+			return;
+		}
+		// a glow can outlive its spell's turn in the hand: its own spell's kind decides, as the hand path does, and one that
+		// is off goes back to its own strength at once
+		if (glowSpell && glowSpell != hand->kindSpell && !KindOff(gFrameSettings, KindOf(glowSpell)).empty()) {
+			if (const auto it = gShaders.find(a_effect); it != gShaders.end()) {
+				RestoreShader(it->second);
+				gShaders.erase(it);
+			}
 			return;
 		}
 		auto [it, added] = gShaders.try_emplace(a_effect);

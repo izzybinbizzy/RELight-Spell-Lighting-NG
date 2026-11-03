@@ -113,6 +113,7 @@ namespace
 		Plugin::DropBodyLights();
 		Plugin::DropHeldLights();
 		Plugin::DropRows();
+		Plugin::DropSwirlLevel();
 		Fade::OnGameLoading();
 	}
 
