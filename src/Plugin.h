@@ -222,6 +222,8 @@ namespace Plugin
 	void                      SetGlowLimitCount(int a_count);
 	[[nodiscard]] bool        RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
 	void                      SetRunesFadeOn(bool a_on);
+	[[nodiscard]] bool        SwirlsFadeOn();  // her weapons' enchantment art fades with her lights while she sneaks
+	void                      SetSwirlsFadeOn(bool a_on);
 	[[nodiscard]] bool        InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
 	void                      SetInvisibleFadeOn(bool a_on);
 	[[nodiscard]] bool        FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)

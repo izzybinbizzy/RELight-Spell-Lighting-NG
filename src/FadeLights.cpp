@@ -92,8 +92,13 @@ namespace Fade
 		{
 			RE::NiPointer<RE::ShaderReferenceEffect> effect;
 			Glow::Scaled                             fill, rim;
+			RE::NiPointer<RE::NiAVObject>            enbGlow;  // ENB Lights For Effect Shaders' particle add-on on this glow
+			Glow::Scaled                             glowScale;
+			bool                                     enbSearched{ false };
 			std::uint32_t                            frame{ 0 };
 		};
+
+		constexpr std::string_view kEnbGlowNode = "po3_ENBLightGlow";
 
 		// an enchantment art's glowing mesh (VAER's swirls, EAE's art): its effect material's emissive scale, keyed by the
 		// material, since two meshes may share one (two keys on one material would each take the other's write as a base)
@@ -164,6 +169,10 @@ namespace Fade
 		// this frame's switches, for the effect hooks, which run for every effect in the world and must not lock and copy
 		// the settings each time
 		std::atomic<bool> gEnabled{ false }, gDimShader{ false };
+		// how far her weapons' enchantment art dims while she sneaks (the mod sets it every frame; 1 = untouched)
+		std::atomic<float> gSneakArt{ 1.0f };
+		// spell hands followed this frame (a self-cast glow fades with them; gActiveHands counts weapon hands only)
+		std::atomic<std::size_t> gActiveSpellHands{ 0 };
 		// Lights by Item's own record of each weapon hand's enchantment-effect roots, for a hand the fading pass does not follow
 		// (Fading off, the weapon exempt): filled by the effect hooks, under gLock, only while Items asked for it the frame before
 		// (gItemRootsWanted, set by EffectRootsOf, cleared by UpdateHands). Never filled by walking the game's own list of magic
@@ -300,6 +309,9 @@ namespace Fade
 
 		void RestoreShader(ShaderSeen& a_seen)
 		{
+			if (a_seen.enbGlow) {
+				a_seen.enbGlow->local.scale = a_seen.glowScale.Restore(a_seen.enbGlow->local.scale);
+			}
 			// a finished effect's shader data may already be gone: nothing to put back on it
 			auto* data = a_seen.effect && !a_seen.effect->finished ? a_seen.effect->effectShaderData : nullptr;
 			if (data) {
@@ -488,6 +500,17 @@ namespace Fade
 			return nullptr;
 		}
 
+		// this frame's spell hand of an actor, by its address (a self-cast glow; the effect hooks run on any thread). Under gLock.
+		HandTrack* ActiveSpellHand(const RE::Actor* a_actor, bool a_left)
+		{
+			for (auto& [key, h] : gHands) {
+				if (h.spell && h.active && h.left == a_left && h.actorSeen == a_actor && gFrame - h.frame <= 1) {
+					return &h;
+				}
+			}
+			return nullptr;
+		}
+
 		// the effect's weapon-enchantment controller by its vtable, no RTTI cast (the hooks ask this of every effect in the world);
 		// no class of the game derives from it (its own type info), so it matches exactly what skyrim_cast matched
 		[[nodiscard]] RE::WeaponEnchantmentController* WeaponEnchantmentOf(RE::ReferenceEffectController* a_ctrl)
@@ -511,6 +534,36 @@ namespace Fade
 			a_actor = ctrl->target;
 			a_left = ctrl->caster->castingSource == RE::MagicSystem::CastingSource::kLeftHand;
 			a_root = ctrl->attachRoot.get();
+			return true;
+		}
+
+		[[nodiscard]] RE::ActiveEffectReferenceEffectController* SpellEffectOf(RE::ReferenceEffectController* a_ctrl)
+		{
+			if (!a_ctrl) {
+				return nullptr;
+			}
+			static const REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_ActiveEffectReferenceEffectController[0] };
+			std::uintptr_t                               first = 0;
+			std::memcpy(&first, static_cast<const void*>(a_ctrl), sizeof(first));
+			return first == vtbl.address() ? static_cast<RE::ActiveEffectReferenceEffectController*>(a_ctrl) : nullptr;
+		}
+
+		// a spell's glow on the one who cast it from a hand (a self heal): that hand and its caster; false for anything else
+		bool HandOfSelfSpell(RE::ReferenceEffect* a_effect, RE::Actor*& a_actor, bool& a_left)
+		{
+			using Source = RE::MagicSystem::CastingSource;
+			auto* ctrl = a_effect ? SpellEffectOf(a_effect->controller) : nullptr;
+			auto* effect = ctrl ? ctrl->effect : nullptr;
+			if (!effect || (effect->castingSource != Source::kLeftHand && effect->castingSource != Source::kRightHand)) {
+				return false;
+			}
+			auto*      target = effect->GetTargetActor();
+			const auto caster = effect->GetCasterActor();
+			if (!target || caster.get() != target) {
+				return false;
+			}
+			a_actor = target;
+			a_left = effect->castingSource == Source::kLeftHand;
 			return true;
 		}
 
@@ -559,6 +612,7 @@ namespace Fade
 			gHands.clear();
 			gActiveList.clear();
 			gActiveHands = 0;
+			gActiveSpellHands = 0;
 		}
 
 		// one spell hand, one frame (from UpdateHands, under the lock)
@@ -915,20 +969,24 @@ namespace Fade
 		}
 		Sweep();
 		gActiveList.clear();
+		std::size_t spells = 0;
 		for (auto& [key, hand] : gHands) {
 			if (hand.active && !hand.spell) {
 				gActiveList.push_back(&hand);
 			}
+			spells += hand.active && hand.spell ? 1 : 0;
 		}
 		gActiveHands = gActiveList.size();
+		gActiveSpellHands = spells;
 		PublishHud(s, hudHidden);
 		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
 	}
 
 	void AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D)
 	{
-		const bool items = gItemRootsWanted.load(std::memory_order_relaxed);
-		if (gActiveHands.load(std::memory_order_relaxed) == 0 && !items && !Items::Holding()) {
+		const bool  items = gItemRootsWanted.load(std::memory_order_relaxed);
+		const float sneakArt = gSneakArt.load(std::memory_order_relaxed);
+		if (gActiveHands.load(std::memory_order_relaxed) == 0 && !items && !Items::Holding() && sneakArt >= 1.0f) {
 			return;
 		}
 		RE::Actor*      actor = nullptr;
@@ -949,6 +1007,7 @@ namespace Fade
 				}
 			}
 		}
+		const float sneak = actor == RE::PlayerCharacter::GetSingleton() ? sneakArt : 1.0f;
 		if (auto* hand = gEnabled ? ActiveHand(actor, left) : nullptr) {
 			for (auto* node : nodes) {
 				if (!node) {
@@ -957,9 +1016,13 @@ namespace Fade
 				NoteRoot(hand->effectRoots, node);
 				ApplyUnder(node, *hand);  // right after Light Placer wrote this frame's values for this effect
 			}
-			if (nodes[1] && gDimShader.load(std::memory_order_relaxed)) {
-				DimArt(nodes[1], hand->out.brightness);  // the art's own glowing meshes: VAER's swirls, EAE's art
+			const bool dim = gDimShader.load(std::memory_order_relaxed);
+			if (nodes[1] && (dim || sneak < 1.0f)) {
+				// the art's own glowing meshes: VAER's swirls, EAE's art
+				DimArt(nodes[1], (dim ? hand->out.brightness : 1.0f) * sneak);
 			}
+		} else if (nodes[1] && sneak < 1.0f) {
+			DimArt(nodes[1], sneak);
 		}
 		for (auto* node : nodes) {
 			Items::ReapplyUnder(node);  // last: an item's own choice over Light Placer's animation of this frame
@@ -986,17 +1049,20 @@ namespace Fade
 	void AfterShaderEffect(RE::ShaderReferenceEffect* a_effect)
 	{
 		// the cheap test first: every effect shader in the loaded world comes through here every frame
-		if (gActiveHands.load(std::memory_order_relaxed) == 0 || !gDimShader.load(std::memory_order_relaxed)) {
+		const bool weapons = gActiveHands.load(std::memory_order_relaxed) > 0;
+		const bool spells = gActiveSpellHands.load(std::memory_order_relaxed) > 0;
+		if ((!weapons && !spells) || !gDimShader.load(std::memory_order_relaxed) || !a_effect || !a_effect->effectShaderData) {
 			return;
 		}
 		RE::Actor*      actor = nullptr;
 		bool            left = false;
 		RE::NiAVObject* root = nullptr;
-		if (!a_effect || !a_effect->effectShaderData || !HandOfEffect(a_effect, actor, left, root)) {
+		const bool      enchantment = weapons && HandOfEffect(a_effect, actor, left, root);
+		if (!enchantment && !(spells && HandOfSelfSpell(a_effect, actor, left))) {
 			return;
 		}
 		std::lock_guard lock(gLock);
-		const auto*     hand = ActiveHand(actor, left);
+		const auto*     hand = enchantment ? ActiveHand(actor, left) : ActiveSpellHand(actor, left);
 		if (!hand) {
 			return;
 		}
@@ -1011,7 +1077,23 @@ namespace Fade
 		auto*       data = a_effect->effectShaderData;
 		data->fillColor.alpha = std::clamp(seen.fill.Apply(data->fillColor.alpha, k), 0.0f, 1.0f);
 		data->rimColor.alpha = std::clamp(seen.rim.Apply(data->rimColor.alpha, k), 0.0f, 1.0f);
+		// ENB Lights For Effect Shaders lights a glow through a particle add-on; ENB's light follows the particles' size, late
+		// and only once they are small (measured), so the size falls with the cube of the fade
+		if (!seen.enbSearched) {
+			seen.enbSearched = true;
+			for (const auto& addon : a_effect->addonObjects) {
+				if (auto* node = addon ? addon->GetObjectByName(kEnbGlowNode) : nullptr) {
+					seen.enbGlow.reset(node);
+					break;
+				}
+			}
+		}
+		if (seen.enbGlow) {
+			seen.enbGlow->local.scale = seen.glowScale.Apply(seen.enbGlow->local.scale, (std::max)(k * k * k, 0.05f));
+		}
 	}
+
+	void SetSneakArt(float a_level) { gSneakArt.store(std::clamp(a_level, 0.0f, 1.0f), std::memory_order_relaxed); }
 
 	void ReapplyAll()
 	{

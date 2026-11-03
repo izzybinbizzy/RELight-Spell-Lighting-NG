@@ -187,9 +187,9 @@ namespace Fade
 			Percent("Reach follows", t.reachFollows, 0, 100,
 				"How much of the fade the light's reach follows too. 0%: only the brightness fades; 100%: the reach shrinks just as much.",
 				save);
-			Toggle("Dim the enchantment glow too", s.dimShader,
+			Toggle("Dim the glow too", s.dimShader,
 				"The glow on the blade (the enchantment's shader and its art, VAER's swirls among them) fades with the charge, "
-				"like the lights.",
+				"and the glow of a spell you cast on yourself (a heal, a cloak) with your magicka, like the lights.",
 				save);
 
 			GlowHeading(Icon::kMoon, "Nearly empty");
