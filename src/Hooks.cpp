@@ -802,6 +802,7 @@ namespace
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
 				const float sneak = StepSneakLevel(a_this, a_delta);
+				Fade::SetSneakArt(Plugin::SwirlsFadeOn() ? sneak : 1.0f);
 				UpdateBudgetLights();
 				Plugin::UpdateOptionLights();
 				HoldBudgetLightsOut();

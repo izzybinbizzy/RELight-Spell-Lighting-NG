@@ -80,7 +80,7 @@ namespace DataText
 	inline constexpr std::array<std::array<std::string_view, 4>, 4> kPickNames{ {
 		{ "Vanilla", "Inferno", "Embers XD", "Kittytail Flame" },
 		{ "Vanilla", "Kittytail", "", "" },
-		{ "Vanilla", "Kittytail Lightning", "Voltage", "" },
+		{ "Vanilla", "Kittytail Lightning", "Voltage", "Near Voltage" },
 		{ "Vanilla", "Kittytail healing", "", "" },
 	} };
 

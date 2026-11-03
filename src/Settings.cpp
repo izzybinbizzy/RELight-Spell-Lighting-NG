@@ -10,6 +10,7 @@
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
+//   SwirlsFadeWhileSneaking=0   1 = her weapons' enchantment art (VAER's swirls) fades with her lights too
 //   InShadow=0                  1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
 //   GlowLimit=1                 1 = at most GlowLimitCount body glows on people lit at once (hers never wait - BodyLights.cpp)
 //   GlowLimitCount=16           4 to 64
@@ -56,6 +57,7 @@ namespace Plugin
 		std::atomic<bool>               gSneak{ false };
 		std::atomic<int>                gSneakBrightness{ 0 };
 		std::atomic<bool>               gRunes{ true };
+		std::atomic<bool>               gSwirls{ false };
 		std::atomic<bool>               gInvisible{ false };
 		std::atomic<bool>               gGlowLimit{ true };
 		std::atomic<int>                gGlowCount{ 16 };
@@ -115,6 +117,7 @@ namespace Plugin
 			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
+			{ "SwirlsFadeWhileSneaking", [] { return gSwirls ? 1 : 0; }, [](int v) { gSwirls = v != 0; } },
 			// a new key: 2.9 saved "fade out" (its default) under FadeWhileInvisible into every file, which 3.0 must not carry over
 			{ "InShadow", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
 			{ "GlowLimit", [] { return gGlowLimit ? 1 : 0; }, [](int v) { gGlowLimit = v != 0; } },
@@ -378,6 +381,15 @@ namespace Plugin
 	{
 		if (gRunes.exchange(a_on) != a_on) {
 			SKSE::log::info("runes fade while sneaking turned {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool SwirlsFadeOn() { return gSwirls; }
+
+	void SetSwirlsFadeOn(bool a_on)
+	{
+		if (gSwirls.exchange(a_on) != a_on) {
+			SKSE::log::info("weapon swirls fade while sneaking turned {}", a_on ? "on" : "off");
 		}
 	}
 

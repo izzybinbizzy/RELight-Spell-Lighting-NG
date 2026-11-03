@@ -707,6 +707,15 @@ namespace Plugin
 					SaveSettings();
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
+				const std::vector<const char*> kSwirls{ T("Stay as they are"), T("Fade too") };
+				const std::vector<const char*> kSwirlsTips{ T("The glowing swirls on your enchanted weapons stay bright while you sneak."),
+					T("The glowing swirls on your enchanted weapons (VAER Reborn and the like) fade with your lights while you sneak.") };
+				int                            swirls = SwirlsFadeOn() ? 1 : 0;
+				if (ChoiceCombo(T("Weapon swirls"), swirls, kSwirls, kSwirlsTips)) {
+					SetSwirlsFadeOn(swirls == 1);
+					SaveSettings();
+				}
+				MenuStyle::Tip(kSwirlsTips[static_cast<std::size_t>(swirls)]);
 			}
 			const std::vector<const char*> kInvisible{ T("Lights stay on"), T("Lights fade out") };
 			const std::vector<const char*> kInvisibleTips{ T("Your lights stay on while you are invisible or in shadow."),
@@ -736,10 +745,11 @@ namespace Plugin
 				{ T("Healing hands keep the light Skyrim gives them. Colors change at once; the rest at the next start."),
 					T("The cooler blue healing light from Kittytail's pack.\nInstall first: Kittytail's healing VFX edit. Colors change at once; the rest at the next start.") });
 			GlowHeading("Shock");
-			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage") },
+			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage"), T("Near Voltage") },
 				{ T("Skyrim's own blue-violet. Colors change at once; the rest at the next start."),
 					T("A deeper, more saturated blue.\nInstall first: Kittytail's Lightning VFX Edit.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start."),
-					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start.") });
+					T("A lighter, cyan-shifted blue.\nInstall first: Voltage.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start."),
+					T("A violet purple.\nInstall first: Voltage and Near Voltage - Purple Edition.\nWrong pick and shock lights the wrong color. Nothing else changes. Colors change at once; the rest at the next start.") });
 		}
 
 		// Spells Without a Patch and the art picks above the fading module's item list
