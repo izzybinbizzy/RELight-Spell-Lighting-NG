@@ -356,8 +356,8 @@ namespace Plugin
 				return;
 			}
 			if (Other360Color()) {
-				ImGuiMCP::TextDisabled("%s", T("360 Ward - Other colors colors the ward"));
-				MenuStyle::Tip(T("360 Ward - Other colors is installed - its sphere keeps its own color and the ward's light takes it, so the ward color stands aside."));
+				ImGuiMCP::TextDisabled("%s", T("A recolored 360 Ward sphere colors the ward"));
+				MenuStyle::Tip(T("360 Ward's sphere is recolored by another mod - it keeps its own color and the ward's light takes it, so the ward color stands aside."));
 				return;
 			}
 			ImGuiMCP::SetNextItemWidth(220.0f);
