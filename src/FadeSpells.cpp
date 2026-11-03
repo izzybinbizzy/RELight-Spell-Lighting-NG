@@ -117,6 +117,23 @@ namespace Fade
 		}
 	}
 
+	// Rite of Arcana's ritual drains magicka to 0 by design; its players read lights at the empty floor as "spells had no light"
+	bool InRitual(RE::Actor* a_actor)
+	{
+		static const auto* ritual = [] {
+			auto* data = RE::TESDataHandler::GetSingleton();
+			return data ? data->LookupForm<RE::EffectSetting>(0x00AA04, "Rite of Arcana.esp") : nullptr;
+		}();
+		auto* target = ritual ? a_actor->AsMagicTarget() : nullptr;
+		auto* effects = target ? target->GetActiveEffectList() : nullptr;
+		if (!effects) {
+			return false;
+		}
+		return std::ranges::any_of(*effects, [](const RE::ActiveEffect* a_effect) {
+			return a_effect && a_effect->GetBaseObject() == ritual && !a_effect->flags.any(RE::ActiveEffect::Flag::kInactive);
+		});
+	}
+
 	bool ReadSpellHand(RE::Actor* a_actor, bool a_left, SpellHand& a_out)
 	{
 		a_out = {};
@@ -134,7 +151,7 @@ namespace Fade
 			a_out.max = av->GetPermanentActorValue(RE::ActorValue::kMagicka) +
 			            a_actor->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kMagicka);
 		}
-		a_out.fraction = a_out.max > 0.0f ? Glow::Clamp01(a_out.current / a_out.max) : 1.0f;
+		a_out.fraction = a_out.max > 0.0f && !InRitual(a_actor) ? Glow::Clamp01(a_out.current / a_out.max) : 1.0f;
 		SpellHandLights(a_actor, a_left, a_out.nodes, a_out.casterLight);
 		return true;
 	}
