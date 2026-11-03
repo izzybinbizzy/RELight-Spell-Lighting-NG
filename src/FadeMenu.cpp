@@ -189,7 +189,8 @@ namespace Fade
 				save);
 			Toggle("Dim the glow too", s.dimShader,
 				"The glow on the blade (the enchantment's shader and its art, VAER's swirls among them) fades with the charge, "
-				"and the glow of a spell you cast on yourself (a heal, a cloak) with your magicka, like the lights.",
+				"and the glow of a spell you cast on yourself (a heal, a cloak) with your magicka, like the lights - that part needs "
+				"Spells on.",
 				save);
 
 			GlowHeading(Icon::kMoon, "Nearly empty");

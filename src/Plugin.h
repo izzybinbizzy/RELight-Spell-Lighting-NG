@@ -327,6 +327,7 @@ namespace Plugin
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
 	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
 	void                      UpdateRows();                                                          // every frame, main thread (the player update)
+	void                      DropSwirlLevel();                                                      // a game loads: her weapons' art is full again
 	void                      DropRows();                                                            // a game loads: the projectiles they hang on are the old game's
 	[[nodiscard]] bool        IsRowLight(const RE::NiLight* a_light);                                // one of Rows.cpp's lights (any pass that walks the scene skips it)
 	[[nodiscard]] std::size_t LiveRowLights();
