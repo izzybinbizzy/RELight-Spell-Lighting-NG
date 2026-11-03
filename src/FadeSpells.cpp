@@ -120,9 +120,12 @@ namespace Fade
 	// Rite of Arcana's ritual drains magicka to 0 by design; its players read lights at the empty floor as "spells had no light"
 	bool InRitual(RE::Actor* a_actor)
 	{
-		static const auto* ritual = RE::TESDataHandler::GetSingleton()->LookupForm<RE::EffectSetting>(0x00AA04, "Rite of Arcana.esp");
-		auto*              target = ritual ? a_actor->AsMagicTarget() : nullptr;
-		auto*              effects = target ? target->GetActiveEffectList() : nullptr;
+		static const auto* ritual = [] {
+			auto* data = RE::TESDataHandler::GetSingleton();
+			return data ? data->LookupForm<RE::EffectSetting>(0x00AA04, "Rite of Arcana.esp") : nullptr;
+		}();
+		auto* target = ritual ? a_actor->AsMagicTarget() : nullptr;
+		auto* effects = target ? target->GetActiveEffectList() : nullptr;
 		if (!effects) {
 			return false;
 		}
