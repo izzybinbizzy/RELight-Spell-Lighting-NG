@@ -554,10 +554,13 @@ namespace
 
 	// a spell light of ours hangs in that hand and shows: a dimmed one counts (sneaking dims both hands alike), one faded to
 	// nothing (the off choice) leaves its hand unlit
+	// a hand light that shows: faded to nothing (the off choice) or put out by a switch, its hand counts as unlit
+	[[nodiscard]] bool Shows(RE::NiLight* a_light) { return a_light->GetLightRuntimeData().fade > 0.0f && !Plugin::WantedDark(a_light); }
+
 	[[nodiscard]] bool HasHandLight(const RE::NiAVObject* a_magic)
 	{
-		return std::ranges::any_of(gMagicLights, [a_magic](const RE::NiLight* a_light) {
-			if (a_light->GetLightRuntimeData().fade <= 0.0f) {
+		return std::ranges::any_of(gMagicLights, [a_magic](RE::NiLight* a_light) {
+			if (!Shows(a_light)) {
 				return false;
 			}
 			for (const RE::NiAVObject* up = a_light->parent; up; up = up->parent) {
@@ -620,8 +623,8 @@ namespace
 			const bool  left = std::string_view(node->name.c_str()).contains("L MagicNode");
 			const auto* strings = RE::FixedStrings::GetSingleton();
 			auto*       other = strings ? rootOf(node)->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode) : nullptr;
-			const bool  both = other && std::ranges::any_of(lights, [other](const RE::NiLight* a_l) {
-				return MagicNodeOf(a_l) == other && a_l->GetLightRuntimeData().fade > 0.0f;
+			const bool  both = other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
+				return MagicNodeOf(a_l) == other && Shows(a_l);
 			});
 			if (both) {
 				MoveTo(light, (node->world * LightKit::kHandPoint + other->world * LightKit::kHandPoint) * 0.5f);
