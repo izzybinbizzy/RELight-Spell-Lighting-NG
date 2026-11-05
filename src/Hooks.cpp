@@ -623,7 +623,7 @@ namespace
 			const bool  both = other && std::ranges::any_of(lights, [other](const RE::NiLight* a_l) {
 				return MagicNodeOf(a_l) == other && a_l->GetLightRuntimeData().fade > 0.0f;
 			});
-			if (both && other) {
+			if (both) {
 				MoveTo(light, (node->world * LightKit::kHandPoint + other->world * LightKit::kHandPoint) * 0.5f);
 				gShadowsBetween.insert(light);
 			} else if (gShadowsBetween.erase(light) > 0) {
@@ -668,7 +668,7 @@ namespace
 		static const bool on = Plugin::InverseSquare() && !REL::Module::IsVR() && !Plugin::ShadowPatch() && PromoteOn();
 		auto*             player = RE::PlayerCharacter::GetSingleton();
 		const auto*       strings = RE::FixedStrings::GetSingleton();
-		if (!on || !player || !strings) {
+		if (!on || !player || !strings || (gMagicLights.empty() && gPromotedBetween.empty())) {
 			return;
 		}
 		static std::vector<RE::NiPointLight*> between;
