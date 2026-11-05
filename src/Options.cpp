@@ -247,6 +247,48 @@ namespace Plugin
 			gTwinSeen.push_back(a_light);
 		}
 
+		// RE::Light puts the player's enchantment lights back into the scene only when she goes indoors or outdoors
+		// (ReinitializeEnchantmentLights): after an outdoor-to-outdoor fast travel her drawn weapon's light stays out of it until
+		// a new equip makes a new light. Twice a second her drawn weapons' RE::Light lights missing from both lists are added back.
+		bool InScene(RE::ShadowSceneNode* a_ssn, const RE::NiLight* a_light)
+		{
+			auto& rt = a_ssn->GetRuntimeData();
+			return std::ranges::any_of(rt.activeLights, [a_light](const auto& b) { return b && b->light.get() == a_light; }) ||
+			       std::ranges::any_of(rt.activeShadowLights, [a_light](const auto& b) { return b && b->light.get() == a_light; });
+		}
+
+		void GiveBackDroppedWeaponLights(RE::ShadowSceneNode* a_ssn)
+		{
+			constexpr std::uint32_t kEvery = 30;
+			auto*                   player = RE::PlayerCharacter::GetSingleton();
+			if (gFrame % kEvery != 0 || !player) {
+				return;
+			}
+			static std::vector<RE::NiPointLight*> mine;  // main thread; its storage kept between checks
+			mine.clear();
+			// the third-person skeleton only: RE::Light hangs the light on the third-person node whenever it finds one, so a light
+			// under the hidden first-person body would come back as a second, misplaced light (the review of the fix)
+			static const RE::BSFixedString kWeapon{ "WEAPON" }, kShield{ "SHIELD" };
+			auto*                          root = player->Get3D(false);
+			for (const auto* name : { &kWeapon, &kShield }) {
+				if (auto* node = root ? root->GetObjectByName(*name) : nullptr) {
+					RE::BSVisit::TraverseScenegraphLights(node, [](RE::NiPointLight* a_light) {
+						if (IsEnchantLight(a_light)) {
+							mine.push_back(a_light);
+						}
+						return RE::BSVisit::BSVisitControl::kContinue;
+					});
+				}
+			}
+			static std::uint32_t logged = 0;
+			for (auto* light : mine) {
+				if (light->parent && !InScene(a_ssn, light) && LightKit::AddToScene(a_ssn, light, 1.0f, false) && logged < 5) {
+					++logged;
+					SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+				}
+			}
+		}
+
 		// RE::Light culls an enchantment light on sheathe: a switch turned back on must not light a sheathed weapon
 		bool MayGiveBack(const Held& a_held)
 		{
@@ -321,6 +363,7 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
+		GiveBackDroppedWeaponLights(ssn);
 		gTwinSeen.clear();
 		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {
 			if (!bsLight || !bsLight->light) {

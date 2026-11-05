@@ -240,7 +240,8 @@ namespace Plugin
 		}
 		light->local.translate = a_s.at;
 		light->local.scale = 1.0f;
-		auto* bs = LightKit::Hang(a_parent, light, a_scene, 1.0f, true, a_shadow);
+		// not portal strict: a light on an actor lights the actor and those beside it indoors, not only the room's meshes
+		auto* bs = LightKit::Hang(a_parent, light, a_scene, 1.0f, false, a_shadow);
 		if (!bs) {
 			return nullptr;
 		}
