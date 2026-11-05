@@ -124,7 +124,8 @@ namespace Plugin
 		// the scene refused it - the twin is then dropped
 		bool Register(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
-			auto* bs = LightKit::AddToScene(a_scene, a_twin.light.get(), 1.0f, true);
+			// not portal strict: a twin at her hand lights her and the people beside her indoors, not only the room's meshes
+			auto* bs = LightKit::AddToScene(a_scene, a_twin.light.get(), 1.0f, false);
 			if (!bs) {
 				return false;
 			}
