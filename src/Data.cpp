@@ -751,10 +751,11 @@ namespace Plugin
 				return path && *path ? path : nullptr;
 			};
 			// a light by form that names a model stands down on any other: a mod re-modelling the weapon lights its own model
-			const char* own = pathOf(a_weapon);
-			if (auto it = gHeldBase.find(a_weapon->GetFormID());
-				it != gHeldBase.end() && (it->second.model.empty() || (own && PathKey(own) == it->second.model))) {
-				return &it->second;
+			if (auto it = gHeldBase.find(a_weapon->GetFormID()); it != gHeldBase.end()) {
+				const char* own = it->second.model.empty() ? nullptr : pathOf(a_weapon);
+				if (it->second.model.empty() || (own && PathKey(own) == it->second.model)) {
+					return &it->second;
+				}
 			}
 			// exact: a weapon's own mesh by its full path first (two mods' staves can share a file name), then its bare name -
 			// never a key inside another. In first person the game draws the first-person model, which a config may light
