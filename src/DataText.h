@@ -162,6 +162,7 @@ namespace DataText
 	{
 		std::string           key, node;
 		std::array<float, 10> v{};
+		std::string           model;  // a `held` line by form: the model path key it was measured on (empty: any)
 	};
 
 	struct HandText
@@ -280,16 +281,18 @@ namespace DataText
 			return true;
 		}
 		if (kind == "stream" && p.size() == 13) {
-			LightText s{ std::string(p[1]), std::string(p[2]), {} };
+			LightText s{ std::string(p[1]), std::string(p[2]), {}, {} };
 			if (!Numbers(p, 3, s.v)) {
 				return false;
 			}
 			a_file.streams.push_back(std::move(s));
 			return true;
 		}
-		if (kind == "held" && p.size() == 12) {
-			LightText s{ std::string(p[1]), "-", {} };
-			if (!Numbers(p, 2, s.v)) {
+		// held <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z> [<model>]: a light by form may name the model path key
+		// its point was measured on (Data.cpp HeldOf)
+		if (kind == "held" && (p.size() == 12 || p.size() == 13)) {
+			LightText s{ std::string(p[1]), "-", {}, p.size() == 13 ? std::string(p[12]) : std::string{} };
+			if (!Numbers(p, 2, s.v) || (p.size() == 13 && (s.model.empty() || s.key.find('~') == std::string::npos))) {
 				return false;
 			}
 			a_file.helds.push_back(std::move(s));
@@ -297,7 +300,7 @@ namespace DataText
 		}
 		// body <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>: the light for that art model on an actor (BodyLights.cpp)
 		if (kind == "body" && p.size() == 12) {
-			LightText s{ std::string(p[1]), "-", {} };
+			LightText s{ std::string(p[1]), "-", {}, {} };
 			if (!Numbers(p, 2, s.v)) {
 				return false;
 			}
@@ -306,7 +309,7 @@ namespace DataText
 		}
 		// cloud <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>: a cone whose one light stays where its cloud is (Rows.cpp)
 		if (kind == "cloud" && p.size() == 12) {
-			LightText s{ std::string(p[1]), "-", {} };
+			LightText s{ std::string(p[1]), "-", {}, {} };
 			if (!Numbers(p, 2, s.v)) {
 				return false;
 			}
