@@ -55,8 +55,10 @@ namespace Plugin
 		RE::NiColor  color{ 1.0f, 1.0f, 1.0f };
 		float        fade{ 1.0f }, radius{ 133.0f }, size{ 2.5f }, cutoff{ 0.3f };
 		RE::NiPoint3 at;  // where the light sits on the mesh (a held light; a stream's is not read - RE::Light lights it)
-		int          order{ 0 };
-		std::size_t  option{ kNone };
+		// a held light keyed by its form: the full model path key `at` was measured on - a weapon wearing another model gets none
+		std::string model;
+		int         order{ 0 };
+		std::size_t option{ kNone };
 	};
 
 	// one hand light, as one layer lights it: the layer's own light for the casting-art mesh `key`

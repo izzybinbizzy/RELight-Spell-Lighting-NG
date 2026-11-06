@@ -17,9 +17,10 @@
 //   desc <text>   what the option lights, broadly - the menu shows it over the option's switch
 //   download <Spells|Weapons>   the download the file came in (a file with no line: its `file` download)
 //   tint <key or 0xID~Plugin> <r> <g> <b>   an art pick's color for the lights on an object (highest order wins)
-//   held <key or 0xID~Plugin> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>   a weapon's own light while it is
-//        drawn (Held.cpp); a key is matched exactly against the weapon's model (its full path key, then its bare name), or
-//        its first-person model in first person
+//   held <key or 0xID~Plugin> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z> [<model>]   a weapon's own light while
+//        it is drawn (Held.cpp); a key is matched exactly against the weapon's model (its full path key, then its bare name), or
+//        its first-person model in first person; a form may name the model path key its point was measured on, and lights the
+//        weapon only while it wears that model
 //   body <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>   the light for that art model when the game hangs
 //        it on an actor (a cloak, a heal - BodyLights.cpp; never a spell's casting art); matched exactly, as `held` is
 //   cloud <key> <r> <g> <b> <fade> <radius> <size> <cutoff> <x> <y> <z>   a cone whose one light stays where its cloud is
@@ -230,6 +231,7 @@ namespace Plugin
 				s.size = v[5];
 				s.cutoff = v[6];
 				s.at = { v[7], v[8], v[9] };
+				s.model = a_text.model;
 				return s;
 			};
 			std::vector<Stream> streams, helds, bodies, clouds;
@@ -743,15 +745,23 @@ namespace Plugin
 			return nullptr;
 		}
 		return Cached(gHeldCache[a_firstPerson ? 1 : 0], a_weapon, [&]() -> const Stream* {
+			const auto pathOf = [](const RE::TESForm* a_form) -> const char* {
+				const auto* model = a_form ? a_form->As<RE::TESModel>() : nullptr;
+				const char* path = model ? model->GetModel() : nullptr;
+				return path && *path ? path : nullptr;
+			};
+			// a light by form that names a model stands down on any other: a mod re-modelling the weapon lights its own model
 			if (auto it = gHeldBase.find(a_weapon->GetFormID()); it != gHeldBase.end()) {
-				return &it->second;
+				const char* own = it->second.model.empty() ? nullptr : pathOf(a_weapon);
+				if (it->second.model.empty() || (own && PathKey(own) == it->second.model)) {
+					return &it->second;
+				}
 			}
 			// exact: a weapon's own mesh by its full path first (two mods' staves can share a file name), then its bare name -
 			// never a key inside another. In first person the game draws the first-person model, which a config may light
-			const auto find = [](const RE::TESForm* a_form) -> const Stream* {
-				const auto* model = a_form ? a_form->As<RE::TESModel>() : nullptr;
-				const char* path = model ? model->GetModel() : nullptr;
-				if (!path || !*path) {
+			const auto find = [&](const RE::TESForm* a_form) -> const Stream* {
+				const char* path = pathOf(a_form);
+				if (!path) {
 					return nullptr;
 				}
 				auto it = gHeld.find(PathKey(path));
