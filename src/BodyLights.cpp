@@ -33,15 +33,21 @@ namespace Plugin
 		constexpr float       kBurningHold = 8.0f;  // a fire played with no end: the char darkening ends at 8 s
 		constexpr float       kFecOut = 2.0f;
 		constexpr float       kBurningOut = 1.0f;  // the flames die over this
+		// FEC plays its charred / skeleton skin burn with no end: the skin is seen burning for its record's fill time (3.4 / 4.4 s)
+		constexpr float kCharredHold = 3.0f;
+		constexpr float kSkeletonHold = 4.0f;
+		constexpr float kSkinOut = 0.5f;
 
-		// FEC.esp is an ESL - its ids move with the load order: FEC_FrostFXS, then FEC_FireFXS and FEC_FireHeavyFXS
-		[[nodiscard]] const std::array<const RE::TESEffectShader*, 3>& FecShaders()
+		// FEC.esp is an ESL - its ids move with the load order: FEC_FrostFXS, FEC_FireFXS, FEC_FireHeavyFXS, then the charred and
+		// the skeleton skin burns (FEC_FireDisintegrateSkinFXS, FEC_FireDisintegrateSkinLongFXS)
+		[[nodiscard]] const std::array<const RE::TESEffectShader*, 5>& FecShaders()
 		{
 			static const auto shaders = [] {
-				std::array<const RE::TESEffectShader*, 3> out{};
+				std::array<const RE::TESEffectShader*, 5> out{};
 				if (auto* data = RE::TESDataHandler::GetSingleton()) {
 					out = { data->LookupForm<RE::TESEffectShader>(0x80D, "FEC.esp"),
-						data->LookupForm<RE::TESEffectShader>(0x806, "FEC.esp"), data->LookupForm<RE::TESEffectShader>(0x826, "FEC.esp") };
+						data->LookupForm<RE::TESEffectShader>(0x806, "FEC.esp"), data->LookupForm<RE::TESEffectShader>(0x826, "FEC.esp"),
+						data->LookupForm<RE::TESEffectShader>(0x887, "FEC.esp"), data->LookupForm<RE::TESEffectShader>(0x896, "FEC.esp") };
 				}
 				return out;
 			}();
@@ -57,16 +63,21 @@ namespace Plugin
 				return 1.0f;
 			}
 			const bool frozen = shader->effectData == fec[0];
-			const bool burning = shader->effectData == fec[1] || shader->effectData == fec[2];
+			const bool charred = shader->effectData == fec[3];
+			const bool skeleton = shader->effectData == fec[4];
+			const bool burning = shader->effectData == fec[1] || shader->effectData == fec[2] || charred || skeleton;
 			if (!(frozen && FecFrozenFadesOut()) && !(burning && FecBurningFadesOut())) {
 				return 1.0f;
 			}
 			if (frozen) {
 				return std::clamp(1.0f - (shader->age - kFrozenHold) / kFecOut, 0.0f, 1.0f);
 			}
-			// FEC times its own fire (2-5 s): the light ends with the effect; only a fire played with no end fades
+			// FEC times its own fire (2-5 s): the light ends with the effect; only a burn played with no end fades
 			if (shader->lifetime > 0.0f) {
 				return 1.0f;
+			}
+			if (charred || skeleton) {
+				return std::clamp(1.0f - (shader->age - (charred ? kCharredHold : kSkeletonHold)) / kSkinOut, 0.0f, 1.0f);
 			}
 			return std::clamp(1.0f - (shader->age - kBurningHold) / kBurningOut, 0.0f, 1.0f);
 		}
