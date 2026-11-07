@@ -323,6 +323,7 @@ namespace Plugin
 			ImGuiMCP::SameLine(0.0f, 24.0f);
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> items{ T("Glow fades out"), T("Glow stays while frozen") };
+			const float                    column = ImGuiMCP::GetCursorPosX();
 			const std::vector<const char*> tips{ T("A body frozen solid glows blue for a few seconds, then the glow fades out."),
 				T("The glow stays for as long as the body is frozen.") };
 			int                            frozen = FecFrozenFadesOut() ? 0 : 1;
@@ -331,7 +332,8 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(tips[static_cast<std::size_t>(frozen)]);
-			// its own line under Frozen bodies: a fourth item on the FEC row falls off a narrow window
+			// under Frozen bodies, in its column: a fourth item on the FEC row falls off a narrow window
+			ImGuiMCP::SetCursorPosX(column);
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
 			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if they never end."),
