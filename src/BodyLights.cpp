@@ -76,10 +76,10 @@ namespace Plugin
 			if (shader->lifetime > 0.0f) {
 				return 1.0f;
 			}
-			const float hold = charred ? kCharredHold : skeleton ? kSkeletonHold :
-			                                                       kBurningHold;
-			const float out = charred || skeleton ? kSkinOut : kBurningOut;
-			return std::clamp(1.0f - (shader->age - hold) / out, 0.0f, 1.0f);
+			if (charred || skeleton) {
+				return std::clamp(1.0f - (shader->age - (charred ? kCharredHold : kSkeletonHold)) / kSkinOut, 0.0f, 1.0f);
+			}
+			return std::clamp(1.0f - (shader->age - kBurningHold) / kBurningOut, 0.0f, 1.0f);
 		}
 
 		struct Live
