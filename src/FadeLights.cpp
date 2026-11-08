@@ -163,6 +163,8 @@ namespace Fade
 		// effect hooks: every art and shader effect in the world calls them each frame, and with no enchanted weapon out they need
 		// not look up (RTTI) whose effect it is
 		std::atomic<std::size_t> gActiveHands{ 0 };
+		// last frame a gem of ours could draw (PublishHud): only then is the HUD's alpha read (UpdateHands)
+		std::atomic<bool> gGemsShown{ false };
 		// the same hands, in gHands' order, for ActiveHand: rebuilt with gActiveHands under gLock (a map's nodes never move, so
 		// the pointers hold until the next rebuild or RestoreAll)
 		std::vector<HandTrack*> gActiveList;
@@ -816,6 +818,7 @@ namespace Fade
 				hud.shoutLit = shout.has_value();
 				hud.shoutColor = shout.value_or(Glow::Rgb{});
 			}
+			gGemsShown.store(hud.gems && (hud.hands[0].shown || hud.hands[1].shown), std::memory_order_relaxed);
 			std::lock_guard lock(gHudLock);
 			gHud = hud;
 		}
@@ -834,15 +837,31 @@ namespace Fade
 	{
 		// every weapon hand read BEFORE the lock: ReadHand walks a bound weapon's active effects, which the game locks, and the
 		// effect hooks hold that lock when they ask for gLock - read under gLock it could freeze (the outside review's threads M3)
-		const Settings                             s = Config();  // one copy for the frame
-		static std::vector<std::array<Reading, 2>> readings;      // main thread; its storage kept between frames
+		const auto     settingsStart = std::chrono::steady_clock::now();
+		const Settings s = Config();  // one copy for the frame
+		LightKit::Cost::Note(23, "fading: the settings copy",
+			std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - settingsStart).count());
+		static std::vector<std::array<Reading, 2>> readings;  // main thread; its storage kept between frames
 		readings.clear();
 		if (s.enabled) {
+			const LightKit::Cost::Scope c{ 20, "fading: the hands read" };
 			for (auto& actor : Actors(s.who)) {
 				readings.push_back({ ReadHand(actor.get(), false), ReadHand(actor.get(), true) });
 			}
 		}
-		const bool      hudHidden = s.enabled && s.hudGems && HudMovieHidden();
+		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw, at once when
+		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames
+		static bool          hudHiddenWas = false;
+		static bool          gemsWere = false;
+		static std::uint32_t hudLook = 0;
+		const bool           gems = s.enabled && s.hudGems && gGemsShown.load(std::memory_order_relaxed);
+		bool                 hudHidden = false;
+		if (gems) {
+			const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
+			hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
+		}
+		gemsWere = gems;
+		hudHiddenWas = hudHidden;
 		std::lock_guard lock(gLock);
 		++gFrame;
 		gFrameSettings = s;
@@ -958,6 +977,7 @@ namespace Fade
 		}
 		// the spells in hand: their lights and glow follow the caster's magicka
 		if (s.spells) {
+			const LightKit::Cost::Scope c{ 21, "fading: the spell hands" };
 			for (auto& actor : gActors) {
 				for (const bool left : { false, true }) {
 					UpdateSpellHand(actor.get(), left, s, a_delta, previewOn, previewToggled, preview.fraction);
@@ -972,6 +992,7 @@ namespace Fade
 				hand.effectRoots.clear();  // its effects' 3D is not ours to keep
 			}
 		}
+		const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
 		Sweep();
 		gActiveList.clear();
 		std::size_t spells = 0;

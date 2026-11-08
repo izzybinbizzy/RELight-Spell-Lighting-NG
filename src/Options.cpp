@@ -249,7 +249,13 @@ namespace Plugin
 
 		// RE::Light puts the player's enchantment lights back into the scene only when she goes indoors or outdoors
 		// (ReinitializeEnchantmentLights): after an outdoor-to-outdoor fast travel her drawn weapon's light stays out of it until
-		// a new equip makes a new light. Twice a second her drawn weapons' RE::Light lights missing from both lists are added back.
+		// a new equip makes a new light. For four seconds after her cell changes or she draws (Events.cpp), twice a second, her
+		// drawn weapons' RE::Light lights missing from both lists are added back; nothing is walked the rest of the time.
+		std::atomic<int> gWeaponChecks{ 0 };
+		// the option-lights walk is wanted (NoteOptionsLook - any thread)
+		std::atomic<bool> gOptionsLook{ true };
+		constexpr int     kWeaponChecks = 8;
+
 		bool InScene(RE::ShadowSceneNode* a_ssn, const RE::NiLight* a_light)
 		{
 			auto& rt = a_ssn->GetRuntimeData();
@@ -261,9 +267,10 @@ namespace Plugin
 		{
 			constexpr std::uint32_t kEvery = 30;
 			auto*                   player = RE::PlayerCharacter::GetSingleton();
-			if (gFrame % kEvery != 0 || !player) {
+			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
 				return;
 			}
+			gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
 			static std::vector<RE::NiPointLight*> mine;  // main thread; its storage kept between checks
 			mine.clear();
 			// the third-person skeleton only: RE::Light hangs the light on the third-person node whenever it finds one, so a light
@@ -325,23 +332,51 @@ namespace Plugin
 
 	bool HeldOutForOption(const RE::NiLight* a_light) { return gHeldSet.contains(a_light); }
 
+	void WatchWeaponLights() { gWeaponChecks.store(kWeaponChecks, std::memory_order_relaxed); }
+
 	void ForgetOptionLights(const GoneLights& a_gone)
 	{
 		std::erase_if(gHeldOut, [&](const Held& h) { return a_gone.contains(h.light); });
 		std::erase_if(gHeldSet, [&](const RE::NiLight* l) { return a_gone.contains(l); });
 		std::erase_if(gSheathedOut, [&](RE::NiLight* l) { return a_gone.contains(l); });
 		std::erase_if(gKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+		// kept between walks now: a freed light's address must not keep its option or hue for a new light
+		std::erase_if(gEnchant, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+		std::erase_if(gFlesh, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	}
+
+	void NoteOptionsLook() { gOptionsLook.store(true, std::memory_order_relaxed); }
 
 	void UpdateOptionLights()
 	{
 		++gFrame;
 		auto& opts = Options();
+		// a switch off holds its lights out as they come, so then the walk runs every frame (as before); otherwise only when
+		// something it depends on happened (NoteOptionsLook) and twice a second
+		static std::uint32_t lastGen = ~0u;
+		static bool          anyOff = false;
+		if (const auto gen = SettingsGeneration(); gen != lastGen) {
+			lastGen = gen;
+			anyOff = AllLightsOff();
+			for (std::size_t i = 0; i < opts.size() && !anyOff; ++i) {
+				anyOff = !OptionLit(i);
+			}
+			gOptionsLook = true;
+		}
+		if (!anyOff && !gOptionsLook.exchange(false) && gFrame % 30 != 0) {
+			if (auto* ssn = LightKit::Scene()) {
+				GiveBackDroppedWeaponLights(ssn);
+			}
+			return;
+		}
 		for (auto& o : opts) {
 			o.lit = 0;
 			o.heldOut = 0;
 		}
-		FindEnchantLights();
+		{
+			const LightKit::Cost::Scope c{ 17, "option lights: enchantment walk" };
+			FindEnchantLights();
+		}
 		// give back whatever belongs to a switch that is on again (what has unloaded is already forgotten: Keep.cpp)
 		std::erase_if(gHeldOut, [](Held& h) {
 			if (!Off(h.option)) {
@@ -365,6 +400,7 @@ namespace Plugin
 		}
 		GiveBackDroppedWeaponLights(ssn);
 		gTwinSeen.clear();
+		const LightKit::Cost::Scope c{ 18, "option lights: scene walk" };
 		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {
 			if (!bsLight || !bsLight->light) {
 				continue;

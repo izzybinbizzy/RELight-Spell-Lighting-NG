@@ -217,11 +217,7 @@ namespace Plugin
 	void                      SetSneakOn(bool a_on);
 	[[nodiscard]] int         SneakBrightness();  // percent, 0 to 100
 	void                      SetSneakBrightness(int a_percent);
-	[[nodiscard]] std::size_t GlowLimit();  // the most body glows on people lit at once; no limit when its switch is off
-	[[nodiscard]] bool        GlowLimitOn();
-	[[nodiscard]] int         GlowLimitCount();
-	void                      SetGlowLimitOn(bool a_on);
-	void                      SetGlowLimitCount(int a_count);
+	[[nodiscard]] std::size_t GlowLimit();    // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
 	[[nodiscard]] bool        RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
 	void                      SetRunesFadeOn(bool a_on);
 	[[nodiscard]] bool        SwirlsFadeOn();  // her weapons' enchantment art fades with her lights while she sneaks
@@ -339,6 +335,9 @@ namespace Plugin
 	void                      UpdateHeldLights();  // every frame, after UpdateOptionLights
 	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
 	[[nodiscard]] std::size_t LiveHeldLights();
+	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
+	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
+	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
 	[[nodiscard]] bool ShadowPatch();
@@ -357,11 +356,15 @@ namespace Plugin
 	[[nodiscard]] OwnScale OwnLightScale();
 
 	// ------------------------------------------------------------------ BodyLights.cpp: the body glow while casting
-	void                      UpdateBodyLights();  // every frame, after UpdateHeldLights
-	void                      DropBodyLights();    // a game loads, or a new one starts: the art they hang on is the old game's
-	void                      ForgetBodyArt();     // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
-	[[nodiscard]] std::size_t LiveBodyLights();
-	[[nodiscard]] std::size_t BodyLightsMade();
+	void                        UpdateBodyLights();    // every frame, after UpdateHeldLights
+	void                        DropBodyLights();      // a game loads, or a new one starts: the art they hang on is the old game's
+	void                        ForgetBodyArt();       // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
+	void                        NoteArtStarted();      // an art started somewhere (any thread): the body lights look for new art
+	void                        NoteOptionsLook();     // something the option lights depend on happened (any thread): their walk runs
+	void                        BumpSettings();        // a setting or switch changed (Settings.cpp)
+	[[nodiscard]] std::uint32_t SettingsGeneration();  // bumped by every setting / switch change: a pass waiting on events looks again
+	[[nodiscard]] std::size_t   LiveBodyLights();
+	[[nodiscard]] std::size_t   BodyLightsMade();
 
 	// ------------------------------------------------------------------ Wards.cpp: one ward, one dome, and its color
 	void                                     ApplyWards(const char* a_why);  // one dome per ward and the color pick; nothing while Dynamic Wards is loaded

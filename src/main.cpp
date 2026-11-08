@@ -84,6 +84,7 @@ namespace
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
+		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
@@ -147,6 +148,7 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
 			ForgetOldGame();
+			LightKit::Cost::Reset();  // the worst times start again with each game
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
@@ -155,6 +157,8 @@ namespace
 			}
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
+			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers
+			Plugin::NoteOptionsLook();
 			break;
 		default:
 			break;

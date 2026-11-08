@@ -12,8 +12,6 @@
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
 //   SwirlsFadeWhileSneaking=0   1 = her weapons' enchantment art (VAER's swirls) fades with her lights too
 //   InShadow=0                  1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
-//   GlowLimit=1                 1 = at most GlowLimitCount body glows on people lit at once (hers never wait - BodyLights.cpp)
-//   GlowLimitCount=16           4 to 64
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
@@ -59,8 +57,6 @@ namespace Plugin
 		std::atomic<bool>               gRunes{ true };
 		std::atomic<bool>               gSwirls{ false };
 		std::atomic<bool>               gInvisible{ false };
-		std::atomic<bool>               gGlowLimit{ true };
-		std::atomic<int>                gGlowCount{ 16 };
 		std::atomic<bool>               gFecFrozenFades{ true };
 		std::atomic<bool>               gFecBurningFades{ true };
 		std::atomic<bool>               gHands{ true };
@@ -120,8 +116,6 @@ namespace Plugin
 			{ "SwirlsFadeWhileSneaking", [] { return gSwirls ? 1 : 0; }, [](int v) { gSwirls = v != 0; } },
 			// a new key: 2.9 saved "fade out" (its default) under FadeWhileInvisible into every file, which 3.0 must not carry over
 			{ "InShadow", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
-			{ "GlowLimit", [] { return gGlowLimit ? 1 : 0; }, [](int v) { gGlowLimit = v != 0; } },
-			{ "GlowLimitCount", [] { return gGlowCount.load(); }, [](int v) { gGlowCount = std::clamp(v, 4, 64); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
@@ -151,6 +145,7 @@ namespace Plugin
 			if (SameText(a_key, "WardColour")) {
 				a_key = "WardColor";  // the key's spelling before 2.2 (his rule: color, never colour, in a file a player reads)
 			}
+			BumpSettings();
 			for (const auto& k : kKeys) {
 				if (SameText(a_key, k.name)) {
 					k.set(a_v);
@@ -283,7 +278,8 @@ namespace Plugin
 				picksRead = picksRead || IsPickKey(key);
 				pulseRead = pulseRead || SameText(key, "PulseShapes");
 				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
-				if (!ApplySetting(key, *v)) {
+				// the glow limit's switch and count left the menu (fixed per lighting since 3.1): an older file's keys pass quietly
+				if (!SameText(key, "GlowLimit") && !SameText(key, "GlowLimitCount") && !ApplySetting(key, *v)) {
 					problems.push_back(std::format("{}: not a setting", key));
 				}
 			} else {
@@ -428,26 +424,9 @@ namespace Plugin
 
 	std::size_t GlowLimit()
 	{
-		return gGlowLimit ? static_cast<std::size_t>((std::max)(gGlowCount.load(), 1)) : (std::numeric_limits<std::size_t>::max)();
-	}
-
-	bool GlowLimitOn() { return gGlowLimit; }
-
-	int GlowLimitCount() { return gGlowCount; }
-
-	void SetGlowLimitOn(bool a_on)
-	{
-		if (gGlowLimit.exchange(a_on) != a_on) {
-			SKSE::log::info("glow lights on people limited: {}", a_on ? "on" : "off");
-		}
-	}
-
-	void SetGlowLimitCount(int a_count)
-	{
-		a_count = std::clamp(a_count, 4, 64);
-		if (gGlowCount.exchange(a_count) != a_count) {
-			SKSE::log::info("most glow lights on people set to {}", a_count);
-		}
+		// off Community Shaders the game lights a surface with only a few lights at once and switches the rest off (they flicker
+		// as the camera moves): 5 there, as the rows; Light Limit Fix takes far more, and 16 keeps a big fight smooth
+		return LightingFound() == Lighting::kShaders ? 16 : 5;
 	}
 
 	void SetSneakBrightness(int a_percent)
@@ -527,7 +506,14 @@ namespace Plugin
 	void SetAutoLightsOn(bool a_on) { gAuto = a_on; }
 	bool AllLightsOff() { return gAllOff; }
 	void SetAllLightsOff(bool a_off) { gAllOff = a_off; }
-	int  ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
+
+	namespace
+	{
+		std::atomic<std::uint32_t> gSettingsGen{ 0 };
+	}
+	void          BumpSettings() { gSettingsGen.fetch_add(1, std::memory_order_relaxed); }
+	std::uint32_t SettingsGeneration() { return gSettingsGen.load(std::memory_order_relaxed); }
+	int           ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
 
 	// read before the data at a start; once the data is read, a change recolors at once: the tints and the lights already lit
 	// re-read their colors, and the hand lights and the sprays' copies are dressed again on the main thread
@@ -563,6 +549,7 @@ namespace Plugin
 	// every option with that id turns together
 	void SetOptionOn(std::size_t a_index, bool a_on)
 	{
+		BumpSettings();
 		auto& opts = Options();
 		if (a_index >= opts.size() || !opts[a_index].switchable) {
 			return;

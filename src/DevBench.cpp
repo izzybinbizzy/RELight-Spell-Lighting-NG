@@ -59,6 +59,13 @@ namespace Plugin
 			out["beamRecords"] = BeamLightRecords().size();
 			out["streamCopies"] = { { "raised", RaisedLights() }, { "plain", PlainLights() } };
 			out["wardsSteppedDown"] = WardsSteppedDown();
+			out["cost"] = json::array();  // each per-frame pass's main-thread time (LightKit::Cost)
+			for (const auto& s : LightKit::Cost::Slots()) {
+				if (const char* name = s.name.load(std::memory_order_relaxed)) {
+					out["cost"].push_back({ { "pass", name }, { "usAvg", s.usAvg.load(std::memory_order_relaxed) },
+						{ "usMax", s.usMax.load(std::memory_order_relaxed) } });
+				}
+			}
 			out["options"] = json::array();
 			for (const auto& o : Options()) {
 				out["options"].push_back({ { "id", o.id }, { "name", o.name }, { "switchable", o.switchable }, { "on", o.on.load() },

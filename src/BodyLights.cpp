@@ -91,12 +91,23 @@ namespace Plugin
 			RE::NiPointer<RE::NiPointLight>    light;
 			float                              written{ -1.0f }, wroteReach{ -1.0f };
 			bool                               seen{ false };
-			bool                               hers{ false };  // on the player: it fades with her spell lights while she sneaks
+			bool                               hers{ false };   // on the player: it fades with her spell lights while she sneaks
+			float                              distSq{ 0.0f };  // its actor's squared distance to her, this frame
 		};
 
+		// past the cap a nearer glow takes the farthest one's place only when it is clearly nearer (3/4 of the distance), so two
+		// casters at about the same distance never trade places every frame
+		constexpr float kNearerBy = 0.75f * 0.75f;
+
 		std::vector<Live> gLive;  // main thread only
-		std::size_t       gMade = 0;
-		bool              gCapLogged = false;
+
+		// the cap counts the glows on others only: hers never take one of their places
+		[[nodiscard]] std::size_t OthersLit()
+		{
+			return static_cast<std::size_t>(std::ranges::count_if(gLive, [](const Live& v) { return !v.hers; }));
+		}
+		std::size_t gMade = 0;
+		bool        gCapLogged = false;
 
 		// an art whose light could not be made or registered: warned about once, tried again every kRetryUpdates updates while
 		// the art is still there (Held.cpp's retry - the scene may refuse a light for a while), forgotten when it is gone
@@ -109,6 +120,12 @@ namespace Plugin
 			bool                       seen{ false };
 		};
 		std::vector<Failed> gFailed;
+
+		// new body art is looked for when an art starts anywhere (ReferenceEffect Init, Hooks.cpp - any thread), at a loaded game
+		// and once a second; between looks only the lights already lit are checked, each off its own art
+		std::atomic<bool>       gArtStarted{ false };
+		std::atomic<bool>       gLookNow{ true };
+		constexpr std::uint64_t kLookUpdates = 60;
 
 		// the art a spell plays as its casting art (HandLights.cpp lights the hands) or on a weapon (its enchantment art): never
 		// a body light. Worked out once, before the first walk of the effects (never inside it - that walk holds the game's lock)
@@ -208,11 +225,25 @@ namespace Plugin
 			LearnHandOrWeaponArt();
 		}
 		++gUpdate;
+		// a setting, a switch or her sneak changed since the last frame: look again at once, so a glow let go comes straight back
+		static std::uint32_t lastGen = 0;
+		static bool          lastHerDark = false;
+		const std::uint32_t  gen = SettingsGeneration();
+		const bool           herDark = SneakLevel() <= 0.0f;
+		const bool           changed = gen != lastGen || herDark != lastHerDark;
+		lastGen = gen;
+		lastHerDark = herDark;
+		const bool look = changed || gLookNow.exchange(false) || gArtStarted.exchange(false) || gUpdate % kLookUpdates == 0;
+		if (!look && gLive.empty()) {
+			return;  // nothing lit and nothing new
+		}
 		for (auto& v : gLive) {
 			v.seen = false;
 		}
-		for (auto& f : gFailed) {
-			f.seen = false;
+		if (look) {
+			for (auto& f : gFailed) {
+				f.seen = false;
+			}
 		}
 		// "All RELight - Spell Lighting NG lights off" puts every light of the mod out (2.5), and while she sneaks her own body glow
 		// fades with her spell lights (her held lights the same way - Held.cpp)
@@ -226,43 +257,57 @@ namespace Plugin
 			RE::NiPointer<RE::NiNode>          node;
 			bool                               hers{};
 			RE::FormID                         formId{};
+			float                              distSq{};
 		};
-		std::vector<Todo> todo;
-		if (!hidden) {
+		static std::vector<Todo> todo;  // main thread; its storage kept between frames
+		todo.clear();
+		// one art judged: kept (seen), queued to be made, or left - the same rules on a look and between looks
+		const auto consider = [&](RE::BSTempEffect* a_effect) {
+			auto*                model = a_effect ? netimmerse_cast<RE::ModelReferenceEffect*>(a_effect) : nullptr;
+			auto*                shader = model || !a_effect ? nullptr : netimmerse_cast<RE::ShaderReferenceEffect*>(a_effect);
+			RE::ReferenceEffect* art = model ? static_cast<RE::ReferenceEffect*>(model) : shader;
+			const Stream*        body = nullptr;
+			if (model && !model->finished && model->artObject && model->artObject3D && !gHandOrWeaponArt.contains(model->artObject)) {
+				body = BodyOf(model->artObject);
+			} else if (shader && !shader->finished) {
+				body = BodyOf(shader->effectData);
+			}
+			// a faded-out FEC body is not seen: its light comes off and leaves the glow cap
+			if (!body || !OptionLit(body->option) || FecBodyFade(art) <= 0.0f) {
+				return;
+			}
+			const auto ref = art->target.get();
+			auto*      actor = ref ? ref->As<RE::Actor>() : nullptr;
+			if (!actor || !actor->Is3DLoaded() || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
+				return;
+			}
+			auto* node = NodeFor(art, actor);
+			if (!node) {
+				return;
+			}
+			const float distSq = actor == player ? 0.0f : player->GetPosition().GetSquaredDistance(actor->GetPosition());
+			// already lit: kept, unless its node was rebuilt (a view switch, a new 3D) - then it is made again below
+			const auto have = std::ranges::find_if(gLive, [art](const Live& v) { return v.art.get() == art; });
+			if (have != gLive.end() && have->node.get() == node && have->body == body) {
+				have->seen = true;
+				have->distSq = distSq;
+				return;
+			}
+			todo.push_back(
+				{ RE::NiPointer<RE::ReferenceEffect>(art), body, RE::NiPointer<RE::NiNode>(node), actor == player, actor->GetFormID(), distSq });
+		};
+		if (!hidden && look) {
 			lists->ForEachMagicTempEffect([&](RE::BSTempEffect* a_effect) {
-				auto*                model = a_effect ? netimmerse_cast<RE::ModelReferenceEffect*>(a_effect) : nullptr;
-				auto*                shader = model || !a_effect ? nullptr : netimmerse_cast<RE::ShaderReferenceEffect*>(a_effect);
-				RE::ReferenceEffect* art = model ? static_cast<RE::ReferenceEffect*>(model) : shader;
-				const Stream*        body = nullptr;
-				if (model && !model->finished && model->artObject && model->artObject3D && !gHandOrWeaponArt.contains(model->artObject)) {
-					body = BodyOf(model->artObject);
-				} else if (shader && !shader->finished) {
-					body = BodyOf(shader->effectData);
-				}
-				// a faded-out FEC body is not seen: its light comes off and leaves the glow cap
-				if (!body || !OptionLit(body->option) || FecBodyFade(art) <= 0.0f) {
-					return RE::BSContainer::ForEachResult::kContinue;
-				}
-				const auto ref = art->target.get();
-				auto*      actor = ref ? ref->As<RE::Actor>() : nullptr;
-				if (!actor || !actor->Is3DLoaded() || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
-					return RE::BSContainer::ForEachResult::kContinue;
-				}
-				auto* node = NodeFor(art, actor);
-				if (!node) {
-					return RE::BSContainer::ForEachResult::kContinue;
-				}
-				// already lit: kept, unless its node was rebuilt (a view switch, a new 3D) - then it is made again below
-				const auto have = std::ranges::find_if(gLive, [art](const Live& v) { return v.art.get() == art; });
-				if (have != gLive.end() && have->node.get() == node && have->body == body) {
-					have->seen = true;
-					return RE::BSContainer::ForEachResult::kContinue;
-				}
-				todo.push_back({ RE::NiPointer<RE::ReferenceEffect>(art), body, RE::NiPointer<RE::NiNode>(node), actor == player, actor->GetFormID() });
+				consider(a_effect);
 				return RE::BSContainer::ForEachResult::kContinue;
 			});
+		} else if (!hidden) {
+			for (std::size_t i = 0, n = gLive.size(); i < n; ++i) {
+				consider(gLive[i].art.get());
+			}
 		}
-		// made and put in the scene after the walk: the game holds its effect list's lock through it
+		// made and put in the scene after the walk: the game holds its effect list's lock through it; the nearest first
+		std::ranges::sort(todo, {}, &Todo::distSq);
 		for (const auto& t : todo) {
 			auto*       art = t.art.get();
 			auto*       node = t.node.get();
@@ -279,13 +324,19 @@ namespace Plugin
 					continue;
 				}
 			}
-			// her own art is never left out by the cap: a fight's cloaks and heals on others wait instead
-			if (gLive.size() >= GlowLimit() && !hers) {
-				if (!gCapLogged) {
-					gCapLogged = true;
-					SKSE::log::info("[BODY] {} body lights are lit at once, the most there may be: the rest wait for one to go out", gLive.size());
+			// her own art is never left out by the cap: at the cap a glow on someone clearly nearer takes the farthest one's place,
+			// the rest wait for one to go out
+			if (!hers && OthersLit() >= GlowLimit()) {
+				const auto farthest = std::ranges::max_element(gLive, {}, [](const Live& v) { return v.hers ? -1.0f : v.distSq; });
+				if (farthest == gLive.end() || farthest->hers || t.distSq >= farthest->distSq * kNearerBy) {
+					if (!gCapLogged) {
+						gCapLogged = true;
+						SKSE::log::info("[BODY] {} body lights on others are lit at once, the most there may be: the nearest keep them", OthersLit());
+					}
+					continue;
 				}
-				continue;
+				TakeOff(*farthest, scene);
+				gLive.erase(farthest);
 			}
 			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FecBodyFade(art);
 			const float       reach = body->radius * reachScale;
@@ -318,9 +369,11 @@ namespace Plugin
 			}
 			return !v.seen;
 		});
-		std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
-		// a lowered cap, or the limit switched on, takes the newest glows on others off at once; they wait like any other
-		for (auto it = gLive.end(); gLive.size() > GlowLimit() && it != gLive.begin();) {
+		if (look) {
+			std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
+		}
+		// never more than the cap on others, whatever came in this frame: the newest come off and wait like any other
+		for (auto it = gLive.end(); OthersLit() > GlowLimit() && it != gLive.begin();) {
 			--it;
 			if (!it->hers) {
 				TakeOff(*it, scene);
@@ -347,8 +400,11 @@ namespace Plugin
 		}
 		gLive.clear();
 		gFailed.clear();
+		gLookNow = true;
 		ForgetBodyArt();  // a save may bring other casting art (RefindHandLights)
 	}
+
+	void NoteArtStarted() { gArtStarted.store(true, std::memory_order_relaxed); }
 
 	void ForgetBodyArt()
 	{

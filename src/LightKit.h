@@ -23,10 +23,71 @@
 #include "LightMath.h"
 #include "Pulse.h"
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <mutex>
 
 namespace LightKit
 {
+	// What each per-frame pass costs on the main thread, in microseconds: a pass wraps itself in one Cost::Scope with a fixed slot
+	// and name, devbench reads Cost::Slots(); about the last 20 frames as the average, the worst since the last Reset (a load)
+	namespace Cost
+	{
+		inline constexpr std::size_t kSlots = 24;
+
+		struct Slot
+		{
+			std::atomic<const char*> name{ nullptr };
+			std::atomic<float>       usAvg{ 0.0f };
+			std::atomic<float>       usMax{ 0.0f };
+		};
+
+		[[nodiscard]] inline std::array<Slot, kSlots>& Slots()
+		{
+			static std::array<Slot, kSlots> slots{};
+			return slots;
+		}
+
+		inline void Note(std::size_t a_slot, const char* a_name, float a_us)
+		{
+			if (a_slot >= kSlots) {
+				return;
+			}
+			auto&       s = Slots()[a_slot];
+			const float avg = s.usAvg.load(std::memory_order_relaxed);
+			s.name.store(a_name, std::memory_order_relaxed);
+			s.usAvg.store(avg <= 0.0f ? a_us : avg + (a_us - avg) * 0.05f, std::memory_order_relaxed);
+			if (a_us > s.usMax.load(std::memory_order_relaxed)) {
+				s.usMax.store(a_us, std::memory_order_relaxed);
+			}
+		}
+
+		inline void Reset()
+		{
+			for (auto& s : Slots()) {
+				s.usAvg.store(0.0f, std::memory_order_relaxed);
+				s.usMax.store(0.0f, std::memory_order_relaxed);
+			}
+		}
+
+		// times its own lifetime into one slot
+		class Scope
+		{
+		public:
+			Scope(std::size_t a_slot, const char* a_name) noexcept : slot(a_slot), name(a_name), start(std::chrono::steady_clock::now()) {}
+			~Scope() { Note(slot, name, std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - start).count()); }
+			Scope(const Scope&) = delete;
+			Scope& operator=(const Scope&) = delete;
+
+		private:
+			std::size_t                           slot{ 0 };
+			const char*                           name{ nullptr };
+			std::chrono::steady_clock::time_point start{};
+		};
+	}
+
 	// A value read and written on different threads (the menu's render thread, the main thread, the game's loader threads)
 	// with no other value depending on it: relaxed atomic loads and stores. Copyable, so it can live in a vector that is
 	// built once at load.

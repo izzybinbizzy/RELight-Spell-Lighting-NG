@@ -69,6 +69,37 @@ namespace Plugin
 		};
 		std::vector<Failed> gFailed;
 
+		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look every
+		// half second adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
+		std::mutex              gDrawnLock;
+		std::vector<RE::FormID> gDrawnNoted;  // gDrawnLock
+		std::vector<RE::FormID> gDrawn;       // the main thread's
+		constexpr std::uint64_t kLookUpdates = 30;
+		bool                    gLookNow = true;  // a game loaded: look at once
+
+		void AddDrawn(RE::FormID a_id)
+		{
+			if (std::ranges::find(gDrawn, a_id) == gDrawn.end()) {
+				gDrawn.push_back(a_id);
+			}
+		}
+
+		[[nodiscard]] bool WeaponOut(RE::Actor* a_actor) { return a_actor->AsActorState()->GetWeaponState() != RE::WEAPON_STATE::kSheathed; }
+
+		void LookForDrawn(RE::PlayerCharacter* a_player)
+		{
+			if (WeaponOut(a_player)) {
+				AddDrawn(a_player->GetFormID());
+			}
+			if (auto* lists = RE::ProcessLists::GetSingleton()) {
+				for (auto& handle : lists->highActorHandles) {
+					if (auto actor = handle.get(); actor && WeaponOut(actor.get())) {
+						AddDrawn(actor->GetFormID());
+					}
+				}
+			}
+		}
+
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)
 		{
 			if (a_scene && a_v.bs) {
@@ -279,16 +310,31 @@ namespace Plugin
 		const auto  ownFade = [&](const Stream& a_held, RE::FormID a_actor) {
 			return a_held.fade * (a_actor == player->GetFormID() ? sneak : 1.0f);
 		};
+		{
+			std::lock_guard lock(gDrawnLock);
+			for (const auto id : gDrawnNoted) {
+				AddDrawn(id);
+			}
+			gDrawnNoted.clear();
+		}
+		if (gLookNow || gUpdate % kLookUpdates == 0) {
+			gLookNow = false;
+			LookForDrawn(player);
+		}
+		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
+			return;  // no weapon out and nothing lit
+		}
 		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
 		want.clear();
-		WantsOf(player, hidden, want);
-		if (auto* lists = RE::ProcessLists::GetSingleton()) {
-			for (auto& handle : lists->highActorHandles) {
-				if (auto actor = handle.get(); actor && actor.get() != player) {
-					WantsOf(actor.get(), false, want);
-				}
+		// an actor leaves the list once its weapon is fully away or it is gone; the rest say what they want
+		std::erase_if(gDrawn, [&](RE::FormID a_id) {
+			auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor)) {
+				return true;
 			}
-		}
+			WantsOf(actor, actor == player && hidden, want);
+			return false;
+		});
 		// what is no longer wanted, or hangs on a node the actor no longer has (a view switch rebuilds it), comes off
 		std::erase_if(gLive, [&](Live& v) {
 			const bool keep = std::ranges::any_of(want, [&v](const Want& w) {
@@ -364,6 +410,20 @@ namespace Plugin
 		gLive.clear();
 		gLiveCount = 0;
 		gFailed.clear();
+		{
+			std::lock_guard lock(gDrawnLock);
+			gDrawnNoted.clear();
+		}
+		gDrawn.clear();
+		gLookNow = true;
+	}
+
+	void NoteDrawing(RE::FormID a_actor)
+	{
+		std::lock_guard lock(gDrawnLock);
+		if (std::ranges::find(gDrawnNoted, a_actor) == gDrawnNoted.end()) {
+			gDrawnNoted.push_back(a_actor);
+		}
 	}
 
 	std::size_t LiveHeldLights() { return gLiveCount.load(); }

@@ -873,6 +873,9 @@ namespace
 						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
+				if constexpr (std::is_same_v<T, RE::Hazard>) {
+					Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
+				}
 				if constexpr (std::is_base_of_v<RE::Projectile, T>) {
 					Plugin::QueueRow(a_this);  // a bolt / spray / cone our data lights: its row of lights, hung on the main thread (Rows.cpp)
 				}
@@ -891,28 +894,73 @@ namespace
 		static void thunk(RE::PlayerCharacter* a_this, float a_delta)
 		{
 			// the dimmed lights get the others' numbers back BEFORE the update: RE::Light writes this frame's fades inside it
-			LightKit::Guarded("player update undim", []() { UndimForFrame(); });
+			using LightKit::Cost::Scope;
+			{
+				const Scope c{ 1, "undim" };
+				LightKit::Guarded("player update undim", []() { UndimForFrame(); });
+			}
 			func(a_this, a_delta);
 			LightKit::Guarded("player update", [a_this, a_delta]() {
+				const Scope all{ 0, "player update, all of ours" };
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
-				Plugin::SweepKeptLights();
-				const float sneak = StepSneakLevel(a_this, a_delta);
-				Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
-				UpdateBudgetLights();
-				Plugin::UpdateOptionLights();
-				HoldBudgetLightsOut();
-				Plugin::UpdateHeldLights();
-				Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
-				Plugin::UpdateRows();        // the rows of lights along bolts, sprays and cones (Rows.cpp)
-				PlaceHerShadow();
-				PlacePromotedHands();
+				{
+					const Scope c{ 2, "sweep kept lights" };
+					Plugin::SweepKeptLights();
+				}
+				float sneak = 1.0f;
+				{
+					const Scope c{ 3, "sneak level" };
+					sneak = StepSneakLevel(a_this, a_delta);
+					Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
+				}
+				{
+					const Scope c{ 4, "budget lights" };
+					UpdateBudgetLights();
+				}
+				{
+					const Scope c{ 5, "option lights" };
+					Plugin::UpdateOptionLights();
+				}
+				{
+					const Scope c{ 6, "budget held out" };
+					HoldBudgetLightsOut();
+				}
+				{
+					const Scope c{ 7, "held lights" };
+					Plugin::UpdateHeldLights();
+				}
+				{
+					const Scope c{ 8, "body lights" };
+					Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
+				}
+				{
+					const Scope c{ 9, "rows" };
+					Plugin::UpdateRows();  // the rows of lights along bolts, sprays and cones (Rows.cpp)
+				}
+				{
+					const Scope c{ 10, "her shadow, promoted hands" };
+					PlaceHerShadow();
+					PlacePromotedHands();
+				}
 				// RE::Light has already written this frame's fades (its update runs inside `func` above): the sliders next, then
 				// the fading module as the final pass, on what the sliders wrote (each fade it writes is reported back -
 				// Brightness.cpp's NoteFadeWrite)
-				Plugin::UpdateBrightness(a_delta);
-				Fade::UpdateHands(a_delta);
-				DimSpellLights(sneak);       // over every fade written above
-				Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				{
+					const Scope c{ 11, "brightness" };
+					Plugin::UpdateBrightness(a_delta);
+				}
+				{
+					const Scope c{ 12, "fading hands" };
+					Fade::UpdateHands(a_delta);
+				}
+				{
+					const Scope c{ 13, "sneak dim" };
+					DimSpellLights(sneak);  // over every fade written above
+				}
+				{
+					const Scope c{ 14, "ground lights" };
+					Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				}
 			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -927,7 +975,8 @@ namespace
 		{
 			func(a_this);
 			LightKit::Guarded("effect update", [a_this]() {
-				const auto pass = [a_this]() {
+				const LightKit::Cost::Scope c{ 15, "one effect update (each effect, each frame)" };
+				const auto                  pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
 				};
 				if (gDimming.load(std::memory_order_acquire) && OnHerWeapon(a_this)) {  // the cast only while something is dimmed
@@ -944,13 +993,34 @@ namespace
 		}
 	};
 
+	// an art starting on anything (Light Placer's Init way - powerof3, GPL-3.0, his permission 2026-11-07): the body lights look
+	// for new art only then (BodyLights.cpp). Any thread; only a flag is set
+	template <class T>
+	struct ArtInit
+	{
+		static void thunk(T* a_this)
+		{
+			func(a_this);
+			Plugin::NoteArtStarted();
+			Plugin::NoteOptionsLook();
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(T::VTABLE[0]).write_vfunc(0x36, thunk);  // ReferenceEffect::Init
+		}
+	};
+
 	struct CellAnimations
 	{
 		static void thunk(RE::TESObjectCELL* a_cell)
 		{
 			func(a_cell);
 			// this frame's fading numbers again for every hand's lights, without advancing any timer
-			LightKit::Guarded("cell animations", []() { UndimmedFor([]() { Fade::ReapplyAll(); }); });
+			LightKit::Guarded("cell animations", []() {
+				const LightKit::Cost::Scope c{ 16, "cell animations" };
+				UndimmedFor([]() { Fade::ReapplyAll(); });
+			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 		static void                                    Install()
@@ -1060,6 +1130,8 @@ namespace
 		PlayerUpdate::func = vtbl.write_vfunc(REL::Relocate(0xAD, 0xAD, 0xAF), PlayerUpdate::thunk);  // Actor::Update (CommonLib's Actor.cpp)
 		EffectUpdate<RE::ShaderReferenceEffect>::Install();
 		EffectUpdate<RE::ModelReferenceEffect>::Install();
+		ArtInit<RE::ShaderReferenceEffect>::Install();
+		ArtInit<RE::ModelReferenceEffect>::Install();
 		CellAnimations::Install();
 		SKSE::log::info(
 			"projectile, explosion and hazard loads, the player update, effect updates and cell animations hooked after every "

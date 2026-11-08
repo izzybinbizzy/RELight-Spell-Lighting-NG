@@ -808,29 +808,6 @@ namespace Plugin
 				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby lights "
 				"only casters within about forty paces of you, as they come and go. Lights lit under Everyone nearby follow a change at "
 				"once; the others reach the next spell a caster readies."));
-			bool limit = GlowLimitOn();
-			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
-				SetGlowLimitOn(limit);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"Cloaks, healing and other spells on people each carry a glow. On: at most the count below are lit at once - "
-				"past it a new one waits until another goes out. Yours always light."));
-			ImGuiMCP::BeginDisabled(!limit);
-			int count = GlowLimitCount();
-			// the word translated, the number not: a % in a translation is doubled so it can never become a format of its own
-			std::string format = "%d ";
-			for (const char* c = T("lights"); *c; ++c) {
-				format += *c == '%' ? std::string("%%") : std::string(1, *c);
-			}
-			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, format.c_str())) {
-				SetGlowLimitCount(count);
-			}
-			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-				SaveSettings();
-			}
-			ImGuiMCP::EndDisabled();
-			MenuStyle::Tip(T("How many glows on people can be lit at the same time. Fewer keeps big fights smoother."));
 			// his list: "under performance add a toggle to turn off lights completely for the entire mod"
 			bool allOff = AllLightsOff();
 			if (ImGuiMCP::Checkbox(T("All RELight - Spell Lighting NG lights off"), &allOff)) {
