@@ -35,7 +35,7 @@ namespace Plugin
 			RE::NiPointer<RE::BSLight>      bs;
 			bool                            seen{ false };
 			RE::NiPointer<RE::NiAVObject>   anchor;              // where it sits: magic's third-person counterpart (also in first person), or magic itself when there is none
-			bool                            handsDown{ false };  // dropped because the hands went down: the game's light stays hidden
+			bool                            handsDown{ false };  // dropped because the hands went down or the actor went: the game's light stays hidden
 			RE::NiPointer<RE::NiAVObject>   magic;               // the nearest node above the casting light whose name holds "MagicNode", or the light's own parent when none does
 		};
 
@@ -51,6 +51,13 @@ namespace Plugin
 		// the game's casting lights left hidden when their hands went down (a twin dropped with handsDown); main thread only
 		std::unordered_map<std::uint64_t, RE::NiPointer<RE::NiPointLight>> gLeftHidden;
 
+		// its actor or that actor's 3D has gone: nobody is left to end its casting light, which must not come back lit
+		[[nodiscard]] bool ActorGone(std::uint64_t a_key)
+		{
+			auto* actor = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(a_key >> 1));
+			return !actor || !actor->Is3DLoaded();
+		}
+
 		void Drop(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
 			if (a_scene && a_twin.bs) {
@@ -59,7 +66,7 @@ namespace Plugin
 			if (a_twin.light && a_twin.light->parent) {
 				a_twin.light->parent->DetachChild(a_twin.light.get());
 			}
-			if (a_twin.source && !a_twin.handsDown && !WantedDark(a_twin.source.get())) {
+			if (a_twin.source && a_twin.source->parent && !a_twin.handsDown && !WantedDark(a_twin.source.get())) {
 				a_twin.source->SetAppCulled(false);  // the casting light shows again
 			}
 			a_twin = {};
@@ -69,6 +76,7 @@ namespace Plugin
 		void DropAll(RE::ShadowSceneNode* a_scene)
 		{
 			for (auto& entry : gTwins) {
+				entry.second.handsDown = entry.second.handsDown || ActorGone(entry.first);
 				Drop(entry.second, a_scene);
 			}
 			gTwins.clear();
@@ -355,9 +363,11 @@ namespace Plugin
 		}
 		std::erase_if(gTwins, [&](auto& a_entry) {
 			if (!a_entry.second.seen) {
-				if (a_entry.second.handsDown && a_entry.second.source) {
+				const bool gone = ActorGone(a_entry.first);
+				if (a_entry.second.handsDown && a_entry.second.source && !gone) {
 					gLeftHidden.insert_or_assign(a_entry.first, a_entry.second.source);
 				}
+				a_entry.second.handsDown = a_entry.second.handsDown || gone;
 				Drop(a_entry.second, scene);
 				return true;
 			}
@@ -368,6 +378,9 @@ namespace Plugin
 
 	void DropGroundLights()
 	{
+		for (auto& entry : gTwins) {
+			entry.second.handsDown = true;  // a load: the old game's 3D goes, nothing is given back to it
+		}
 		DropAll(LightKit::Scene());
 		gLeftHidden.clear();  // a load: the lights left hidden went with the old game's 3D
 	}

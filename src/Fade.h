@@ -32,6 +32,7 @@ namespace Fade
 	[[nodiscard]] Settings Config();                                           // a copy, safe from any thread
 	void                   WatchHands();                                       // data load: the events that wake the hands' pass
 	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
+	void                   NoteActor3D(bool a_in) noexcept;                    // any thread: an actor's 3D came or went (each mod's own hook)
 	[[nodiscard]] bool     HandsAsleep() noexcept;                             // the hands' pass is asleep (DevBench)
 	[[nodiscard]] bool     EffectsWanted() noexcept;                           // any thread: an effect's update has fading work
 	[[nodiscard]] bool     ReapplyWanted() noexcept;                           // any thread: the cell's animation call has fading work

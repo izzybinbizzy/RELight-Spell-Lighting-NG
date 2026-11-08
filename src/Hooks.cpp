@@ -1037,6 +1037,23 @@ namespace
 		}
 	};
 
+	// and out: lights hung on it leave with it. Flags only, any thread
+	struct RefSet3D
+	{
+		static void thunk(RE::TESObjectREFR* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
+		{
+			func(a_this, a_object, a_queue3DTasks);
+			if (!a_object) {
+				Plugin::NoteSweep();
+			}
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::TESObjectREFR::VTABLE[0]).write_vfunc(0x6C, thunk);
+		}
+	};
+
 	struct CellAnimations
 	{
 		static void thunk(RE::TESObjectCELL* a_cell)
@@ -1157,6 +1174,7 @@ namespace
 		Load3D<RE::Explosion>::Install();
 		Load3D<RE::Hazard>::Install();
 		RefLoad3D::Install();
+		RefSet3D::Install();
 		REL::Relocation<std::uintptr_t> vtbl{ RE::PlayerCharacter::VTABLE[0] };
 		PlayerUpdate::func = vtbl.write_vfunc(REL::Relocate(0xAD, 0xAD, 0xAF), PlayerUpdate::thunk);  // Actor::Update (CommonLib's Actor.cpp)
 		EffectUpdate<RE::ShaderReferenceEffect>::Install();

@@ -489,7 +489,6 @@ namespace Fade
 
 		class HandWatch final :
 			public RE::BSTEventSink<RE::TESEquipEvent>,
-			public RE::BSTEventSink<RE::TESObjectLoadedEvent>,
 			public RE::BSTEventSink<RE::BGSActorCellEvent>,
 			public RE::BSTEventSink<SKSE::ActionEvent>
 		{
@@ -497,14 +496,6 @@ namespace Fade
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
 				WakeHands();
-				return RE::BSEventNotifyControl::kContinue;
-			}
-
-			RE::BSEventNotifyControl ProcessEvent(const RE::TESObjectLoadedEvent* a_event, RE::BSTEventSource<RE::TESObjectLoadedEvent>*) override
-			{
-				if (a_event && (a_event->loaded || gWatched.load(std::memory_order_relaxed) != Who::kPlayer) && RE::TESForm::LookupByID<RE::Actor>(a_event->formID)) {
-					WakeHands();
-				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 
@@ -951,6 +942,13 @@ namespace Fade
 		gHandsWake.store(true, std::memory_order_relaxed);
 	}
 
+	void NoteActor3D(bool a_in) noexcept
+	{
+		if (a_in || gWatched.load(std::memory_order_relaxed) != Who::kPlayer) {
+			WakeHands();
+		}
+	}
+
 	bool HandsAsleep() noexcept
 	{
 		return gHandsAsleep.load(std::memory_order_relaxed);
@@ -966,7 +964,6 @@ namespace Fade
 		static HandWatch watch;
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESEquipEvent>(&watch);
-			events->AddEventSink<RE::TESObjectLoadedEvent>(&watch);
 		}
 		if (auto* actions = SKSE::GetActionEventSource()) {
 			actions->AddEventSink(&watch);
