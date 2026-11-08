@@ -55,9 +55,53 @@ namespace Plugin
 			}
 		};
 
+		// Off until a reading calls for it: flip it in both mods
+		inline constexpr bool kEndCastingLights = false;
+
+		// A casting light when its actor's 3D is let go. The game ends one only on a spell change and, for the player alone, on a node reset; held by the
+		// caster, its BSLight outlives its node and stays on what it lit. This does to the light what the game's detach does, in its order. Main thread
+		[[maybe_unused]] void EndCastingLights(RE::FormID a_id)
+		{
+			auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+			if (!actor || actor->IsPlayerRef() || actor->Is3DLoaded()) {
+				return;  // its 3D is back; or hers, which the game's own detach looks after
+			}
+			auto* scene = LightKit::Scene();
+			for (auto* caster : actor->GetActorRuntimeData().magicCasters) {
+				if (!caster || !caster->light) {
+					continue;
+				}
+				const auto bs = caster->light;
+				if (scene) {
+					scene->RemoveLight(bs);
+				}
+				if (auto* light = bs->light.get(); light && light->parent) {
+					light->parent->DetachChild(light);
+				}
+				caster->light.reset();
+			}
+		}
+
+		// any thread: only read, and only a caster with a light queues the main thread's end
+		[[maybe_unused]] void QueueEndCastingLights(const RE::Actor* a_actor)
+		{
+			const auto& casters = a_actor->GetActorRuntimeData().magicCasters;
+			if (a_actor->IsPlayerRef() || std::ranges::none_of(casters, [](const auto* a_caster) { return a_caster && a_caster->light; })) {
+				return;
+			}
+			if (auto* tasks = SKSE::GetTaskInterface()) {
+				tasks->AddTask([id = a_actor->GetFormID()]() { LightKit::Guarded("end casting lights", [id]() { EndCastingLights(id); }); });
+			}
+		}
+
 		// lights leave with an actor's 3D, and an actor may arrive with its weapon out and an enchantment light on it
 		void Note3D(const RE::Actor* a_actor, bool a_in)
 		{
+			if constexpr (kEndCastingLights) {
+				if (!a_in) {
+					QueueEndCastingLights(a_actor);
+				}
+			}
 			NoteSweep();
 			Fade::NoteActor3D(a_actor);
 			if (a_in) {
