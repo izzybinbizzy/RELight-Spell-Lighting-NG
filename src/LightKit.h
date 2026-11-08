@@ -10,7 +10,6 @@
 //   NewForm      a form made in memory by the game's own factory; IsCallAt, a call site's check before it is hooked
 //   Isl          the two words Community Shaders' inverse-square lighting reads off a light
 //   CloneLight   a new light for the scene, and AddToScene to register it (ReLight's method, Truman's permission)
-//   Daylight     how much dimmer the lights are by day and in bright rooms: the "Dim in daylight" setting
 //   FleshFx      which flesh spells wear FleshFX's look, and the color their lights then take
 //   ArtColor     an art model's color off its effect shaders (an automatic hand light's third source)
 //   Guarded      runs a hook's or a frame's own work and lets no exception out into the game
@@ -299,29 +298,6 @@ namespace LightKit
 
 	// the ambient a light of ours wears off Community Shaders: a tenth of its color (RE::Light's rule, Truman)
 	[[nodiscard]] inline RE::NiColor Tenth(const RE::NiColor& a_color) { return { a_color.red * 0.1f, a_color.green * 0.1f, a_color.blue * 0.1f }; }
-
-	// "Dim in daylight" (LightMath.h's DaylightShare): 1 at night and in the dark; a_pick 0 off, 1 a little, 2 more. Main thread:
-	// it reads the player's cell (an interior by its own light, outdoors by the hour).
-	[[nodiscard]] inline float Daylight(int a_pick)
-	{
-		auto* player = a_pick > 0 ? RE::PlayerCharacter::GetSingleton() : nullptr;
-		auto* cell = player ? player->GetParentCell() : nullptr;
-		if (!cell) {
-			return 1.0f;
-		}
-		float bright = 0.0f;
-		if (cell->IsInteriorCell()) {
-			if (const auto* l = cell->GetLighting()) {
-				const auto lum = [](const RE::Color& a_c) {
-					return (0.2126f * a_c.red + 0.7152f * a_c.green + 0.0722f * a_c.blue) / 255.0f;
-				};
-				bright = DaylightOfRoom((std::max)(lum(l->ambient), lum(l->directional)));
-			}
-		} else if (const auto* calendar = RE::Calendar::GetSingleton()) {
-			bright = DaylightOfHour(calendar->GetHour());
-		}
-		return DaylightShare(a_pick, bright);
-	}
 
 	// FleshFX (LightMath.h kFleshLooks): which flesh spells wear its look in this load order. Find() runs once at data load, on
 	// the main thread, before any light is drawn; HueOf and Shown only read after it, from any thread.

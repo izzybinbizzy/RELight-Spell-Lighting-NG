@@ -13,7 +13,6 @@
 //                      PlainAt, the same from a reach already worked out; LightPlacerSize, a record's size as Light Placer reads it;
 //                      NeverDimmer, the fade a raised light keeps so it is never dimmer than the light it was raised from
 //   ToScreen           linear light -> the screen's color (Dynamic Wards' wardgen.srgb); ToLinear the way back
-//   DaylightShare      how bright the day or the room is, for "Dim in daylight"
 //   KeyAt              a fade controller's value at a time (Truman's KeyframeSequence maths, RE::Light's controller.h)
 //   kFleshLooks        the five flesh spells' light colors when FleshFX's look wins on them; AtStrengthOf, a color carried
 //                      at another light's strength
@@ -162,36 +161,6 @@ namespace LightKit
 	{
 		const float v = ToLinear(static_cast<float>(a_screen) / 255.0f);
 		return static_cast<std::uint8_t>(std::clamp(std::lround(v * 255.0f), 0L, 255L));
-	}
-
-	// "Dim in daylight": how bright it is, 0 (night, a dark room) to 1 (full day, a bright room). Outdoors it follows the
-	// hour (full day 8 to 17, a three-hour dawn and dusk); indoors the room's own light, as the luminance (0..1) of its
-	// ambient or directional color, whichever is brighter.
-	[[nodiscard]] inline float DaylightOfHour(float a_hour) noexcept
-	{
-		if (a_hour < 5.0f || a_hour >= 20.0f) {
-			return 0.0f;
-		}
-		if (a_hour < 8.0f) {
-			return (a_hour - 5.0f) / 3.0f;
-		}
-		if (a_hour < 17.0f) {
-			return 1.0f;
-		}
-		return (20.0f - a_hour) / 3.0f;
-	}
-	[[nodiscard]] inline float DaylightOfRoom(float a_luminance) noexcept
-	{
-		return std::clamp((a_luminance - 0.15f) / 0.3f, 0.0f, 1.0f);
-	}
-	// the share the lights keep: a_pick 0 off, 1 a little (at most a quarter dimmer), 2 more (at most half)
-	[[nodiscard]] inline float DaylightShare(int a_pick, float a_bright) noexcept
-	{
-		if (a_pick <= 0) {
-			return 1.0f;
-		}
-		const float most = a_pick == 1 ? 0.25f : 0.5f;
-		return 1.0f - most * std::clamp(a_bright, 0.0f, 1.0f);
 	}
 
 	// A fade controller's value at a_time (inside its loop): Truman's KeyframeSequence::Interpolate (RE::Light,

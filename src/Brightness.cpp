@@ -12,10 +12,6 @@
 // Lighting breathes or crackles here (Oscillate), and a light on an object an art pick recolors (`tint`) takes that
 // color. Runs in the player update after the switches and before the fading module, the sneak dim and the ground twins.
 //
-// Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister mods" -
-// RE::Light lights the objects; what it has no setting for is done here, on the lights this pass already looks after):
-//   Dim in daylight   Brightness x a daylight factor: outdoors by the hour (full by day, none at night, a ramp at dawn and
-//                     dusk), indoors by how bright the room's own light is - looked at every two seconds
 // (Light colors and the Fire / Frost / Shock color picks were here until his order took the color variations out of the
 // menu, 2026-10-09; Light colors came back 2026-10-20 and left again 2026-10-21 - "pale and deep also need to be removed":
 // every light keeps its own color; an art pick's tint still recolors.)
@@ -61,7 +57,6 @@ namespace Plugin
 			return a.red == b.red && a.green == b.green && a.blue == b.blue;
 		}
 
-		float gDaylight = 1.0f, gDaylightClock = 2.0f;  // main thread only (UpdateBrightness)
 		// frames the scene is still walked after what can bring a light of ours: RE::Light may hang one a few frames after its 3D or art
 		constexpr int    kSliderLooks = 30;
 		std::atomic<int> gSliderLooks{ kSliderLooks };
@@ -255,8 +250,6 @@ namespace Plugin
 		}
 	}
 
-	float DaylightFactor() { return gDaylight; }
-
 	void ForgetSliderLights(const GoneLights& a_gone)
 	{
 		{
@@ -346,7 +339,6 @@ namespace Plugin
 		}
 		int looks = gSliderLooks.load(std::memory_order_relaxed);
 		if (looks <= 0 && !gOursInScene) {
-			gDaylightClock = 2.0f;  // the walk that wakes reads the daylight at once
 			return;
 		}
 		if (looks > 0) {
@@ -354,15 +346,8 @@ namespace Plugin
 		}
 		++gFrame;
 		const float dt = std::clamp(a_delta, 0.0f, 0.25f);
-		if (DimInDaylight() <= 0) {
-			gDaylight = 1.0f;  // the sun has no event: its two-second look only while its pick is on
-			gDaylightClock = 2.0f;
-		} else if (gDaylightClock += dt; gDaylightClock >= 2.0f) {
-			gDaylightClock = 0.0f;
-			gDaylight = LightKit::Daylight(DimInDaylight());
-		}
 		bool        ours = false;
-		const float scale = Brightness() * gDaylight * VanillaStrength();
+		const float scale = Brightness() * VanillaStrength();
 		const float reach = Reach();
 		const auto  epoch = TintEpoch();
 		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {

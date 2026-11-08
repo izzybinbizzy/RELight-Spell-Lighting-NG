@@ -237,8 +237,6 @@ namespace Plugin
 	void                      SetOptionOn(std::size_t a_index, bool a_on);
 	// Illuminated's settings, ported (his "add everything from illuminated into relight ... sister mods"). The lighting is
 	// never a pick here: it is found by itself (LightingFound, Lighting.cpp), as his later word asked
-	[[nodiscard]] int  DimInDaylight();  // 0 off, 1 a little, 2 more
-	void               SetDimInDaylight(int a_v);
 	[[nodiscard]] int  HandLightsFor();  // 0 everyone, 1 everyone nearby, 2 player and followers, 3 player only
 	void               SetHandLightsFor(int a_v);
 	[[nodiscard]] bool AutoLightsOn();
@@ -295,9 +293,6 @@ namespace Plugin
 	// (DressHandLight), its Brightness bases - fade -1: none known, its values when this pass next meets it
 	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false,
 		Dressed a_dressed = {});
-	// what this pass gives every light of ours, for the lights another file scales (Held.cpp): the daylight factor (looked
-	// at every two seconds, main thread)
-	[[nodiscard]] float DaylightFactor();
 
 	// ------------------------------------------------------------------ Streams.cpp: sprays, beams, breath shouts
 	void RaiseStreamLights();    // once, after the data is read and the lighting found, BEFORE MakeHandLights
@@ -349,9 +344,9 @@ namespace Plugin
 	[[nodiscard]] RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light);
 	[[nodiscard]] RE::BSLight*       MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
 		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
-	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
+	// the sliders onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
-	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community
+	// what a held or body light's file fade and radius are multiplied by: Brightness, Reach, and off Community
 	// Shaders the plain drawing (fade x 1.14, reach x 178 / 133)
 	struct OwnScale
 	{

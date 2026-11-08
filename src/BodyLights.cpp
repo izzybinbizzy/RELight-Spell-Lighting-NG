@@ -409,7 +409,7 @@ namespace Plugin
 				it = gLive.erase(it);
 			}
 		}
-		// the sliders and the daylight reach a light already hung
+		// the sliders reach a light already hung
 		for (auto& v : gLive) {
 			const float fade = v.body->fade * scale * (v.hers ? sneak : 1.0f) * FecBodyFade(v.art.get());
 			const float reach = v.body->radius * reachScale;

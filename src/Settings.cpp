@@ -17,7 +17,6 @@
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
-//   DimInDaylight=1             0 off, 1 a little, 2 more (Brightness.cpp)
 //   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (Hooks.cpp)
 //   AutoLights=1                spells from mods with no patch get a hand light too (HandLights.cpp)
 //   Quality=0                   0 quality, 1 performance: hand, weapon and body lights for the player and followers only (Hooks.cpp)
@@ -62,7 +61,6 @@ namespace Plugin
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
-		std::atomic<int>                gDaylight{ 1 };
 		std::atomic<int>                gHandsFor{ 0 };
 		std::atomic<bool>               gAuto{ true };
 		std::atomic<bool>               gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
@@ -121,7 +119,6 @@ namespace Plugin
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
-			{ "DimInDaylight", [] { return gDaylight.load(); }, [](int v) { gDaylight = std::clamp(v, 0, 2); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
 			{ "AllLightsOff", [] { return gAllOff ? 1 : 0; }, [](int v) { gAllOff = v != 0; } },
@@ -278,8 +275,8 @@ namespace Plugin
 				picksRead = picksRead || IsPickKey(key);
 				pulseRead = pulseRead || SameText(key, "PulseShapes");
 				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
-				// the glow limit's switch and count left the menu (fixed per lighting since 3.1): an older file's keys pass quietly
-				if (!SameText(key, "GlowLimit") && !SameText(key, "GlowLimitCount") && !ApplySetting(key, *v)) {
+				// the glow limit's switch and count and Dim in daylight left the menu in 3.1: an older file's keys pass quietly
+				if (!SameText(key, "GlowLimit") && !SameText(key, "GlowLimitCount") && !SameText(key, "DimInDaylight") && !ApplySetting(key, *v)) {
 					problems.push_back(std::format("{}: not a setting", key));
 				}
 			} else {
@@ -501,8 +498,6 @@ namespace Plugin
 		}
 	}
 
-	int  DimInDaylight() { return gDaylight; }
-	void SetDimInDaylight(int a_v) { gDaylight = std::clamp(a_v, 0, 2); }
 	int  HandLightsFor() { return gHandsFor; }
 	void SetHandLightsFor(int a_v) { gHandsFor = std::clamp(a_v, 0, 3); }
 	bool AutoLightsOn() { return gAuto; }

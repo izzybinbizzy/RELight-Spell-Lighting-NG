@@ -3,7 +3,7 @@
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
 // Pages in SKSE Menu Framework's Mod Control Panel, under their own section so nothing of RE::Light's own menu is touched, laid out
-// as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, daylight, sneaking, Flicker, hand and weapon lights,
+// as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, sneaking, Flicker, hand and weapon lights,
 // the ward color), Choose Your Own Color (the four art picks, automatic lights, the item list), Configs (the weapon enchantment
 // mods, the spells' own switches, Creation Club, then the other mods' groups) and Praedy's Staves. The fading module adds HUD and
 // Fading after them, then this file Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
@@ -564,18 +564,18 @@ namespace Plugin
 #endif
 			GlowHeading("Presets", Icon::kBulb);
 			// Illuminated's presets, the same three (his word: "remove performance preset, only subtle default and cinematic"):
-			// one click sets the two sliders, the light budget and Dim in daylight (-1 leaves one as it is); Default puts back all
-			// four as the mod ships them, as its tip says. The player's own presets are kept per lighting
+			// one click sets the two sliders and the light budget (-1 leaves it as it is); Default puts back all
+			// three as the mod ships them, as its tip says. The player's own presets are kept per lighting
 			struct Preset
 			{
 				const char* name;
 				const char* tip;
-				int         brightness, reach, hands, daylight;
+				int         brightness, reach, hands;
 			};
 			const Preset presets[] = {
-				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1, -1 },
-				{ T("Default"), T("The lights as the mod was made."), 100, 100, 0, 1 },  // Dim in daylight too, as its tip says (the audit)
-				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1, -1 },
+				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1 },
+				{ T("Default"), T("The lights as the mod was made."), 100, 100, 0 },
+				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1 },
 			};
 			for (std::size_t i = 0; i < std::size(presets); ++i) {
 				const auto& p = presets[i];
@@ -587,9 +587,6 @@ namespace Plugin
 					SetReachPercent(p.reach);
 					if (p.hands >= 0) {
 						SetHandLightsFor(p.hands);
-					}
-					if (p.daylight >= 0) {
-						SetDimInDaylight(p.daylight);
 					}
 					SaveSettings();
 				}
@@ -659,18 +656,6 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far this mod's lights carry. 100% is the measured reach. How bright they are does not change - "
 				"that is the Brightness slider."));
-
-			// LightKit::Daylight dims at most a quarter / a half
-			const std::vector<const char*> kDaylight{ T("Off"), T("25% dimmer"), T("50% dimmer") };
-			const std::vector<const char*> kDaylightTips{ T("Lights stay at full strength day and night."),
-				T("By day and in bright rooms lights are up to a quarter dimmer; full strength at night and in the dark."),
-				T("By day and in bright rooms lights are up to half as bright; full strength at night and in the dark.") };
-			int                            day = std::clamp(DimInDaylight(), 0, 2);
-			if (ChoiceCombo(T("Dim in daylight"), day, kDaylight, kDaylightTips)) {
-				SetDimInDaylight(day);
-				SaveSettings();
-			}
-			MenuStyle::Tip(kDaylightTips[static_cast<std::size_t>(day)]);
 
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
 			if (const auto* cs = CSLightLoaded()) {

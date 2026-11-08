@@ -230,13 +230,13 @@ namespace Plugin
 		}
 	}
 
-	// the same Brightness x daylight factor the brightness pass gives every other light of ours (the re-score's P5: held
-	// lights missed Dim in daylight); off Community Shaders a light made for inverse square lighting is drawn plain - the
+	// the same Brightness the brightness pass gives every other light of ours; off Community Shaders a light made for inverse
+	// square lighting is drawn plain - the
 	// house light the hand lights take (LightMath.h PlainAt: fade x 1.14, the reach drawn at 178 / 133)
 	OwnScale OwnLightScale()
 	{
 		const bool isl = InverseSquare();
-		return { Brightness() * DaylightFactor() * VanillaStrength() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
+		return { Brightness() * VanillaStrength() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
 	}
 
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
@@ -279,7 +279,7 @@ namespace Plugin
 		return bs;
 	}
 
-	// the sliders and the daylight onto a light MakeOwnLight made: fade and reach as the caller worked them out
+	// the sliders onto a light MakeOwnLight made: fade and reach as the caller worked them out
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved)
 	{
 		// in a turn: the fading module's effect hooks write a held light too, from other threads (LightKit.h)
@@ -350,7 +350,7 @@ namespace Plugin
 			return !keep;
 		});
 		std::erase_if(gFailed, [&](const Failed& f) { return std::ranges::none_of(want, [&f](const Want& w) { return f.Is(w); }); });
-		// the sliders, the daylight and (🔁 his "re add the enb and cs and vanilla versions ... auto detect") the plain drawing
+		// the sliders and (🔁 his "re add the enb and cs and vanilla versions ... auto detect") the plain drawing
 		// off Community Shaders; the color is the light's own
 		const auto [scale, reachScale] = OwnLightScale();
 		for (const auto& w : want) {
@@ -391,7 +391,7 @@ namespace Plugin
 					w.left ? "left" : "right", w.firstPerson ? "first" : "third", fade, reach);
 			}
 		}
-		// the sliders and the daylight reach a light already hung
+		// the sliders reach a light already hung
 		for (auto& v : gLive) {
 			const float fade = ownFade(*v.held, v.actor) * scale;
 			const float reach = v.held->radius * reachScale;
