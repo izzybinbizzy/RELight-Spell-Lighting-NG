@@ -1203,6 +1203,7 @@ namespace Fade
 		auto& seen = it->second;
 		if (added) {
 			seen.effect.reset(a_effect);
+			WakeHands();  // the pass may sleep with this spell sheathed: this glow follows the hand from now on
 		}
 		seen.frame = gFrame;
 		// a shader's alpha tops out at 1: a pulse or flare can brighten a dimmed glow back up, not past its own

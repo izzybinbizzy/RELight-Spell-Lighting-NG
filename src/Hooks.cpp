@@ -975,8 +975,9 @@ namespace
 		static void thunk(T* a_this)
 		{
 			func(a_this);
-			// every effect in the loaded world comes through here: nothing of the fading module's to do is the common case
-			if (!Fade::EffectsWanted()) {
+			// every effect in the loaded world comes through here: nothing of the fading module's to do, and nothing dimmed for the pass below
+			// to dim again after RE::Light's write, is the common case
+			if (!Fade::EffectsWanted() && !gDimming.load(std::memory_order_acquire)) {
 				return;
 			}
 			LightKit::Guarded("effect update", [a_this]() {
@@ -1041,8 +1042,8 @@ namespace
 		static void thunk(RE::TESObjectCELL* a_cell)
 		{
 			func(a_cell);
-			// every loaded cell comes through here: nothing to write again is the common case
-			if (!Fade::ReapplyWanted()) {
+			// every loaded cell comes through here: nothing to write again and nothing dimmed is the common case
+			if (!Fade::ReapplyWanted() && !gDimming.load(std::memory_order_acquire)) {
 				return;
 			}
 			// this frame's fading numbers again for every hand's lights, without advancing any timer
