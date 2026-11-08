@@ -406,7 +406,8 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
-			ours = true;
+			// a light left on a body the game has taken away (a disabled caster's hand, no reference above it) keeps no walk awake
+			ours = ours || ReferenceOf(niLight) != nullptr;
 			Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
 		}
 		gOursInScene = ours;
