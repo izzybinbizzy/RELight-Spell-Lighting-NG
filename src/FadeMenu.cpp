@@ -395,9 +395,6 @@ namespace Fade
 						h.lights ? "" : T(" - nothing to dim: no lighting mod lights this weapon?"));
 					ImGuiMCP::TextDisabled(T("decided by: %s"), h.why.c_str());
 				}
-				if (h.chargeAV >= 0.0f && !h.bound && !h.spell) {
-					ImGuiMCP::TextDisabled(T("the game's own %s actor value: %.1f"), h.left ? "LeftItemCharge" : "RightItemCharge", h.chargeAV);
-				}
 				ImGuiMCP::Unindent();
 				ImGuiMCP::PopID();
 			}

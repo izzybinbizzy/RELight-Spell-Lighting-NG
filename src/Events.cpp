@@ -56,10 +56,10 @@ namespace Plugin
 		};
 
 		// lights leave with an actor's 3D, and an actor may arrive with its weapon out and an enchantment light on it
-		void Note3D(RE::Actor*, bool a_in)
+		void Note3D(const RE::Actor* a_actor, bool a_in)
 		{
 			NoteSweep();
-			Fade::NoteActor3D(a_in);
+			Fade::NoteActor3D(a_actor);
 			if (a_in) {
 				NoteActorLoaded();
 				NoteOptionsLook();

@@ -32,7 +32,7 @@ namespace Fade
 	[[nodiscard]] Settings Config();                                           // a copy, safe from any thread
 	void                   WatchHands();                                       // data load: the events that wake the hands' pass
 	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
-	void                   NoteActor3D(bool a_in) noexcept;                    // any thread: an actor's 3D came or went (each mod's own hook)
+	void                   NoteActor3D(const RE::Actor* a_actor) noexcept;     // any thread: that actor's 3D came or went (each mod's own hook)
 	[[nodiscard]] bool     HandsAsleep() noexcept;                             // the hands' pass is asleep (DevBench)
 	[[nodiscard]] bool     EffectsWanted() noexcept;                           // any thread: an effect's update has fading work
 	[[nodiscard]] bool     ReapplyWanted() noexcept;                           // any thread: the cell's animation call has fading work
@@ -174,7 +174,6 @@ namespace Fade
 		float       hudFraction{ 1.0f };  // what the HUD's gem shows (a bound weapon: its spell's whole time - Glow::HudFraction)
 		float       brightness{ 1.0f }, reach{ 1.0f }, cool{ 0.0f };
 		std::size_t lights{ 0 }, roots{ 0 };
-		float       chargeAV{ -1.0f };  // the game's own RightItemCharge / LeftItemCharge, to compare
 	};
 	[[nodiscard]] std::vector<HandView> Snapshot();  // the Debug page and DevBench (takes the per-frame lock)
 	struct LightNow

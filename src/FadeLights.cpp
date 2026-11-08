@@ -150,7 +150,7 @@ namespace Fade
 			std::size_t       lights{ 0 }, roots{ 0 };
 			std::string       actorName;
 			std::string       weaponLabel, enchLabel;  // made on the main thread, for the Debug page and DevBench
-			float             chargeAV{ -1.0f };       // the game's own item-charge value, read on the main thread
+			bool              sheathed{ false };       // a weapon hand: put away, as of this pass
 		};
 
 		std::mutex                                       gLock;  // the player update and the effect hooks may be on different threads
@@ -471,12 +471,12 @@ namespace Fade
 			});
 		}
 
-		// a spell hand whose numbers cannot move until the game writes magicka: at full. Not a weapon: a hit takes its charge with no write
-		// the slots below hear, and its ExtraCharge announces nothing
+		// a hand whose numbers cannot move, at full: a spell until the game writes magicka, a weapon while it is sheathed, until the draw that
+		// wakes the pass. Not a drawn weapon: a hit takes its charge with no write the slots below hear. Not a bound one: its time runs sheathed too
 		[[nodiscard]] bool AtRest(const HandTrack& a_hand) noexcept
 		{
 			constexpr float kSlack = 0.002f;
-			return a_hand.spell && a_hand.fraction >= 0.999f && std::fabs(a_hand.out.brightness - 1.0f) < kSlack && std::fabs(a_hand.out.reach - 1.0f) < kSlack &&
+			return (a_hand.spell || (a_hand.sheathed && !a_hand.reading.bound)) && a_hand.fraction >= 0.999f && std::fabs(a_hand.out.brightness - 1.0f) < kSlack && std::fabs(a_hand.out.reach - 1.0f) < kSlack &&
 			       a_hand.out.cool <= 0.0f;
 		}
 
@@ -942,9 +942,9 @@ namespace Fade
 		gHandsWake.store(true, std::memory_order_relaxed);
 	}
 
-	void NoteActor3D(bool a_in) noexcept
+	void NoteActor3D(const RE::Actor* a_actor) noexcept
 	{
-		if (a_in || gWatched.load(std::memory_order_relaxed) != Who::kPlayer) {
+		if (a_actor->IsPlayerRef() || gWatched.load(std::memory_order_relaxed) != Who::kPlayer) {
 			WakeHands();
 		}
 	}
@@ -1084,8 +1084,8 @@ namespace Fade
 					h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
 					h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
 				}
-				if (auto* av = actor->AsActorValueOwner()) {
-					h.chargeAV = av->GetActorValue(left ? RE::ActorValue::kLeftItemCharge : RE::ActorValue::kRightItemCharge);
+				if (const auto* state = actor->AsActorState()) {
+					h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
 				}
 				if (h.verdict.mode == Mode::kExempt) {
 					if (h.active || h.weapon != h.reading.weapon) {
@@ -1474,7 +1474,6 @@ namespace Fade
 			v.cool = h.active ? h.out.cool : 0.0f;
 			v.lights = h.lights;
 			v.roots = h.roots;
-			v.chargeAV = h.chargeAV;  // nothing of the game is touched here: this runs on the menu's and DevBench's threads
 			out.push_back(std::move(v));
 		}
 		std::ranges::sort(out, {}, [](const HandView& v) { return std::make_pair(v.actor, v.left); });

@@ -289,6 +289,7 @@ namespace Plugin
 				}
 				auto& twin = it != gTwins.end() ? it->second : gTwins[key];
 				if (twin.light && (twin.source.get() != source || twin.parent.get() != parent)) {
+					twin.handsDown = twin.handsDown || twin.source.get() != source;  // the hand has a new light: the old one is never shown again
 					Drop(twin, a_scene);
 				}
 				if (!twin.light && !Make(twin, source, parent)) {
