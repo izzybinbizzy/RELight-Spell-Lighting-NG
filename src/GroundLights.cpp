@@ -330,7 +330,9 @@ namespace Plugin
 		Visit(player, scene);
 		// the actors with their hands out, from the draw events (Held.cpp keeps the list, earlier in this update)
 		for (const auto id : DrawnActorIds()) {
-			if (auto* actor = RE::TESForm::LookupByID<RE::Actor>(id); actor && actor != player) {
+			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(id);
+			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
+			if (actor && actor != player && process && process->InHighProcess()) {
 				Visit(actor, scene);
 			}
 		}

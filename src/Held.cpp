@@ -328,14 +328,17 @@ namespace Plugin
 		}
 		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
 		want.clear();
-		// an actor leaves the list once its weapon is fully away or it is gone; the rest say what they want
+		// an actor leaves the list once its weapon is fully away or it is gone; a far one stays listed and is looked at from the moment it
+		// comes near again, with no event to say so; the rest say what they want
 		std::erase_if(gDrawn, [&](RE::FormID a_id) {
 			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
 			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
-			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor) || !process || !process->InHighProcess()) {
+			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor)) {
 				return true;
 			}
-			WantsOf(actor, actor == player && hidden, want);
+			if (process && process->InHighProcess()) {
+				WantsOf(actor, actor == player && hidden, want);
+			}
 			return false;
 		});
 		// what is no longer wanted, or hangs on a node the actor no longer has (a view switch rebuilds it), comes off
