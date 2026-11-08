@@ -487,15 +487,31 @@ namespace Fade
 		std::atomic<bool> gNothingToFollow{ false };  // asleep with nothing held: a value write has no hand to wake it for
 		std::uint32_t     gRestPasses = 0;            // passes in a row with every hand at rest (main thread)
 
+		// an actor the pass follows (Whose): only its equip, action or 3D can change a hand the pass reads. Any thread
+		[[nodiscard]] bool Followed(const RE::TESObjectREFR* a_ref) noexcept
+		{
+			if (!a_ref) {
+				return false;
+			}
+			if (a_ref->IsPlayerRef()) {
+				return true;
+			}
+			const auto  who = gWatched.load(std::memory_order_relaxed);
+			const auto* actor = who == Who::kPlayer ? nullptr : a_ref->As<RE::Actor>();
+			return actor && (who == Who::kEveryone || actor->IsPlayerTeammate());
+		}
+
 		class HandWatch final :
 			public RE::BSTEventSink<RE::TESEquipEvent>,
 			public RE::BSTEventSink<RE::BGSActorCellEvent>,
 			public RE::BSTEventSink<SKSE::ActionEvent>
 		{
 		public:
-			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
-				WakeHands();
+				if (a_event && Followed(a_event->actor.get())) {
+					WakeHands();
+				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 
@@ -505,9 +521,11 @@ namespace Fade
 				return RE::BSEventNotifyControl::kContinue;
 			}
 
-			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent*, RE::BSTEventSource<SKSE::ActionEvent>*) override
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent* a_event, RE::BSTEventSource<SKSE::ActionEvent>*) override
 			{
-				WakeHands();
+				if (a_event && Followed(a_event->actor)) {
+					WakeHands();
+				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
@@ -944,7 +962,7 @@ namespace Fade
 
 	void NoteActor3D(const RE::Actor* a_actor) noexcept
 	{
-		if (a_actor->IsPlayerRef() || gWatched.load(std::memory_order_relaxed) != Who::kPlayer) {
+		if (Followed(a_actor)) {
 			WakeHands();
 		}
 	}

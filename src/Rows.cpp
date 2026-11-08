@@ -133,7 +133,8 @@ namespace Plugin
 		// a light's strength, reach and color written whole; past its top the reach would grow instead of the light brightening
 		void Dress(RE::NiPointLight* a_light, const RE::NiColor& a_color, float a_fade, float a_radius, bool a_isl)
 		{
-			auto& data = a_light->GetLightRuntimeData();
+			const auto turn = LightKit::Turn();  // an effect or cell pass can restore and dim a row light on another thread
+			auto&      data = a_light->GetLightRuntimeData();
 			data.diffuse = a_color;
 			data.fade = a_fade;
 			data.radius = { a_radius, a_radius, LightKit::kLightSize };
