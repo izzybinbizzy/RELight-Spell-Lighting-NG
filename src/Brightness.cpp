@@ -337,7 +337,7 @@ namespace Plugin
 			std::lock_guard l{ gNewLock };
 			made.swap(gNew);
 		}
-		{
+		if (!made.empty()) {
 			std::lock_guard l{ gSeenLock };
 			for (const auto& m : made) {
 				auto& s = gSeen[m.light];

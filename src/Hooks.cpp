@@ -674,6 +674,9 @@ namespace
 		if (!on || !player || !strings || (gMagicLights.empty() && gPromotedBetween.empty())) {
 			return;
 		}
+		if (gPromotedBetween.empty() && !player->AsActorState()->IsWeaponDrawn()) {
+			return;  // her hands down: nothing to place and nothing to put back
+		}
 		static std::vector<RE::NiPointLight*> between;
 		between.clear();
 		for (const bool first : { false, true }) {
@@ -1226,6 +1229,8 @@ bool Plugin::KeptOutByBudget(RE::NiLight* a_light)
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }
 
 bool Plugin::CastByPlayer(const RE::TESObjectREFR* a_ref) { return CastByHer(a_ref); }
+
+bool Plugin::BudgetByDistance() { return NearbyBudget(); }
 
 bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 {

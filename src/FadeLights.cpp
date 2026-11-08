@@ -986,6 +986,7 @@ namespace Fade
 		// asleep: nothing of ours in any hand and nothing to put back, or every hand at rest; only what can change that wakes the pass
 		// (HandWatch, ValueWrites, a setting, a load). A choice of Lights by Item or the fading preview keeps it awake
 		if (gHandsAsleep.load(std::memory_order_relaxed) && !gHandsWake.exchange(false, std::memory_order_relaxed) && !Items::Holding() && !PreviewState().on) {
+			gActors.clear();  // asleep: nothing is read until a wake, and no actor is held meanwhile
 			return;
 		}
 		gHandsWake.store(false, std::memory_order_relaxed);

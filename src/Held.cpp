@@ -75,6 +75,17 @@ namespace Plugin
 		std::vector<RE::FormID> gDrawnNoted;       // gDrawnLock
 		std::vector<RE::FormID> gDrawn;            // the main thread's
 		std::atomic<bool>       gLookNow{ true };  // a game loaded or an actor's 3D came in: look at once
+		std::vector<RE::FormID> gFar;              // listed but out of the high process: nothing announces one coming near
+
+		// a far actor came near, or left: read only while one is listed
+		[[nodiscard]] bool FarChanged()
+		{
+			return std::ranges::any_of(gFar, [](RE::FormID a_id) {
+				const auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+				const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
+				return !actor || (process && process->InHighProcess());
+			});
+		}
 
 		void AddDrawn(RE::FormID a_id)
 		{
@@ -326,8 +337,20 @@ namespace Plugin
 		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
 			return;  // no weapon out and nothing lit
 		}
+		// what a weapon wants changes only with what NoteSweep hears (a draw, a sheathe, an equip, a death, a 3D, a view, her cell, an art's start), a
+		// setting or her sneak level; a refused light is tried again, and neither a far actor coming near nor Everyone nearby has an event
+		static std::uint32_t genWas = 0;
+		static float         sneakWas = -1.0f;
+		const auto           gen = SettingsGeneration();
+		const bool           changed = gen != genWas || sneak != sneakWas;
+		genWas = gen;
+		sneakWas = sneak;
+		if (!changed && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
+			return;
+		}
 		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
 		want.clear();
+		gFar.clear();
 		// an actor leaves the list once its weapon is fully away or it is gone; a far one stays listed and is looked at from the moment it
 		// comes near again, with no event to say so; the rest say what they want
 		std::erase_if(gDrawn, [&](RE::FormID a_id) {
@@ -338,6 +361,8 @@ namespace Plugin
 			}
 			if (process && process->InHighProcess()) {
 				WantsOf(actor, actor == player && hidden, want);
+			} else {
+				gFar.push_back(a_id);
 			}
 			return false;
 		});
@@ -421,6 +446,7 @@ namespace Plugin
 			gDrawnNoted.clear();
 		}
 		gDrawn.clear();
+		gFar.clear();
 		gLookNow = true;
 	}
 

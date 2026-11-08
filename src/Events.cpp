@@ -94,6 +94,36 @@ namespace Plugin
 			}
 		}
 
+		// what else changes which lights a weapon in a hand wants. Only noted, any thread
+		class Changes final :
+			public RE::BSTEventSink<RE::TESEquipEvent>,
+			public RE::BSTEventSink<RE::TESDeathEvent>,
+			public RE::BSTEventSink<SKSE::CameraEvent>,
+			public RE::BSTEventSink<SKSE::NiNodeUpdateEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				NoteSweep();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESDeathEvent*, RE::BSTEventSource<RE::TESDeathEvent>*) override
+			{
+				NoteSweep();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::CameraEvent*, RE::BSTEventSource<SKSE::CameraEvent>*) override
+			{
+				NoteSweep();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::NiNodeUpdateEvent*, RE::BSTEventSource<SKSE::NiNodeUpdateEvent>*) override
+			{
+				NoteSweep();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
 		// lights leave with an actor's 3D, and an actor may arrive with its weapon out and an enchantment light on it
 		void Note3D(const RE::Actor* a_actor, bool a_in)
 		{
@@ -147,6 +177,17 @@ namespace Plugin
 		static Cells cells;
 		Actor3D<RE::Character>::Install();
 		Actor3D<RE::PlayerCharacter>::Install();
+		static Changes changes;
+		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+			events->AddEventSink<RE::TESEquipEvent>(&changes);
+			events->AddEventSink<RE::TESDeathEvent>(&changes);
+		}
+		if (auto* cameras = SKSE::GetCameraEventSource()) {
+			cameras->AddEventSink(&changes);
+		}
+		if (auto* updates = SKSE::GetNiNodeUpdateEventSource()) {
+			updates->AddEventSink(&changes);
+		}
 		auto* actions = SKSE::GetActionEventSource();
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		if (actions) {

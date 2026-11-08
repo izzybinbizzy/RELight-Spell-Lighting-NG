@@ -235,6 +235,7 @@ namespace Fade
 				"A spell in hand: the lights and glow on the casting hand follow your magicka, dimming as it runs low and "
 				"coming back as it refills.",
 				save);
+			ImGuiMCP::SameLine();
 			ImGuiMCP::BeginDisabled(!s.bound);
 			{
 				int secs = static_cast<int>(s.boundFadeSeconds);

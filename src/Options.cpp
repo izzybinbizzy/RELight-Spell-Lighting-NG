@@ -429,7 +429,11 @@ namespace Plugin
 		}
 		// a light not seen for a few seconds has left the scene: what was worked out about it is let go
 		constexpr std::uint32_t kForget = 300;
-		std::erase_if(gKnown, [](const auto& a_kv) { return gFrame - a_kv.second.frame > kForget; });
+		static std::uint32_t    prunedAt = 0;
+		if (gFrame - prunedAt > kForget) {
+			prunedAt = gFrame;
+			std::erase_if(gKnown, [](const auto& a_kv) { return gFrame - a_kv.second.frame > kForget; });
+		}
 	}
 
 	LightList CullOptionLightsUnder(RE::NiAVObject* a_root, std::size_t& a_option)

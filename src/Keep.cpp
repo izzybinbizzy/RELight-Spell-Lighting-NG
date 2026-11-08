@@ -33,6 +33,8 @@ namespace Plugin
 		NoteSliderLook();
 	}
 
+	bool SweepWindowOpen() noexcept { return gSweepFrames.load(std::memory_order_relaxed) > 0; }
+
 	void KeepLight(RE::NiLight* a_light)
 	{
 		if (a_light) {
