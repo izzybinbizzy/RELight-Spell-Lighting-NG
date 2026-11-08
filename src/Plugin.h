@@ -334,6 +334,7 @@ namespace Plugin
 	void                                         WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
 	void                                         WatchEvents();                    // at data load: the event sinks (Events.cpp)
 	void                                         NoteSweep() noexcept;             // any thread: something that can end or bring a light happened (Keep.cpp)
+	[[nodiscard]] std::vector<std::string>       SliderWalkLights();               // main thread: for DevBench, the lights in the scene the sliders' walk calls ours
 	void                                         NoteSliderLook() noexcept;        // any thread: the sliders' walk looks for a few frames (Brightness.cpp)
 	[[nodiscard]] const std::vector<RE::FormID>& DrawnActorIds();                  // main thread: the actors with their hands out (Held.cpp)
 	void                                         NoteActorLoaded() noexcept;       // any thread: an actor's 3D came in, it may arrive with its weapon out (Held.cpp)

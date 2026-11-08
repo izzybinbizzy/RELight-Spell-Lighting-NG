@@ -538,7 +538,8 @@ namespace Fade::Items
 
 	bool Holding() noexcept
 	{
-		return gHolding.load(std::memory_order_relaxed);
+		// a changed choice too: the pass applies it, and saves it once it settles
+		return gHolding.load(std::memory_order_relaxed) || gDirty.load(std::memory_order_acquire);
 	}
 
 	std::optional<RE::NiColor> ChoiceColor(RE::FormID a_id)

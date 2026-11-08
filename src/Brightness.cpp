@@ -291,6 +291,24 @@ namespace Plugin
 		}
 	}
 
+	std::vector<std::string> SliderWalkLights()
+	{
+		std::vector<std::string> names;
+		auto*                    ssn = LightKit::Scene();
+		if (!ssn) {
+			return names;
+		}
+		const auto      turn = LightKit::Turn();
+		std::lock_guard l{ gSeenLock };
+		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
+			if (bsLight && bsLight->light && gSeen.contains(bsLight->light.get())) {
+				const auto* base = BaseOf(bsLight->light.get());
+				names.push_back(std::format("{} on {:08X}", bsLight->light->name.c_str(), base ? base->GetFormID() : 0));
+			}
+		}
+		return names;
+	}
+
 	void NoteSliderLook() noexcept
 	{
 		gSliderLooks.store(kSliderLooks, std::memory_order_relaxed);

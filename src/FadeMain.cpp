@@ -46,7 +46,8 @@ namespace
 	// leftHand, show) - the two calls TrueHUD also reads for its own bar (ersh1/TrueHUD, Hooks.h). With HideChargeBar on,
 	// both go out with show = false, which the vanilla HUD, SkyHUD and TrueHUD all take as "hide the bar". Installed at
 	// data load, after TrueHUD hooked the same calls at plugin load, so TrueHUD is handed what we pass on.
-	// SE/AE only: the call sites are known for those two. Called every frame: it reads the two lock-free switches only.
+	// SE/AE only: the call sites are known for those two. Update compares its numbers with the last and makes these calls only on a
+	// change; this reads the two lock-free switches only.
 	template <int N>
 	struct ChargeBar
 	{
@@ -56,7 +57,7 @@ namespace
 			const bool hide = Fade::HideChargeBarOn();
 			if (Fade::DebugLogOn() && a_args && a_count == 4 && a_args[0].IsNumber() && a_args[2].IsBool() && a_args[3].IsBool()) {
 				LightKit::Guarded("charge bar log", [&]() {
-					// the debug log: each change of what the game hands the HUD (it calls this every frame)
+					// the debug log: each change of what the game hands the HUD
 					static std::array<std::tuple<int, bool, bool>, 2> last{ { { -1, false, false }, { -1, false, false } } };
 					const double                                      percent = a_args[0].GetNumber();
 					const int                                         shown = std::isfinite(percent) ? static_cast<int>(std::clamp(percent, -1.0e6, 1.0e6)) : -1;
