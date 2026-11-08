@@ -122,7 +122,7 @@ namespace Plugin
 		std::vector<Failed> gFailed;
 
 		// new body art is looked for when an art starts anywhere (ReferenceEffect Init, Hooks.cpp - any thread; only a flag: an effect
-		// kept by reference from its Init can be destroyed all the same), at a loaded game and once a second; between looks, under
+		// kept by reference from its Init can be destroyed all the same), an actor's 3D or her cell comes in, and at a loaded game; between looks, under
 		// the game's effect lock as a walk is, only the lights already lit are checked, each off its own art
 		std::atomic<bool> gArtStarted{ false };
 		std::atomic<bool> gLookNow{ true };

@@ -47,6 +47,7 @@ namespace Plugin
 				if (a_event && a_event->flags.get() == RE::BGSActorCellEvent::CellFlag::kEnter) {
 					WatchWeaponLights();
 					NoteOptionsLook();
+					NoteArtStarted();  // an art left behind comes back with its cell, with no start of its own
 					NoteSweep();
 				}
 				return RE::BSEventNotifyControl::kContinue;
@@ -64,6 +65,7 @@ namespace Plugin
 					if (a_event->loaded && RE::TESForm::LookupByID<RE::Actor>(a_event->formID)) {
 						NoteActorLoaded();
 						NoteOptionsLook();
+						NoteArtStarted();  // an art on it comes back with its 3D, with no start of its own
 					}
 				}
 				return RE::BSEventNotifyControl::kContinue;

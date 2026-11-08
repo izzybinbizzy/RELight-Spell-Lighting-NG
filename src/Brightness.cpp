@@ -311,7 +311,6 @@ namespace Plugin
 			std::lock_guard l{ gNewLock };
 			made.swap(gNew);
 		}
-		++gFrame;
 		{
 			std::lock_guard l{ gSeenLock };
 			for (const auto& m : made) {
@@ -353,6 +352,7 @@ namespace Plugin
 		if (looks > 0) {
 			gSliderLooks.compare_exchange_strong(looks, looks - 1, std::memory_order_relaxed);  // a note in between keeps its count
 		}
+		++gFrame;
 		const float dt = std::clamp(a_delta, 0.0f, 0.25f);
 		if (DimInDaylight() <= 0) {
 			gDaylight = 1.0f;  // the sun has no event: its two-second look only while its pick is on

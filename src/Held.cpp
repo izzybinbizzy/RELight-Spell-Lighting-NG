@@ -69,8 +69,8 @@ namespace Plugin
 		};
 		std::vector<Failed> gFailed;
 
-		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look every
-		// half second adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
+		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look at an actor's
+		// or a game's load adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
 		std::mutex              gDrawnLock;
 		std::vector<RE::FormID> gDrawnNoted;       // gDrawnLock
 		std::vector<RE::FormID> gDrawn;            // the main thread's
