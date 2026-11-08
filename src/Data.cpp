@@ -735,6 +735,7 @@ namespace Plugin
 			gTintCache.clear();
 		}
 		gTintEpoch.fetch_add(1, std::memory_order_release);
+		NoteSliderLook();
 	}
 
 	std::uint32_t TintEpoch() { return gTintEpoch.load(std::memory_order_acquire); }

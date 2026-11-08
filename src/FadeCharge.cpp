@@ -116,8 +116,9 @@ namespace Fade
 		}
 		r.tracked = true;
 		r.max = xEnch && xEnch->enchantment ? static_cast<float>(xEnch->charge) : static_cast<float>(weapon->amountofEnchantment);
-		const auto* xCharge = r.instance ? r.instance->GetByType<RE::ExtraCharge>() : nullptr;
-		r.current = xCharge ? xCharge->charge : r.max;
+		// the game's own value: the entry in her hand shows no charge until the next equip when a weapon's first hit made one (measured)
+		auto* values = a_actor->AsActorValueOwner();
+		r.current = values ? values->GetActorValue(a_left ? RE::ActorValue::kLeftItemCharge : RE::ActorValue::kRightItemCharge) : r.max;
 		// a maximum of 0 is an enchantment that never spends charge: always full
 		r.fraction = r.max > 0.0f ? Glow::Clamp01(r.current / r.max) : 1.0f;
 		return r;

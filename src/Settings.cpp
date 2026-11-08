@@ -342,6 +342,7 @@ namespace Plugin
 	{
 		a_percent = std::clamp(a_percent, kMin, kMax);
 		if (gBrightness.exchange(a_percent) != a_percent) {
+			NoteSliderLook();
 			SKSE::log::info("brightness set to {}%", a_percent);
 		}
 	}
@@ -353,6 +354,7 @@ namespace Plugin
 	{
 		a_percent = std::clamp(a_percent, kReachMin, kReachMax);
 		if (gReach.exchange(a_percent) != a_percent) {
+			NoteSliderLook();
 			SKSE::log::info("reach set to {}%", a_percent);
 		}
 	}
@@ -513,7 +515,11 @@ namespace Plugin
 	{
 		std::atomic<std::uint32_t> gSettingsGen{ 0 };
 	}
-	void          BumpSettings() { gSettingsGen.fetch_add(1, std::memory_order_relaxed); }
+	void BumpSettings()
+	{
+		gSettingsGen.fetch_add(1, std::memory_order_relaxed);
+		NoteSliderLook();
+	}
 	std::uint32_t SettingsGeneration() { return gSettingsGen.load(std::memory_order_relaxed); }
 	int           ArtPick(int a_group) { return a_group >= 0 && a_group < 4 ? gArt[static_cast<std::size_t>(a_group)].load() : 0; }
 
