@@ -456,6 +456,59 @@ namespace Fade
 			return out;
 		}
 
+		// the hands' pass sleeps on this (under gLock): no light or glow of ours left to put back, and no hand active but a spell with the
+		// hands down, which has nothing to follow until a draw wakes the pass
+		[[nodiscard]] bool NothingHeld()
+		{
+			return gLights.empty() && gShaders.empty() && gArt.empty() && std::ranges::none_of(gHands, [](const auto& a_hand) {
+				const auto& h = a_hand.second;
+				if (!h.active || !h.spell) {
+					return h.active;
+				}
+				const auto  actor = h.actor.get();
+				const auto* state = actor ? actor->AsActorState() : nullptr;
+				return state && state->GetWeaponState() != RE::WEAPON_STATE::kSheathed;
+			});
+		}
+
+		// what can put something of ours in a hand: an equip, a draw, sheathe or cast (SKSE's action events), an actor loading, her cell
+		// changing. Any thread: one flag, the main thread's pass reads the hands
+		std::atomic<bool> gHandsAsleep{ false }, gHandsWake{ false };
+
+		class HandWatch final :
+			public RE::BSTEventSink<RE::TESEquipEvent>,
+			public RE::BSTEventSink<RE::TESObjectLoadedEvent>,
+			public RE::BSTEventSink<RE::BGSActorCellEvent>,
+			public RE::BSTEventSink<SKSE::ActionEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				WakeHands();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESObjectLoadedEvent* a_event, RE::BSTEventSource<RE::TESObjectLoadedEvent>*) override
+			{
+				if (a_event && a_event->loaded && RE::TESForm::LookupByID<RE::Actor>(a_event->formID)) {
+					WakeHands();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent*, RE::BSTEventSource<RE::BGSActorCellEvent>*) override
+			{
+				WakeHands();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent*, RE::BSTEventSource<SKSE::ActionEvent>*) override
+			{
+				WakeHands();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
 		void Sweep()
 		{
 			for (auto it = gLights.begin(); it != gLights.end();) {
@@ -833,8 +886,50 @@ namespace Fade
 		}
 	}
 
+	void WakeHands() noexcept
+	{
+		gHandsWake.store(true, std::memory_order_relaxed);
+	}
+
+	bool HandsAsleep() noexcept
+	{
+		return gHandsAsleep.load(std::memory_order_relaxed);
+	}
+
+	bool ReapplyWanted() noexcept
+	{
+		return !gHandsAsleep.load(std::memory_order_relaxed) || Items::Holding();
+	}
+
+	void WatchHands()
+	{
+		static HandWatch watch;
+		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+			events->AddEventSink<RE::TESEquipEvent>(&watch);
+			events->AddEventSink<RE::TESObjectLoadedEvent>(&watch);
+		}
+		if (auto* actions = SKSE::GetActionEventSource()) {
+			actions->AddEventSink(&watch);
+		}
+		if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+			player->AsBGSActorCellEventSource()->AddEventSink(&watch);
+		}
+	}
+
+	bool EffectsWanted() noexcept
+	{
+		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding() ||
+		       gSneakArt.load(std::memory_order_relaxed) < 1.0f;
+	}
+
 	void UpdateHands(float a_delta)
 	{
+		// asleep: nothing of ours in any hand and nothing to put back; only what can change that wakes the pass (HandWatch, a setting,
+		// a load). A choice of Lights by Item or the fading preview keeps it awake
+		if (gHandsAsleep.load(std::memory_order_relaxed) && !gHandsWake.exchange(false, std::memory_order_relaxed) && !Items::Holding() && !PreviewState().on) {
+			return;
+		}
+		gHandsWake.store(false, std::memory_order_relaxed);
 		// every weapon hand read BEFORE the lock: ReadHand walks a bound weapon's active effects, which the game locks, and the
 		// effect hooks hold that lock when they ask for gLock - read under gLock it could freeze (the outside review's threads M3)
 		const auto     settingsStart = std::chrono::steady_clock::now();
@@ -884,6 +979,7 @@ namespace Fade
 			RestoreAll();
 			PublishHud(s, hudHidden);
 			Items::Apply();  // Lights by Item works with Fading off too
+			gHandsAsleep.store(NothingHeld(), std::memory_order_relaxed);
 			return;
 		}
 		auto&       preview = PreviewState();
@@ -1006,15 +1102,16 @@ namespace Fade
 		gActiveSpellHands = spells;
 		PublishHud(s, hudHidden);
 		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
+		gHandsAsleep.store(NothingHeld(), std::memory_order_relaxed);
 	}
 
 	void AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D)
 	{
-		const bool  items = gItemRootsWanted.load(std::memory_order_relaxed);
-		const float sneakArt = gSneakArt.load(std::memory_order_relaxed);
-		if (gActiveHands.load(std::memory_order_relaxed) == 0 && !items && !Items::Holding() && sneakArt >= 1.0f) {
+		if (!EffectsWanted()) {
 			return;
 		}
+		const bool      items = gItemRootsWanted.load(std::memory_order_relaxed);
+		const float     sneakArt = gSneakArt.load(std::memory_order_relaxed);
 		RE::Actor*      actor = nullptr;
 		bool            left = false;
 		RE::NiAVObject* root = nullptr;
@@ -1195,6 +1292,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		RestoreAll();
 		Items::Release();
+		WakeHands();
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();

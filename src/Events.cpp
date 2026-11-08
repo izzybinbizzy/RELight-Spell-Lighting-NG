@@ -18,6 +18,7 @@ namespace Plugin
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent* a_event, RE::BSTEventSource<SKSE::ActionEvent>*) override
 			{
+				NoteSweep();
 				LightKit::Guarded("draw event", [a_event]() {
 					using T = SKSE::ActionEvent::Type;
 					const auto type = a_event && a_event->actor ? a_event->type.get() : T::kWeaponSwing;
@@ -46,6 +47,24 @@ namespace Plugin
 				if (a_event && a_event->flags.get() == RE::BGSActorCellEvent::CellFlag::kEnter) {
 					WatchWeaponLights();
 					NoteOptionsLook();
+					NoteSweep();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		// a reference's 3D in or out: lights leave with it, and an actor may arrive with its weapon out and an enchantment light on it
+		class Loads final : public RE::BSTEventSink<RE::TESObjectLoadedEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESObjectLoadedEvent* a_event, RE::BSTEventSource<RE::TESObjectLoadedEvent>*) override
+			{
+				if (a_event) {
+					NoteSweep();
+					if (a_event->loaded && RE::TESForm::LookupByID<RE::Actor>(a_event->formID)) {
+						NoteActorLoaded();
+						NoteOptionsLook();
+					}
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -56,8 +75,12 @@ namespace Plugin
 	{
 		static Draws draws;
 		static Cells cells;
-		auto*        actions = SKSE::GetActionEventSource();
-		auto*        player = RE::PlayerCharacter::GetSingleton();
+		static Loads loads;
+		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+			events->AddEventSink<RE::TESObjectLoadedEvent>(&loads);
+		}
+		auto* actions = SKSE::GetActionEventSource();
+		auto* player = RE::PlayerCharacter::GetSingleton();
 		if (actions) {
 			actions->AddEventSink(&draws);
 		}
@@ -65,7 +88,7 @@ namespace Plugin
 			player->AsBGSActorCellEventSource()->AddEventSink(&cells);
 		}
 		if (!actions || !player) {
-			// without them the held lights fall back to the half-second check alone (Held.cpp)
+			// without them nothing tells the held lights of a draw: they look only at an actor's load and a game's load (Held.cpp)
 			SKSE::log::warn("events: weapon draws {}, her cell changes {}", actions ? "watched" : "NOT watched", player ? "watched" : "NOT watched");
 			return;
 		}

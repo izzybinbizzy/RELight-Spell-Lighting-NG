@@ -351,8 +351,8 @@ namespace Plugin
 	{
 		++gFrame;
 		auto& opts = Options();
-		// a switch off holds its lights out as they come, so then the walk runs every frame (as before); otherwise only when
-		// something it depends on happened (NoteOptionsLook) and twice a second
+		// a switch off holds its lights out as they come, so then the walk runs every frame: RE::Light hangs them in its own load hooks and
+		// names none of them (its source, CommonLib's and SKSE's events searched). Otherwise only when something it depends on happened
 		static std::uint32_t lastGen = ~0u;
 		static bool          anyOff = false;
 		if (const auto gen = SettingsGeneration(); gen != lastGen) {
@@ -363,7 +363,7 @@ namespace Plugin
 			}
 			gOptionsLook = true;
 		}
-		if (!anyOff && !gOptionsLook.exchange(false) && gFrame % 30 != 0) {
+		if (!anyOff && !gOptionsLook.exchange(false)) {
 			if (auto* ssn = LightKit::Scene()) {
 				GiveBackDroppedWeaponLights(ssn);
 			}
@@ -429,9 +429,7 @@ namespace Plugin
 		}
 		// a light not seen for a few seconds has left the scene: what was worked out about it is let go
 		constexpr std::uint32_t kForget = 300;
-		if (gFrame % kForget == 0) {
-			std::erase_if(gKnown, [](const auto& a_kv) { return gFrame - a_kv.second.frame > kForget; });
-		}
+		std::erase_if(gKnown, [](const auto& a_kv) { return gFrame - a_kv.second.frame > kForget; });
 	}
 
 	LightList CullOptionLightsUnder(RE::NiAVObject* a_root, std::size_t& a_option)

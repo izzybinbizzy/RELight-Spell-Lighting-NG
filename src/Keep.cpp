@@ -18,6 +18,14 @@ namespace Plugin
 	{
 		RE::BSSpinLock                                               gLock;
 		std::unordered_map<RE::NiLight*, RE::NiPointer<RE::NiLight>> gKept;
+		// a look only after something that can end a light (Events.cpp, the hooks): a light held a little longer is out of the scene and harmless
+		std::atomic<bool> gSweepWanted{ true };
+	}
+
+	void NoteSweep() noexcept
+	{
+		gSweepWanted.store(true, std::memory_order_relaxed);
+		NoteSliderLook();
 	}
 
 	void KeepLight(RE::NiLight* a_light)
@@ -30,6 +38,9 @@ namespace Plugin
 
 	void SweepKeptLights()
 	{
+		if (!gSweepWanted.exchange(false, std::memory_order_relaxed)) {
+			return;
+		}
 		std::vector<RE::NiPointer<RE::NiLight>> gone;  // freed when this returns, after every list has forgotten them
 		{
 			RE::BSSpinLockGuard lock(gLock);

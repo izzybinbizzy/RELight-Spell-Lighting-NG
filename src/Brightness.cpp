@@ -62,6 +62,10 @@ namespace Plugin
 		}
 
 		float gDaylight = 1.0f, gDaylightClock = 2.0f;  // main thread only (UpdateBrightness)
+		// frames the scene is still walked after what can bring a light of ours: RE::Light may hang one a few frames after its 3D or art
+		constexpr int    kSliderLooks = 30;
+		std::atomic<int> gSliderLooks{ kSliderLooks };
+		bool             gOursInScene = false;  // the last walk met a light of ours (main thread only)
 
 		// Dynamic Lighting on a hand light, as Let There Be Glow's Light Placer curves look:
 		//   Pulse (a breathe): RE::Light's pulse - one phase advancing perSecond * dt * 5, a smooth swing of `intensity`.
@@ -294,6 +298,11 @@ namespace Plugin
 		}
 	}
 
+	void NoteSliderLook() noexcept
+	{
+		gSliderLooks.store(kSliderLooks, std::memory_order_relaxed);
+	}
+
 	void UpdateBrightness(float a_delta)
 	{
 		static std::vector<Made> made;  // main thread; its storage and gNew's are swapped back and forth, never reallocated
@@ -331,12 +340,28 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
+		// asleep: the last walk met no light of ours and nothing that can bring one has happened since. RE::Light announces none it hangs,
+		// so what can hang one wakes the walk: a 3D's load, an art's start, a draw, her cell, a load (NoteSweep)
+		if (!made.empty()) {
+			NoteSliderLook();
+		}
+		int looks = gSliderLooks.load(std::memory_order_relaxed);
+		if (looks <= 0 && !gOursInScene) {
+			gDaylightClock = 2.0f;  // the walk that wakes reads the daylight at once
+			return;
+		}
+		if (looks > 0) {
+			gSliderLooks.compare_exchange_strong(looks, looks - 1, std::memory_order_relaxed);  // a note in between keeps its count
+		}
 		const float dt = std::clamp(a_delta, 0.0f, 0.25f);
-		gDaylightClock += dt;
-		if (gDaylightClock >= 2.0f) {
+		if (DimInDaylight() <= 0) {
+			gDaylight = 1.0f;  // the sun has no event: its two-second look only while its pick is on
+			gDaylightClock = 2.0f;
+		} else if (gDaylightClock += dt; gDaylightClock >= 2.0f) {
 			gDaylightClock = 0.0f;
 			gDaylight = LightKit::Daylight(DimInDaylight());
 		}
+		bool        ours = false;
 		const float scale = Brightness() * gDaylight * VanillaStrength();
 		const float reach = Reach();
 		const auto  epoch = TintEpoch();
@@ -378,8 +403,10 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
+			ours = true;
 			Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
 		}
+		gOursInScene = ours;
 		// a light not seen for a few seconds has left the scene: let it go from the cache
 		constexpr std::uint32_t kForget = 300;
 		if (gFrame % kForget == 0) {

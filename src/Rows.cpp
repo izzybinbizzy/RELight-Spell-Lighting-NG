@@ -53,7 +53,8 @@ namespace Plugin
 		std::size_t                                     gLights = 0;
 		std::size_t                                     gMade = 0;
 		std::mutex                                      gQueueLock;
-		std::vector<RE::NiPointer<RE::TESObjectREFR>>   gQueue;  // what a loader thread loaded, for the next frame (under gQueueLock)
+		std::vector<RE::NiPointer<RE::TESObjectREFR>>   gQueue;               // what a loader thread loaded, for the next frame (under gQueueLock)
+		std::atomic<bool>                               gRowsAwake{ false };  // set under gQueueLock, so a load is never missed as the pass goes to sleep
 		// a projectile whose row a switch took off while it still flies (Performance, All lights off, sneaking, its option, the light
 		// cap): hung again when the rows come back, or a held stream stays bare until the next cast (main thread)
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> gParked;
@@ -559,10 +560,15 @@ namespace Plugin
 		}
 		std::lock_guard l{ gQueueLock };
 		gQueue.emplace_back(a_ref);  // held by its refcount; no handle made on a loader thread
+		gRowsAwake.store(true, std::memory_order_relaxed);
 	}
 
 	void UpdateRows()
 	{
+		// asleep with nothing flying, parked or waiting: the load of a projectile that wears a row wakes it (QueueRow)
+		if (!gRowsAwake.load(std::memory_order_relaxed)) {
+			return;
+		}
 		auto*                                         scene = LightKit::Scene();
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
 		{
@@ -610,6 +616,12 @@ namespace Plugin
 		}
 		if (!gLive.empty()) {
 			Move();
+		}
+		if (gLive.empty() && gClouds.empty() && gCloudWait.empty() && gParked.empty()) {
+			std::lock_guard l{ gQueueLock };
+			if (gQueue.empty()) {
+				gRowsAwake.store(false, std::memory_order_relaxed);
+			}
 		}
 	}
 

@@ -76,6 +76,7 @@ namespace Fade
 				out["art"].push_back({ { "base", base }, { "now", now } });
 			}
 			out["hideChargeBar"] = s.hideChargeBar;
+			out["handsAsleep"] = HandsAsleep();
 			DevBenchGlue::Reply(a_sink, a_write, out);
 		}
 

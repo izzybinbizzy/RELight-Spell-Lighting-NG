@@ -40,6 +40,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		gSettings = a_settings;
 		Mirror(gSettings);
+		WakeHands();
 	}
 
 	bool ApplySetting(std::string_view a_key, int a_value)
@@ -47,6 +48,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		const bool      known = SettingsText::Apply(gSettings, a_key, a_value);
 		Mirror(gSettings);
+		WakeHands();
 		return known;
 	}
 

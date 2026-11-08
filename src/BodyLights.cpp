@@ -121,11 +121,18 @@ namespace Plugin
 		};
 		std::vector<Failed> gFailed;
 
-		// new body art is looked for when an art starts anywhere (ReferenceEffect Init, Hooks.cpp - any thread), at a loaded game
-		// and once a second; between looks only the lights already lit are checked, each off its own art
-		std::atomic<bool>       gArtStarted{ false };
-		std::atomic<bool>       gLookNow{ true };
-		constexpr std::uint64_t kLookUpdates = 60;
+		// new body art is looked for when an art starts anywhere (ReferenceEffect Init, Hooks.cpp - any thread; only a flag: an effect
+		// kept by reference from its Init can be destroyed all the same), at a loaded game and once a second; between looks, under
+		// the game's effect lock as a walk is, only the lights already lit are checked, each off its own art
+		std::atomic<bool> gArtStarted{ false };
+		std::atomic<bool> gLookNow{ true };
+		// an art's model loads a moment after it starts: looked for again until its 3D is in, at most this many updates
+		constexpr int kWaitUpdates = 600;
+		int           gWaitUpdates = 0;
+		// a refused light, or a glow held out by the cap (the nearest must take its place, and how near she is has no event): looked at
+		// again this often, only while one waits
+		constexpr std::uint64_t kWaitingEvery = 60;
+		bool                    gCapWaiting = false;
 
 		// the art a spell plays as its casting art (HandLights.cpp lights the hands) or on a weapon (its enchantment art): never
 		// a body light. Worked out once, before the first walk of the effects (never inside it - that walk holds the game's lock)
@@ -233,9 +240,17 @@ namespace Plugin
 		const bool           changed = gen != lastGen || herDark != lastHerDark;
 		lastGen = gen;
 		lastHerDark = herDark;
-		const bool look = changed || gLookNow.exchange(false) || gArtStarted.exchange(false) || gUpdate % kLookUpdates == 0;
+		const bool started = gArtStarted.exchange(false);
+		if (started) {
+			gWaitUpdates = kWaitUpdates;
+		}
+		const bool look = changed || gLookNow.exchange(false) || started || ((gCapWaiting || !gFailed.empty()) && gUpdate % kWaitingEvery == 0);
 		if (!look && gLive.empty()) {
 			return;  // nothing lit and nothing new
+		}
+		bool waiting = false;
+		if (look) {
+			gCapWaiting = false;
 		}
 		for (auto& v : gLive) {
 			v.seen = false;
@@ -267,8 +282,12 @@ namespace Plugin
 			auto*                shader = model || !a_effect ? nullptr : netimmerse_cast<RE::ShaderReferenceEffect*>(a_effect);
 			RE::ReferenceEffect* art = model ? static_cast<RE::ReferenceEffect*>(model) : shader;
 			const Stream*        body = nullptr;
-			if (model && !model->finished && model->artObject && model->artObject3D && !gHandOrWeaponArt.contains(model->artObject)) {
+			if (model && !model->finished && model->artObject && !gHandOrWeaponArt.contains(model->artObject)) {
 				body = BodyOf(model->artObject);
+				if (body && !model->artObject3D) {
+					waiting = true;
+					return;
+				}
 			} else if (shader && !shader->finished) {
 				body = BodyOf(shader->effectData);
 			}
@@ -302,9 +321,14 @@ namespace Plugin
 				return RE::BSContainer::ForEachResult::kContinue;
 			});
 		} else if (!hidden) {
+			RE::BSSpinLockGuard locker(lists->magicEffectsLock);
 			for (std::size_t i = 0, n = gLive.size(); i < n; ++i) {
 				consider(gLive[i].art.get());
 			}
+		}
+		if (look && waiting && gWaitUpdates > 0) {
+			--gWaitUpdates;
+			gLookNow.store(true, std::memory_order_relaxed);
 		}
 		// made and put in the scene after the walk: the game holds its effect list's lock through it; the nearest first
 		std::ranges::sort(todo, {}, &Todo::distSq);
@@ -329,6 +353,7 @@ namespace Plugin
 			if (!hers && OthersLit() >= GlowLimit()) {
 				const auto farthest = std::ranges::max_element(gLive, {}, [](const Live& v) { return v.hers ? -1.0f : v.distSq; });
 				if (farthest == gLive.end() || farthest->hers || t.distSq >= farthest->distSq * kNearerBy) {
+					gCapWaiting = true;
 					if (!gCapLogged) {
 						gCapLogged = true;
 						SKSE::log::info("[BODY] {} body lights on others are lit at once, the most there may be: the nearest keep them", OthersLit());
@@ -363,12 +388,16 @@ namespace Plugin
 			}
 		}
 		// what was not seen this frame - the art is gone, finished, switched off, or she sneaks - comes off
+		const auto wereLit = gLive.size();
 		std::erase_if(gLive, [scene](Live& v) {
 			if (!v.seen) {
 				TakeOff(v, scene);
 			}
 			return !v.seen;
 		});
+		if (gLive.size() < wereLit) {
+			gLookNow.store(true, std::memory_order_relaxed);  // a glow waiting past the cap takes its place at once
+		}
 		if (look) {
 			std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
 		}

@@ -161,6 +161,7 @@ namespace Fade
 		Items::Load();
 		ShaderUpdate::Install();
 		InstallChargeBar();
+		WatchHands();
 		SKSE::log::info("fading: hooked effect shaders; the player update, effect updates and cell animations are the plugin's wrappers");
 		RegisterMenu();
 	}

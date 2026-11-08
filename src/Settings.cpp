@@ -145,10 +145,10 @@ namespace Plugin
 			if (SameText(a_key, "WardColour")) {
 				a_key = "WardColor";  // the key's spelling before 2.2 (his rule: color, never colour, in a file a player reads)
 			}
-			BumpSettings();
 			for (const auto& k : kKeys) {
 				if (SameText(a_key, k.name)) {
 					k.set(a_v);
+					BumpSettings();
 					return true;
 				}
 			}
@@ -404,6 +404,7 @@ namespace Plugin
 	void SetFecBurningFadesOut(bool a_on)
 	{
 		if (gFecBurningFades.exchange(a_on) != a_on) {
+			BumpSettings();
 			SKSE::log::info("burning bodies' glow {}", a_on ? "fades out" : "stays while burning");
 		}
 	}
@@ -411,6 +412,7 @@ namespace Plugin
 	void SetFecFrozenFadesOut(bool a_on)
 	{
 		if (gFecFrozenFades.exchange(a_on) != a_on) {
+			BumpSettings();
 			SKSE::log::info("frozen bodies' glow {}", a_on ? "fades out" : "stays while frozen");
 		}
 	}
@@ -451,6 +453,7 @@ namespace Plugin
 	void SetWeaponLightsOn(bool a_on)
 	{
 		if (gWeapons.exchange(a_on) != a_on) {
+			BumpSettings();
 			SKSE::log::info("weapon lights turned {}", a_on ? "on" : "off");
 		}
 	}
@@ -505,7 +508,11 @@ namespace Plugin
 	bool AutoLightsOn() { return gAuto; }
 	void SetAutoLightsOn(bool a_on) { gAuto = a_on; }
 	bool AllLightsOff() { return gAllOff; }
-	void SetAllLightsOff(bool a_off) { gAllOff = a_off; }
+	void SetAllLightsOff(bool a_off)
+	{
+		gAllOff = a_off;
+		BumpSettings();
+	}
 
 	namespace
 	{
@@ -549,7 +556,6 @@ namespace Plugin
 	// every option with that id turns together
 	void SetOptionOn(std::size_t a_index, bool a_on)
 	{
-		BumpSettings();
 		auto& opts = Options();
 		if (a_index >= opts.size() || !opts[a_index].switchable) {
 			return;
@@ -563,6 +569,7 @@ namespace Plugin
 			}
 		}
 		if (n) {
+			BumpSettings();
 			SKSE::log::info("switch: {} turned {} ({} file(s))", id, a_on ? "on" : "off", n);
 		}
 	}

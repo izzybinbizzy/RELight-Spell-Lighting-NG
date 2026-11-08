@@ -30,6 +30,11 @@ namespace Fade
 	// change it while the main thread reads it every frame, so everyone works on a copy. The two switches the per-call hooks
 	// read (the HUD charge bar, every effect update) are kept beside it as atomics, so those hooks never lock or copy.
 	[[nodiscard]] Settings Config();                                           // a copy, safe from any thread
+	void                   WatchHands();                                       // data load: the events that wake the hands' pass
+	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
+	[[nodiscard]] bool     HandsAsleep() noexcept;                             // the hands' pass is asleep (DevBench)
+	[[nodiscard]] bool     EffectsWanted() noexcept;                           // any thread: an effect's update has fading work
+	[[nodiscard]] bool     ReapplyWanted() noexcept;                           // any thread: the cell's animation call has fading work
 	void                   SetConfig(const Settings& a_settings);              // replaces it whole; live on the next frame
 	bool                   ApplySetting(std::string_view a_key, int a_value);  // one Fading.ini line; false if unknown
 	[[nodiscard]] bool     DebugLogOn() noexcept;                              // lock-free

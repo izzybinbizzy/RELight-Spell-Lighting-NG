@@ -72,10 +72,9 @@ namespace Plugin
 		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look every
 		// half second adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
 		std::mutex              gDrawnLock;
-		std::vector<RE::FormID> gDrawnNoted;  // gDrawnLock
-		std::vector<RE::FormID> gDrawn;       // the main thread's
-		constexpr std::uint64_t kLookUpdates = 30;
-		bool                    gLookNow = true;  // a game loaded: look at once
+		std::vector<RE::FormID> gDrawnNoted;       // gDrawnLock
+		std::vector<RE::FormID> gDrawn;            // the main thread's
+		std::atomic<bool>       gLookNow{ true };  // a game loaded or an actor's 3D came in: look at once
 
 		void AddDrawn(RE::FormID a_id)
 		{
@@ -296,6 +295,10 @@ namespace Plugin
 		}
 	}
 
+	void NoteActorLoaded() noexcept { gLookNow.store(true, std::memory_order_relaxed); }
+
+	const std::vector<RE::FormID>& DrawnActorIds() { return gDrawn; }
+
 	void UpdateHeldLights()
 	{
 		auto* scene = LightKit::Scene();
@@ -317,8 +320,7 @@ namespace Plugin
 			}
 			gDrawnNoted.clear();
 		}
-		if (gLookNow || gUpdate % kLookUpdates == 0) {
-			gLookNow = false;
+		if (gLookNow.exchange(false, std::memory_order_relaxed)) {
 			LookForDrawn(player);
 		}
 		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
@@ -328,8 +330,9 @@ namespace Plugin
 		want.clear();
 		// an actor leaves the list once its weapon is fully away or it is gone; the rest say what they want
 		std::erase_if(gDrawn, [&](RE::FormID a_id) {
-			auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
-			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor)) {
+			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
+			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor) || !process || !process->InHighProcess()) {
 				return true;
 			}
 			WantsOf(actor, actor == player && hidden, want);

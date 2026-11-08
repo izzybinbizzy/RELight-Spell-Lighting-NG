@@ -873,6 +873,7 @@ namespace
 						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
+				Plugin::NoteSweep();
 				if constexpr (std::is_same_v<T, RE::Hazard>) {
 					Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
 				}
@@ -974,9 +975,12 @@ namespace
 		static void thunk(T* a_this)
 		{
 			func(a_this);
+			// every effect in the loaded world comes through here: nothing of the fading module's to do is the common case
+			if (!Fade::EffectsWanted()) {
+				return;
+			}
 			LightKit::Guarded("effect update", [a_this]() {
-				const LightKit::Cost::Scope c{ 15, "one effect update (each effect, each frame)" };
-				const auto                  pass = [a_this]() {
+				const auto pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
 				};
 				if (gDimming.load(std::memory_order_acquire) && OnHerWeapon(a_this)) {  // the cast only while something is dimmed
@@ -993,16 +997,21 @@ namespace
 		}
 	};
 
-	// an art starting on anything (Light Placer's Init way - powerof3, GPL-3.0, his permission 2026-11-07): the body lights look
-	// for new art only then (BodyLights.cpp). Any thread; only a flag is set
+	// an art starting on anything (Light Placer's Init way - powerof3, GPL-3.0, used with his permission): the body lights hear of
+	// it (BodyLights.cpp), and a shader's start asks for the option walk - RE::Light hangs an enchantment light there. Flags only
 	template <class T>
 	struct ArtInit
 	{
-		static void thunk(T* a_this)
+		// the game acts on what Init returns, though CommonLib declares it void: a thunk that loses it drops the effect
+		static bool thunk(T* a_this)
 		{
-			func(a_this);
+			const bool started = func(a_this);
+			Plugin::NoteSweep();
 			Plugin::NoteArtStarted();
-			Plugin::NoteOptionsLook();
+			if constexpr (std::is_same_v<T, RE::ShaderReferenceEffect>) {
+				Plugin::NoteOptionsLook();
+			}
+			return started;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 		static void                                    Install()
@@ -1011,11 +1020,31 @@ namespace
 		}
 	};
 
+	// a plain reference's 3D in, where RE::Light hangs its light: the game's load event names no reference placed by a script. Flags only, any thread
+	struct RefLoad3D
+	{
+		static RE::NiAVObject* thunk(RE::TESObjectREFR* a_this, bool a_backgroundLoading)
+		{
+			auto* root = func(a_this, a_backgroundLoading);
+			Plugin::NoteSweep();
+			return root;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::TESObjectREFR::VTABLE[0]).write_vfunc(0x6A, thunk);
+		}
+	};
+
 	struct CellAnimations
 	{
 		static void thunk(RE::TESObjectCELL* a_cell)
 		{
 			func(a_cell);
+			// every loaded cell comes through here: nothing to write again is the common case
+			if (!Fade::ReapplyWanted()) {
+				return;
+			}
 			// this frame's fading numbers again for every hand's lights, without advancing any timer
 			LightKit::Guarded("cell animations", []() {
 				const LightKit::Cost::Scope c{ 16, "cell animations" };
@@ -1126,6 +1155,7 @@ namespace
 		Load3D<RE::BarrierProjectile>::Install();
 		Load3D<RE::Explosion>::Install();
 		Load3D<RE::Hazard>::Install();
+		RefLoad3D::Install();
 		REL::Relocation<std::uintptr_t> vtbl{ RE::PlayerCharacter::VTABLE[0] };
 		PlayerUpdate::func = vtbl.write_vfunc(REL::Relocate(0xAD, 0xAD, 0xAF), PlayerUpdate::thunk);  // Actor::Update (CommonLib's Actor.cpp)
 		EffectUpdate<RE::ShaderReferenceEffect>::Install();
