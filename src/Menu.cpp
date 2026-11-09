@@ -686,6 +686,10 @@ namespace Plugin
 			}
 			MenuStyle::Tip(kSneakingTips[static_cast<std::size_t>(sneak)]);
 			if (SneakOn()) {
+				// beside the Sneaking pick, the two in one column
+				ImGuiMCP::SameLine(0.0f, 24.0f);
+				const float column = ImGuiMCP::GetCursorPosX();
+				ImGuiMCP::SetNextItemWidth(220.0f);
 				int dim = SneakBrightness();
 				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
 					SetSneakBrightness(dim);
@@ -694,6 +698,8 @@ namespace Plugin
 					SaveSettings();
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
+				ImGuiMCP::SetCursorPosX(column);
+				ImGuiMCP::SetNextItemWidth(220.0f);
 				const std::vector<const char*> kSwirls{ T("Stay as they are"), T("Fade too") };
 				const std::vector<const char*> kSwirlsTips{ T("The glowing swirls on your enchanted weapons stay bright while you sneak."),
 					T("The glowing swirls on your enchanted weapons (VAER Reborn and the like) fade with your lights while you sneak.") };

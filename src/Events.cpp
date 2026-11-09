@@ -42,7 +42,7 @@ namespace Plugin
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent* a_event, RE::BSTEventSource<SKSE::ActionEvent>*) override
 			{
-				NoteSweep();
+				NoteSweep(SweepWhy::kDraw);
 				LightKit::Guarded("draw event", [a_event]() {
 					using T = SKSE::ActionEvent::Type;
 					const auto type = a_event && a_event->actor ? a_event->type.get() : T::kWeaponSwing;
@@ -72,7 +72,7 @@ namespace Plugin
 					WatchWeaponLights();
 					NoteOptionsLook();
 					NoteArtStarted();  // an art left behind comes back with its cell, with no start of its own
-					NoteSweep();
+					NoteSweep(SweepWhy::kCell);
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -127,22 +127,22 @@ namespace Plugin
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
-				NoteSweep();
+				NoteSweep(SweepWhy::kEquip);
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESDeathEvent*, RE::BSTEventSource<RE::TESDeathEvent>*) override
 			{
-				NoteSweep();
+				NoteSweep(SweepWhy::kDeath);
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			RE::BSEventNotifyControl ProcessEvent(const SKSE::CameraEvent*, RE::BSTEventSource<SKSE::CameraEvent>*) override
 			{
-				NoteSweep();
+				NoteSweep(SweepWhy::kCamera);
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			RE::BSEventNotifyControl ProcessEvent(const SKSE::NiNodeUpdateEvent*, RE::BSTEventSource<SKSE::NiNodeUpdateEvent>*) override
 			{
-				NoteSweep();
+				NoteSweep(SweepWhy::kNiNode);
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
@@ -155,7 +155,7 @@ namespace Plugin
 					QueueEndCastingLights(a_actor);
 				}
 			}
-			NoteSweep();
+			NoteSweep(SweepWhy::kActor3D);
 			Fade::NoteActor3D(a_actor);
 			if (a_in) {
 				NoteActorLoaded();

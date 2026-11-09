@@ -159,7 +159,7 @@ namespace
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
 			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers
 			Plugin::NoteOptionsLook();
-			Plugin::NoteSweep();
+			Plugin::NoteSweep(Plugin::SweepWhy::kGameLoad);
 			break;
 		default:
 			break;

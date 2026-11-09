@@ -328,20 +328,40 @@ namespace Plugin
 	[[nodiscard]] std::size_t RowsMade();
 
 	// ------------------------------------------------------------------ Held.cpp: a weapon's own light while it is drawn
-	void                                         UpdateHeldLights();  // every frame, after UpdateOptionLights
-	void                                         DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
-	void                                         RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
-	[[nodiscard]] std::size_t                    LiveHeldLights();
-	void                                         NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
-	void                                         WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
-	void                                         WatchEvents();                    // at data load: the event sinks (Events.cpp)
-	void                                         NoteSweep() noexcept;             // any thread: something that can end or bring a light happened (Keep.cpp)
-	[[nodiscard]] bool                           SweepWindowOpen() noexcept;       // the few frames after such a moment
-	[[nodiscard]] bool                           BudgetByDistance();               // Hand lights for: Everyone nearby, which no event announces (Hooks.cpp)
-	[[nodiscard]] std::vector<std::string>       SliderWalkLights();               // main thread: for DevBench, the lights in the scene the sliders' walk calls ours
-	void                                         NoteSliderLook() noexcept;        // any thread: the sliders' walk looks for a few frames (Brightness.cpp)
-	[[nodiscard]] const std::vector<RE::FormID>& DrawnActorIds();                  // main thread: the actors with their hands out (Held.cpp)
-	void                                         NoteActorLoaded() noexcept;       // any thread: an actor's 3D came in, it may arrive with its weapon out (Held.cpp)
+	void                      UpdateHeldLights();  // every frame, after UpdateOptionLights
+	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
+	void                      RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
+	[[nodiscard]] std::size_t LiveHeldLights();
+	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
+	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
+	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
+	enum class SweepWhy : std::uint8_t
+	{
+		kDraw,
+		kCell,
+		kEquip,
+		kDeath,
+		kCamera,
+		kNiNode,
+		kActor3D,
+		kMagicObject,
+		kArtInit,
+		kArtDetach,
+		kRefLoad,
+		kRefDrop,
+		kGameLoad,
+		kCount,
+	};
+	inline constexpr std::array<const char*, static_cast<std::size_t>(SweepWhy::kCount)> kSweepWhyNames{ "draw", "cell", "equip", "death", "camera", "ni node update",
+		"actor 3d", "magic object", "art init", "art detach", "reference load", "reference drop", "game load" };
+	[[nodiscard]] std::uint32_t                                                          SweepNotes(std::size_t a_why) noexcept;  // how many times each kind of moment was heard: devbench's instrument
+	void                                                                                 NoteSweep(SweepWhy a_why) noexcept;      // any thread: something that can end or bring a light happened (Keep.cpp)
+	[[nodiscard]] bool                                                                   SweepWindowOpen() noexcept;              // the few frames after such a moment
+	[[nodiscard]] bool                                                                   BudgetByDistance();                      // Hand lights for: Everyone nearby, which no event announces (Hooks.cpp)
+	[[nodiscard]] std::vector<std::string>                                               SliderWalkLights();                      // main thread: for DevBench, the lights in the scene the sliders' walk calls ours
+	void                                                                                 NoteSliderLook() noexcept;               // any thread: the sliders' walk looks for a few frames (Brightness.cpp)
+	[[nodiscard]] const std::vector<RE::FormID>&                                         DrawnActorIds();                         // main thread: the actors with their hands out (Held.cpp)
+	void                                                                                 NoteActorLoaded() noexcept;              // any thread: an actor's 3D came in, it may arrive with its weapon out (Held.cpp)
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
 	[[nodiscard]] bool ShadowPatch();

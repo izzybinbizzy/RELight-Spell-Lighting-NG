@@ -22,13 +22,20 @@ namespace Plugin
 		std::unordered_map<RE::NiLight*, RE::NiPointer<RE::NiLight>> gKept;
 		// looks only after something that can end a light (Events.cpp, the hooks), for the few frames what else held it needs to let go (the
 		// fading's last passes); a light something else holds longer waits for the next such moment
-		constexpr int     kSweepFrames = 8;
-		std::atomic<int>  gSweepFrames{ kSweepFrames };
-		KeptLights::Watch gUnowned;  // main thread
+		constexpr int                                                                      kSweepFrames = 8;
+		std::atomic<int>                                                                   gSweepFrames{ kSweepFrames };
+		std::array<std::atomic<std::uint32_t>, static_cast<std::size_t>(SweepWhy::kCount)> gSweepNotes{};
+		KeptLights::Watch                                                                  gUnowned;  // main thread
 	}
 
-	void NoteSweep() noexcept
+	std::uint32_t SweepNotes(std::size_t a_why) noexcept
 	{
+		return gSweepNotes[a_why].load(std::memory_order_relaxed);
+	}
+
+	void NoteSweep(SweepWhy a_why) noexcept
+	{
+		gSweepNotes[static_cast<std::size_t>(a_why)].fetch_add(1, std::memory_order_relaxed);
 		gSweepFrames.store(kSweepFrames, std::memory_order_relaxed);
 		NoteSliderLook();
 	}

@@ -55,6 +55,10 @@ namespace Plugin
 			out["heldLights"] = LiveHeldLights();
 			out["bodyLights"] = { { "now", LiveBodyLights() }, { "made", BodyLightsMade() } };  // BodyLights.cpp
 			out["keptLights"] = KeptLights();
+			out["sweepNotes"] = json::object();
+			for (std::size_t i = 0; i < kSweepWhyNames.size(); ++i) {
+				out["sweepNotes"][kSweepWhyNames[i]] = SweepNotes(i);
+			}
 			out["sprayRecords"] = SprayLightRecords().size();
 			out["beamRecords"] = BeamLightRecords().size();
 			out["streamCopies"] = { { "raised", RaisedLights() }, { "plain", PlainLights() } };

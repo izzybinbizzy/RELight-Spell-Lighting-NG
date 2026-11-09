@@ -892,7 +892,7 @@ namespace
 						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
-				Plugin::NoteSweep();
+				Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
 				if constexpr (std::is_same_v<T, RE::Hazard>) {
 					Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
 				}
@@ -994,7 +994,7 @@ namespace
 		static bool thunk(T* a_this)
 		{
 			const bool started = func(a_this);
-			Plugin::NoteSweep();
+			Plugin::NoteSweep(Plugin::SweepWhy::kArtInit);
 			Plugin::NoteArtStarted();
 			if constexpr (std::is_same_v<T, RE::ShaderReferenceEffect>) {
 				Plugin::NoteOptionsLook();
@@ -1013,7 +1013,7 @@ namespace
 	{
 		static void thunk(RE::ShaderReferenceEffect* a_this)
 		{
-			Plugin::NoteSweep();
+			Plugin::NoteSweep(Plugin::SweepWhy::kArtDetach);
 			Plugin::NoteArtStarted();
 			func(a_this);
 		}
@@ -1030,7 +1030,7 @@ namespace
 		static RE::NiAVObject* thunk(RE::TESObjectREFR* a_this, bool a_backgroundLoading)
 		{
 			auto* root = func(a_this, a_backgroundLoading);
-			Plugin::NoteSweep();
+			Plugin::NoteSweep(Plugin::SweepWhy::kRefLoad);
 			return root;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -1047,7 +1047,7 @@ namespace
 		{
 			func(a_this, a_object, a_queue3DTasks);
 			if (!a_object) {
-				Plugin::NoteSweep();
+				Plugin::NoteSweep(Plugin::SweepWhy::kRefDrop);
 			}
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
