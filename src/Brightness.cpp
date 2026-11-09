@@ -101,6 +101,7 @@ namespace Plugin
 		std::unordered_map<const RE::NiLight*, Seen> gSeen;
 		std::mutex                                   gSeenLock;  // the fading module reports from the effect updates too
 		std::mutex                                   gNewLock;
+		std::atomic<bool>                            gNewAny{ false };  // a light was made since the last pass
 		struct Made
 		{
 			RE::NiLight*  light{ nullptr };
@@ -256,6 +257,7 @@ namespace Plugin
 			KeepLight(a_light);
 			std::lock_guard l{ gNewLock };
 			gNew.push_back({ a_light, a_fx, a_kind, a_hand, a_dressed });
+			gNewAny.store(true, std::memory_order_relaxed);
 		}
 	}
 
@@ -333,9 +335,10 @@ namespace Plugin
 	{
 		static std::vector<Made> made;  // main thread; its storage and gNew's are swapped back and forth, never reallocated
 		made.clear();
-		{
+		if (gNewAny.load(std::memory_order_relaxed)) {
 			std::lock_guard l{ gNewLock };
 			made.swap(gNew);
+			gNewAny.store(false, std::memory_order_relaxed);
 		}
 		if (!made.empty()) {
 			std::lock_guard l{ gSeenLock };
@@ -374,6 +377,7 @@ namespace Plugin
 		if (looks <= 0 && !gOursInScene) {
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 11, "brightness" };
 		if (looks > 0) {
 			gSliderLooks.compare_exchange_strong(looks, looks - 1, std::memory_order_relaxed);  // a note in between keeps its count
 		}

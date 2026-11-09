@@ -270,6 +270,7 @@ namespace Plugin
 			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
 				return;
 			}
+			const LightKit::Cost::Pass pass{ 5, "option lights" };
 			gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
 			static std::vector<RE::NiPointLight*> mine;  // main thread; its storage kept between checks
 			mine.clear();
@@ -363,12 +364,13 @@ namespace Plugin
 			}
 			gOptionsLook = true;
 		}
-		if (!anyOff && !gOptionsLook.exchange(false)) {
+		if (!anyOff && !(gOptionsLook.load(std::memory_order_relaxed) && gOptionsLook.exchange(false))) {
 			if (auto* ssn = LightKit::Scene()) {
 				GiveBackDroppedWeaponLights(ssn);
 			}
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 5, "option lights" };
 		for (auto& o : opts) {
 			o.lit = 0;
 			o.heldOut = 0;

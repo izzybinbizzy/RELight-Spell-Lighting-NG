@@ -33,7 +33,10 @@ namespace
 		static bool thunk(RE::ShaderReferenceEffect* a_this, float a_delta)
 		{
 			const bool result = func(a_this, a_delta);
-			LightKit::Guarded("fading: effect shader update", [a_this]() { Fade::AfterShaderEffect(a_this); });
+			// every effect shader in the loaded world, every frame: this one test before anything else
+			if (Fade::ShaderGlowsWanted()) {
+				LightKit::Guarded("fading: effect shader update", [a_this]() { Fade::AfterShaderEffect(a_this); });
+			}
 			return result;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;

@@ -88,6 +88,37 @@ namespace LightKit
 			const char*                           name{ nullptr };
 			std::chrono::steady_clock::time_point start{};
 		};
+
+		inline float gFrameUs = 0.0f;  // main thread: this frame's passes so far
+
+		// a per-frame pass of ours, started after its own early return: with nothing to do it reads no clock and counts no call. Main thread only
+		class Pass
+		{
+		public:
+			Pass(std::size_t a_slot, const char* a_name) noexcept : slot(a_slot), name(a_name), start(std::chrono::steady_clock::now()) {}
+			~Pass()
+			{
+				const float us = std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - start).count();
+				Note(slot, name, us);
+				gFrameUs += us;
+			}
+			Pass(const Pass&) = delete;
+			Pass& operator=(const Pass&) = delete;
+
+		private:
+			std::size_t                           slot{ 0 };
+			const char*                           name{ nullptr };
+			std::chrono::steady_clock::time_point start{};
+		};
+
+		// slot 0, on a frame a pass ran: what all of them cost that frame
+		inline void FrameEnd()
+		{
+			if (gFrameUs > 0.0f) {
+				Note(0, "player update, all of ours", gFrameUs);
+				gFrameUs = 0.0f;
+			}
+		}
 	}
 
 	// A value read and written on different threads (the menu's render thread, the main thread, the game's loader threads)

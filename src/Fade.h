@@ -34,6 +34,7 @@ namespace Fade
 	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
 	void                   NoteActor3D(const RE::Actor* a_actor) noexcept;     // any thread: that actor's 3D came or went (each mod's own hook)
 	[[nodiscard]] bool     HandsAsleep() noexcept;                             // the hands' pass is asleep (DevBench)
+	[[nodiscard]] bool     ShaderGlowsWanted() noexcept;                       // a hand whose glow the shader update could fade
 	[[nodiscard]] bool     EffectsWanted() noexcept;                           // any thread: an effect's update has fading work
 	[[nodiscard]] bool     ReapplyWanted() noexcept;                           // any thread: the cell's animation call has fading work
 	void                   SetConfig(const Settings& a_settings);              // replaces it whole; live on the next frame

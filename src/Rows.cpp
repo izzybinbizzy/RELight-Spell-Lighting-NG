@@ -570,6 +570,7 @@ namespace Plugin
 		if (!gRowsAwake.load(std::memory_order_relaxed)) {
 			return;
 		}
+		const LightKit::Cost::Pass                    pass{ 9, "rows" };
 		auto*                                         scene = LightKit::Scene();
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
 		{

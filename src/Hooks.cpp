@@ -488,6 +488,10 @@ namespace
 	// switched-off one goes out again in UpdateOptionLights), one whose caster is far goes out
 	void UpdateBudgetLights()
 	{
+		if (gBudgetLights.empty()) {
+			return;
+		}
+		const LightKit::Cost::Pass                                 pass{ 4, "budget lights" };
 		static std::unordered_map<RE::FormID, std::optional<bool>> leftOut;  // main thread; its storage kept between frames
 		leftOut.clear();
 		for (auto& [light, b] : gBudgetLights) {
@@ -512,6 +516,10 @@ namespace
 	// main thread, after the switches: a light a switch gave back stays out while its caster is far
 	void HoldBudgetLightsOut()
 	{
+		if (gBudgetLights.empty()) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 6, "budget held out" };
 		for (const auto& [light, b] : gBudgetLights) {
 			if (b.out) {
 				light->SetAppCulled(true);
@@ -549,6 +557,7 @@ namespace
 	// at one point between them, so she throws one shadow, not two crossed ones. Filled on any thread, pruned on the main thread;
 	// Keep.cpp holds each light, ForgetSpellLights drops it here first
 	std::mutex                       gHerShadowLock;
+	std::atomic<bool>                gHerShadowsAny{ false };  // set when one joins; the pass clears it when none is left
 	std::unordered_set<RE::NiLight*> gHerShadows;
 	std::unordered_set<RE::NiLight*> gShadowsBetween;  // the casters moved between her hands; main thread only
 
@@ -597,6 +606,9 @@ namespace
 	// shadow; a hand lit alone casts from out of its own palm (OutOfThePalm's place)
 	void PlaceHerShadow()
 	{
+		if (!gHerShadowsAny.load(std::memory_order_relaxed)) {
+			return;
+		}
 		static std::vector<RE::NiLight*> lights;
 		lights.clear();
 		{
@@ -604,10 +616,12 @@ namespace
 			std::erase_if(gHerShadows, [](const RE::NiLight* a_l) { return !a_l->parent; });
 			lights.assign(gHerShadows.begin(), gHerShadows.end());
 			std::erase_if(gShadowsBetween, [](RE::NiLight* a_l) { return !gHerShadows.contains(a_l); });
+			gHerShadowsAny.store(!gHerShadows.empty(), std::memory_order_relaxed);
 		}
 		if (lights.empty() || !Plugin::InverseSquare() || REL::Module::IsVR()) {
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 10, "her shadow, promoted hands" };
 		// her two hands are paired per skeleton: a first-person hand never pairs with a third-person one
 		const auto rootOf = [](RE::NiAVObject* a_node) {
 			while (a_node->parent) {
@@ -677,6 +691,7 @@ namespace
 		if (gPromotedBetween.empty() && !player->AsActorState()->IsWeaponDrawn()) {
 			return;  // her hands down: nothing to place and nothing to put back
 		}
+		const LightKit::Cost::Pass            pass{ 10, "her shadow, promoted hands" };
 		static std::vector<RE::NiPointLight*> between;
 		between.clear();
 		for (const bool first : { false, true }) {
@@ -729,6 +744,7 @@ namespace
 			if (hers && use != a_light && made) {
 				std::lock_guard lock(gHerShadowLock);
 				gHerShadows.insert(made);
+				gHerShadowsAny.store(true, std::memory_order_relaxed);
 			}
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 			OutOfThePalm(made, a_node);
@@ -905,66 +921,34 @@ namespace
 			}
 			func(a_this, a_delta);
 			LightKit::Guarded("player update", [a_this, a_delta]() {
-				const Scope all{ 0, "player update, all of ours" };
+				// each pass times itself after its own early return (LightKit::Cost::Pass); only Ivy's sneak calls keep their meter here
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
-				{
-					const Scope c{ 2, "sweep kept lights" };
-					Plugin::SweepKeptLights();
-				}
+				Plugin::SweepKeptLights();
 				float sneak = 1.0f;
 				{
 					const Scope c{ 3, "sneak level" };
 					sneak = StepSneakLevel(a_this, a_delta);
 					Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
 				}
-				{
-					const Scope c{ 4, "budget lights" };
-					UpdateBudgetLights();
-				}
-				{
-					const Scope c{ 5, "option lights" };
-					Plugin::UpdateOptionLights();
-				}
-				{
-					const Scope c{ 6, "budget held out" };
-					HoldBudgetLightsOut();
-				}
-				{
-					const Scope c{ 7, "held lights" };
-					Plugin::UpdateHeldLights();
-				}
-				{
-					const Scope c{ 8, "body lights" };
-					Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
-				}
-				{
-					const Scope c{ 9, "rows" };
-					Plugin::UpdateRows();  // the rows of lights along bolts, sprays and cones (Rows.cpp)
-				}
-				{
-					const Scope c{ 10, "her shadow, promoted hands" };
-					PlaceHerShadow();
-					PlacePromotedHands();
-				}
+				UpdateBudgetLights();
+				Plugin::UpdateOptionLights();
+				HoldBudgetLightsOut();
+				Plugin::UpdateHeldLights();
+				Plugin::UpdateBodyLights();  // the body glow while casting (BodyLights.cpp)
+				Plugin::UpdateRows();        // the rows of lights along bolts, sprays and cones (Rows.cpp)
+				PlaceHerShadow();
+				PlacePromotedHands();
 				// RE::Light has already written this frame's fades (its update runs inside `func` above): the sliders next, then
 				// the fading module as the final pass, on what the sliders wrote (each fade it writes is reported back -
 				// Brightness.cpp's NoteFadeWrite)
-				{
-					const Scope c{ 11, "brightness" };
-					Plugin::UpdateBrightness(a_delta);
-				}
-				{
-					const Scope c{ 12, "fading hands" };
-					Fade::UpdateHands(a_delta);
-				}
+				Plugin::UpdateBrightness(a_delta);
+				Fade::UpdateHands(a_delta);
 				{
 					const Scope c{ 13, "sneak dim" };
 					DimSpellLights(sneak);  // over every fade written above
 				}
-				{
-					const Scope c{ 14, "ground lights" };
-					Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
-				}
+				Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				LightKit::Cost::FrameEnd();
 			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;

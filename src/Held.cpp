@@ -72,9 +72,10 @@ namespace Plugin
 		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look at an actor's
 		// or a game's load adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
 		std::mutex              gDrawnLock;
-		std::vector<RE::FormID> gDrawnNoted;       // gDrawnLock
-		std::vector<RE::FormID> gDrawn;            // the main thread's
-		std::atomic<bool>       gLookNow{ true };  // a game loaded or an actor's 3D came in: look at once
+		std::vector<RE::FormID> gDrawnNoted;              // gDrawnLock
+		std::atomic<bool>       gDrawnNotedAny{ false };  // a sink noted one since the last pass
+		std::vector<RE::FormID> gDrawn;                   // the main thread's
+		std::atomic<bool>       gLookNow{ true };         // a game loaded or an actor's 3D came in: look at once
 		// the game stores a body a moment after its load is noted, and nothing says so: such an actor is looked at again for about 5 s
 		constexpr int           kWaitLooksMost = 300;
 		int                     gWaitLooks = 0;  // the main thread's
@@ -316,8 +317,13 @@ namespace Plugin
 
 	void UpdateHeldLights()
 	{
-		auto* scene = LightKit::Scene();
-		auto* player = RE::PlayerCharacter::GetSingleton();
+		// no weapon out, nothing lit, nothing noted and no look asked
+		if (gDrawn.empty() && gLive.empty() && gFailed.empty() && !gDrawnNotedAny.load(std::memory_order_relaxed) && !gLookNow.load(std::memory_order_relaxed)) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 7, "held lights" };
+		auto*                      scene = LightKit::Scene();
+		auto*                      player = RE::PlayerCharacter::GetSingleton();
 		if (!scene || !player) {
 			return;
 		}
@@ -334,6 +340,7 @@ namespace Plugin
 				AddDrawn(id);
 			}
 			gDrawnNoted.clear();
+			gDrawnNotedAny.store(false, std::memory_order_relaxed);
 		}
 		const bool looked = gLookNow.exchange(false, std::memory_order_relaxed);
 		if (looked) {
@@ -484,6 +491,7 @@ namespace Plugin
 		std::lock_guard lock(gDrawnLock);
 		if (std::ranges::find(gDrawnNoted, a_actor) == gDrawnNoted.end()) {
 			gDrawnNoted.push_back(a_actor);
+			gDrawnNotedAny.store(true, std::memory_order_relaxed);
 		}
 	}
 

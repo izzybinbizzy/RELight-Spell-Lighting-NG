@@ -141,6 +141,8 @@ namespace Plugin
 		// a body light. Worked out once, before the first walk of the effects (never inside it - that walk holds the game's lock)
 		std::unordered_set<const RE::BGSArtObject*> gHandOrWeaponArt;
 		bool                                        gArtKnown = false;
+		std::uint32_t                               gLastGen = 0;
+		bool                                        gLastHerDark = false;
 
 		void LearnHandOrWeaponArt()
 		{
@@ -225,9 +227,17 @@ namespace Plugin
 
 	void UpdateBodyLights()
 	{
-		auto* scene = LightKit::Scene();
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		auto* lists = RE::ProcessLists::GetSingleton();
+		// nothing lit and nothing new: a setting, her sneak, an art's start or a look asked for is what changes that
+		const std::uint32_t gen = SettingsGeneration();
+		const bool          herDark = SneakLevel() <= 0.0f;
+		if (gArtKnown && gLive.empty() && gFailed.empty() && !gCapWaiting && gen == gLastGen && herDark == gLastHerDark &&
+			!gArtStarted.load(std::memory_order_relaxed) && !gLookNow.load(std::memory_order_relaxed)) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 8, "body lights" };
+		auto*                      scene = LightKit::Scene();
+		auto*                      player = RE::PlayerCharacter::GetSingleton();
+		auto*                      lists = RE::ProcessLists::GetSingleton();
 		if (!scene || !player || !lists) {
 			return;
 		}
@@ -236,13 +246,9 @@ namespace Plugin
 		}
 		++gUpdate;
 		// a setting, a switch or her sneak changed since the last frame: look again at once, so a glow let go comes straight back
-		static std::uint32_t lastGen = 0;
-		static bool          lastHerDark = false;
-		const std::uint32_t  gen = SettingsGeneration();
-		const bool           herDark = SneakLevel() <= 0.0f;
-		const bool           changed = gen != lastGen || herDark != lastHerDark;
-		lastGen = gen;
-		lastHerDark = herDark;
+		const bool changed = gen != gLastGen || herDark != gLastHerDark;
+		gLastGen = gen;
+		gLastHerDark = herDark;
 		const bool started = gArtStarted.exchange(false);
 		if (started) {
 			gWaitUpdates = kWaitUpdates;

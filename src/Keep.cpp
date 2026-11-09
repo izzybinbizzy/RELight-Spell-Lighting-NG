@@ -49,6 +49,7 @@ namespace Plugin
 		if (left <= 0) {
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 2, "sweep kept lights" };
 		gSweepFrames.compare_exchange_strong(left, left - 1, std::memory_order_relaxed);  // a note in between keeps its count
 		std::vector<RE::NiPointer<RE::NiLight>> gone;                                     // let go when this returns, after every list has forgotten them
 		static std::vector<KeptLights::Seen>    lost;                                     // main thread; its storage kept between looks

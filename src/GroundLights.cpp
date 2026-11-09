@@ -322,6 +322,12 @@ namespace Plugin
 		if (InverseSquare()) {
 			return;  // Community Shaders: the casting light lights the ground itself
 		}
+		// no twin, nothing left hidden or refused, nobody's hands listed and hers down: a look would change nothing (Visit)
+		const auto* her = RE::PlayerCharacter::GetSingleton();
+		if (gTwins.empty() && gLeftHidden.empty() && gRefused.empty() && DrawnActorIds().empty() && !(her && her->AsActorState()->IsWeaponDrawn())) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 14, "ground lights" };
 		ShowLeftHidden();  // before Visit: a twin made this tick hides its light again (Follow)
 		auto* scene = LightKit::Scene();
 		if (!scene || gGroundLightsOn.load(std::memory_order_relaxed) < 0.5f || AllLightsOff()) {  // switched off (advanced settings file, or all lights off)

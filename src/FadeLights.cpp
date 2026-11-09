@@ -685,7 +685,9 @@ namespace Fade
 			if (!effect || (effect->castingSource != Source::kLeftHand && effect->castingSource != Source::kRightHand)) {
 				return false;
 			}
-			auto*      target = effect->GetTargetActor();
+			// the actor's own override: the effect holds his MagicTarget part, and CommonLib's GetTargetActor at our pin returns that part as the actor
+			auto*      stats = effect->target ? effect->target->GetTargetStatsObject() : nullptr;
+			auto*      target = stats ? stats->As<RE::Actor>() : nullptr;
 			const auto caster = effect->GetCasterActor();
 			if (!target || caster.get() != target) {
 				return false;
@@ -979,6 +981,11 @@ namespace Fade
 		return gHandsAsleep.load(std::memory_order_relaxed);
 	}
 
+	bool ShaderGlowsWanted() noexcept
+	{
+		return gActiveHands.load(std::memory_order_relaxed) > 0 || gActiveSpellHands.load(std::memory_order_relaxed) > 0;
+	}
+
 	bool ReapplyWanted() noexcept
 	{
 		return !gHandsAsleep.load(std::memory_order_relaxed) || Items::Holding();
@@ -1010,10 +1017,12 @@ namespace Fade
 	{
 		// asleep: nothing of ours in any hand and nothing to put back, or every hand at rest; only what can change that wakes the pass
 		// (HandWatch, ValueWrites, a setting, a load). A choice of Lights by Item or the fading preview keeps it awake
-		if (gHandsAsleep.load(std::memory_order_relaxed) && !gHandsWake.exchange(false, std::memory_order_relaxed) && !Items::Holding() && !PreviewState().on) {
+		if (gHandsAsleep.load(std::memory_order_relaxed) && !(gHandsWake.load(std::memory_order_relaxed) && gHandsWake.exchange(false, std::memory_order_relaxed)) &&
+			!Items::Holding() && !PreviewState().on) {
 			gActors.clear();  // asleep: nothing is read until a wake, and no actor is held meanwhile
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 15, "fading hands" };
 		gHandsWake.store(false, std::memory_order_relaxed);
 		if (gHandsAsleep.load(std::memory_order_relaxed)) {
 			gRestPasses = 0;  // woken: what left a hand gets its passes to be let go
