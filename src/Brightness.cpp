@@ -453,9 +453,15 @@ namespace Plugin
 				}
 				return;
 			}
-			// its body back (a 3D reset): any light we put out shows again; the game re-culls a casting light, the option walk a switched-off one
+			// its body back (a 3D reset): a light we put out goes to whoever decides it now - an option's light to its switch (held out while off,
+			// given back when on), a hand light shown only with hand lights on (they show it again when turned on); the game re-culls a casting light
 			if (std::exchange(it->second.outByUs, false)) {
-				niLight->SetAppCulled(false);
+				const auto option = IsEnchantLight(niLight) ? EnchantOptionOf(niLight) : OptionOf(BaseOf(niLight));
+				if (option != kNone) {
+					AdoptOptionLights(option, { RE::NiPointer<RE::NiLight>(niLight) });
+				} else if (!AllLightsOff() && (!it->second.ours || HandLightsOn())) {
+					niLight->SetAppCulled(false);
+				}
 			}
 			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
 			// a hidden light keeps no walk awake (a casting light the game keeps culled while its spell stays selected):
