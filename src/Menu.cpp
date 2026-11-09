@@ -420,14 +420,14 @@ namespace Plugin
 			struct Look
 			{
 				Strength    kind;
-				const char* label;
+				const char* alone;  // the label when no switch stands beside it
 				const char* tip;
 			};
 			static constexpr Look kLooks[]{
-				{ Strength::kExplosions, "Strength", "How bright explosions are, on top of Brightness. 100% is as the mod sets them." },
-				{ Strength::kStreams, "Strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as the mod sets them." },
-				{ Strength::kGlows, "Strength", "How bright the glows on people are - cloaks, flesh spells and Frozen Electrocuted Combustion's bodies - on top of Brightness. 100% is as the mod sets them." },
-				{ Strength::kEnchanted, "Strength", "How bright enchanted weapons' lights are - VAER Reborn, Vibrant Weapons and the game's own - on top of Brightness. Bound weapons, staves and artifacts keep Brightness alone." },
+				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kGlows, "Glow strength", "How bright the glows on people are - cloaks, flesh spells and Frozen Electrocuted Combustion's bodies - on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kEnchanted, "Enchanted weapon strength", "How bright enchanted weapons' lights are - VAER Reborn, Vibrant Weapons and the game's own - on top of Brightness. Bound weapons, staves and artifacts keep Brightness alone." },
 			};
 			const auto* look = std::ranges::find(kLooks, a_kind, &Look::kind);
 			if (look == std::end(kLooks)) {
@@ -438,7 +438,7 @@ namespace Plugin
 			}
 			ImGuiMCP::SetNextItemWidth(180.0f);
 			int v = StrengthPercent(a_kind);
-			if (ImGuiMCP::SliderInt(T(look->label), &v, 25, 200, "%d%%")) {
+			if (ImGuiMCP::SliderInt(T(a_beside ? "Strength" : look->alone), &v, 25, 200, "%d%%")) {
 				SetStrengthPercent(a_kind, v);
 				SaveSettings();
 			}
@@ -647,6 +647,12 @@ namespace Plugin
 					SetReachPercent(p.reach);
 					if (p.hands >= 0) {
 						SetHandLightsFor(p.hands);
+					}
+					// Default is the mod as it ships: the four strengths back to 100 % too
+					if (p.hands == 0) {
+						for (const auto kind : { Strength::kExplosions, Strength::kStreams, Strength::kGlows, Strength::kEnchanted }) {
+							SetStrengthPercent(kind, 100);
+						}
 					}
 					SaveSettings();
 				}

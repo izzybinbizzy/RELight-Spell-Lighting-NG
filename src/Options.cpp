@@ -91,9 +91,14 @@ namespace Plugin
 		// strength where the Enchanted weapons switch counts its option (not the artifacts' or a bound weapons')
 		[[nodiscard]] Strength EnchantKindOf(RE::ShaderReferenceEffect* a_effect, std::size_t a_option)
 		{
-			const auto ref = a_effect->target.get();
-			if (ref && ref->As<RE::Actor>() && !skyrim_cast<RE::WeaponEnchantmentController*>(a_effect->controller)) {
+			const auto  ref = a_effect->target.get();
+			const auto* weapon = skyrim_cast<RE::WeaponEnchantmentController*>(a_effect->controller);
+			if (ref && ref->As<RE::Actor>() && !weapon) {
 				return Strength::kGlows;
+			}
+			// a staff or a bound weapon keeps Brightness alone, as the Enchanted weapons switch leaves it lit
+			if (weapon && weapon->lastWeapon && (weapon->lastWeapon->IsStaff() || weapon->lastWeapon->IsBound())) {
+				return Strength::kNone;
 			}
 			const auto& opts = Options();
 			return a_option < opts.size() && DataText::EnchantedOption(opts[a_option].name) ? Strength::kEnchanted : Strength::kNone;
