@@ -76,7 +76,7 @@ namespace Plugin
 		std::vector<RE::FormID> gDrawn;            // the main thread's
 		std::atomic<bool>       gLookNow{ true };  // a game loaded or an actor's 3D came in: look at once
 		// the game stores a body a moment after its load is noted, and nothing says so: such an actor is looked at again for about 5 s
-		constexpr int           gWaitLooksMost = 300;
+		constexpr int           kWaitLooksMost = 300;
 		int                     gWaitLooks = 0;  // the main thread's
 		bool                    gWaitingBody = false;
 		std::vector<RE::FormID> gFar;  // listed but out of the high process: nothing announces one coming near
@@ -339,7 +339,7 @@ namespace Plugin
 		if (looked) {
 			LookForDrawn(player);
 			if (!gWaitingBody) {
-				gWaitLooks = gWaitLooksMost;
+				gWaitLooks = kWaitLooksMost;
 			}
 		}
 		gWaitingBody = false;
@@ -447,6 +447,18 @@ namespace Plugin
 			}
 		}
 		gLiveCount = gLive.size();
+	}
+
+	void RenewHeldLights()
+	{
+		auto* scene = LightKit::Scene();
+		for (auto& v : gLive) {
+			TakeOff(v, scene);
+		}
+		gLive.clear();
+		gLiveCount = 0;
+		gFailed.clear();
+		gLookNow = true;
 	}
 
 	void DropHeldLights()

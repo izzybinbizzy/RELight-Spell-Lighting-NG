@@ -129,6 +129,9 @@ namespace Plugin
 		// an art's model loads a moment after it starts: looked for again until its 3D is in, at most this many updates
 		constexpr int kWaitUpdates = 600;
 		int           gWaitUpdates = 0;
+		// an actor whose body is not stored yet: its own count, or every art started in a fight would keep the walk going for one with none
+		constexpr int    kBodyLooks = 300;
+		std::atomic<int> gBodyLooks{ 0 };
 		// a refused light, or a glow held out by the cap (the nearest must take its place, and how near she is has no event): looked at
 		// again this often, only while one waits
 		constexpr std::uint64_t kWaitingEvery = 60;
@@ -249,6 +252,7 @@ namespace Plugin
 			return;  // nothing lit and nothing new
 		}
 		bool waiting = false;
+		bool noBody = false;
 		if (look) {
 			gCapWaiting = false;
 		}
@@ -298,7 +302,7 @@ namespace Plugin
 			const auto ref = art->target.get();
 			auto*      actor = ref ? ref->As<RE::Actor>() : nullptr;
 			if (actor && !actor->Is3DLoaded()) {
-				waiting = true;  // the game stores its body a moment after its load is noted, and nothing says so
+				noBody = true;  // the game stores its body a moment after its load is noted, and nothing says so
 				return;
 			}
 			if (!actor || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
@@ -329,6 +333,10 @@ namespace Plugin
 			for (std::size_t i = 0, n = gLive.size(); i < n; ++i) {
 				consider(gLive[i].art.get());
 			}
+		}
+		if (look && noBody && gBodyLooks.load(std::memory_order_relaxed) > 0) {
+			gBodyLooks.fetch_sub(1, std::memory_order_relaxed);
+			gLookNow.store(true, std::memory_order_relaxed);
 		}
 		if (look && waiting && gWaitUpdates > 0) {
 			--gWaitUpdates;
@@ -438,6 +446,8 @@ namespace Plugin
 	}
 
 	void NoteArtStarted() { gArtStarted.store(true, std::memory_order_relaxed); }
+
+	void NoteBodyComing() { gBodyLooks.store(kBodyLooks, std::memory_order_relaxed); }
 
 	void ForgetBodyArt()
 	{

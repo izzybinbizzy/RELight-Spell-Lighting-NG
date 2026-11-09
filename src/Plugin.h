@@ -330,6 +330,7 @@ namespace Plugin
 	// ------------------------------------------------------------------ Held.cpp: a weapon's own light while it is drawn
 	void                                         UpdateHeldLights();  // every frame, after UpdateOptionLights
 	void                                         DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
+	void                                         RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
 	[[nodiscard]] std::size_t                    LiveHeldLights();
 	void                                         NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
 	void                                         WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
@@ -363,6 +364,7 @@ namespace Plugin
 	void                        DropBodyLights();      // a game loads, or a new one starts: the art they hang on is the old game's
 	void                        ForgetBodyArt();       // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
 	void                        NoteArtStarted();      // an art started somewhere (any thread): the body lights look for new art
+	void                        NoteBodyComing();      // an actor's load is noted (any thread): the game stores its body a moment later
 	void                        NoteOptionsLook();     // something the option lights depend on happened (any thread): their walk runs
 	void                        BumpSettings();        // a setting or switch changed (Settings.cpp)
 	[[nodiscard]] std::uint32_t SettingsGeneration();  // bumped by every setting / switch change: a pass waiting on events looks again

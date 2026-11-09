@@ -17,7 +17,7 @@ namespace Plugin
 		// lit keeps drawing it. So each is let go on the main thread and the passes make it again (Dynamic Wards' way). A sink only queues this
 		void AfterLoadingScreen()
 		{
-			DropHeldLights();
+			RenewHeldLights();
 			DropBodyLights();
 			RenewGroundLights();
 		}
@@ -161,6 +161,7 @@ namespace Plugin
 				NoteActorLoaded();
 				NoteOptionsLook();
 				NoteArtStarted();  // an art on it comes back with its 3D, with no start of its own
+				NoteBodyComing();
 			}
 		}
 

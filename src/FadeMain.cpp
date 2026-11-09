@@ -120,7 +120,7 @@ namespace Fade
 	}
 
 	// the meter sends its numbers only when they differ from its last two (read in the 1.6.1170 exe): a number no charge equals makes its next
-	// update send them through our thunk, with the switch as it is now. The game's own force flag reaches only a hand with no charge. On the UI thread, where the meter runs
+	// update send them through our thunk, with the switch as it is now. The game's force flag reaches only a hand with no charge. On the UI thread
 	void RefreshChargeBar() noexcept
 	{
 		LightKit::Guarded("charge bar refresh", []() {
