@@ -236,9 +236,24 @@ namespace Plugin
 	void                      SetWeaponLightsOn(bool a_on);
 	[[nodiscard]] bool        EnchantedWeaponsOn();
 	void                      SetEnchantedWeaponsOn(bool a_on);
-	[[nodiscard]] int         WardColor();  // 0 vanilla blue, 1 white (Wards.cpp)
-	void                      SetWardColor(int a_color);
-	void                      SetOptionOn(std::size_t a_index, bool a_on);
+	// a strength per kind of light beside the two main sliders, 25 to 200 % (his "All four"), each beside its kind's switch
+	enum class Strength
+	{
+		kNone,
+		kExplosions,
+		// the rows along streams, sprays and bolts, and a spray's or bolt's own light
+		kStreams,
+		// glows on people: cloaks, flesh spells, FEC's bodies
+		kGlows,
+		// enchanted weapons' lights, as the Enchanted weapons switch counts them
+		kEnchanted,
+	};
+	[[nodiscard]] int   StrengthPercent(Strength a_kind);
+	void                SetStrengthPercent(Strength a_kind, int a_percent);
+	[[nodiscard]] float StrengthOf(Strength a_kind);  // 1 for kNone
+	[[nodiscard]] int   WardColor();                  // 0 vanilla blue, 1 white (Wards.cpp)
+	void                SetWardColor(int a_color);
+	void                SetOptionOn(std::size_t a_index, bool a_on);
 	// Illuminated's settings, ported (his "add everything from illuminated into relight ... sister mods"). The lighting is
 	// never a pick here: it is found by itself (LightingFound, Lighting.cpp), as his later word asked
 	[[nodiscard]] int  HandLightsFor();  // 0 everyone, 1 everyone nearby, 2 player and followers, 3 player only
@@ -280,6 +295,7 @@ namespace Plugin
 	[[nodiscard]] bool               HeldOutForOption(const RE::NiLight* a_light);                        // main thread
 	[[nodiscard]] RE::TESObjectREFR* ReferenceOf(RE::NiAVObject* a_obj);                                  // the reference a scene-graph object belongs to
 	[[nodiscard]] std::size_t        EnchantOptionOf(const RE::NiLight* a_light);                         // kNone unless it is an enchantment light of ours
+	[[nodiscard]] Strength           EnchantStrengthOf(const RE::NiLight* a_light);                       // its strength's kind this frame (main thread)
 	// a flesh spell's light this frame where FleshFX's look wins on its shader: the hue it is drawn in (LightKit.h FleshFx),
 	// else nullptr. HIS CALL: "do the changes proposed with the dim light in its own color" (main thread)
 	[[nodiscard]] const RE::NiColor* FleshHueOf(const RE::NiLight* a_light);

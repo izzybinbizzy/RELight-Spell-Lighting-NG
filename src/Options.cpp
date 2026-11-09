@@ -42,7 +42,8 @@ namespace Plugin
 		std::unordered_set<const RE::NiLight*> gHeldSet;  // the same lights, to answer "is it held out" without a walk
 		// this frame's lights, sorted by light once the walk is done (FindEnchantLights) and searched by halves; the storage is
 		// kept from frame to frame
-		std::vector<std::pair<const RE::NiLight*, std::size_t>> gEnchant;  // enchantment lights -> option
+		std::vector<std::pair<const RE::NiLight*, std::size_t>> gEnchant;      // enchantment lights -> option
+		std::vector<std::pair<const RE::NiLight*, Strength>>    gEnchantKind;  // the same lights -> the strength they take
 		// this frame's flesh-spell lights under FleshFX -> the hue they are drawn in (LightKit.h FleshFx; Brightness.cpp)
 		std::vector<std::pair<const RE::NiLight*, const RE::NiColor*>> gFlesh;
 		std::unordered_set<const RE::TESEffectShader*>                 gFleshMissLogged;  // flesh shaders whose light was not found, said once each
@@ -86,6 +87,18 @@ namespace Plugin
 			return it != a_list.end() && it->first == a_light ? &it->second : nullptr;
 		}
 
+		// a shader on a body that is no weapon's enchantment (a flesh spell) is a glow on people; a weapon's takes the enchanted weapons'
+		// strength where the Enchanted weapons switch counts its option (not the artifacts' or a bound weapons')
+		[[nodiscard]] Strength EnchantKindOf(RE::ShaderReferenceEffect* a_effect, std::size_t a_option)
+		{
+			const auto ref = a_effect->target.get();
+			if (ref && ref->As<RE::Actor>() && !skyrim_cast<RE::WeaponEnchantmentController*>(a_effect->controller)) {
+				return Strength::kGlows;
+			}
+			const auto& opts = Options();
+			return a_option < opts.size() && DataText::EnchantedOption(opts[a_option].name) ? Strength::kEnchanted : Strength::kNone;
+		}
+
 		// this frame's enchantment lights of ours, sorted by light so each pass finds one by halves (a big fight has hundreds).
 		// A flesh spell's shader (FleshFX's look winning on it) hangs on the caster's body: RE::Light puts a config with no
 		// attach path straight under the effect's root (found the way RE::Light finds it, EnchantRootOf), so only a light
@@ -93,6 +106,7 @@ namespace Plugin
 		void FindEnchantLights()
 		{
 			gEnchant.clear();
+			gEnchantKind.clear();
 			gFlesh.clear();
 			auto* lists = RE::ProcessLists::GetSingleton();
 			if (!lists) {
@@ -103,9 +117,10 @@ namespace Plugin
 				auto*      root = opt != kNone ? EnchantRootOf(a_effect) : nullptr;
 				if (root) {
 					const auto* hue = LightKit::FleshFx::HueOf(a_effect->effectData);
+					const auto  kind = EnchantKindOf(a_effect, opt);
 					std::size_t direct = 0;
 					std::size_t deeper = 0;
-					RE::BSVisit::TraverseScenegraphLights(root, [opt, hue, root, &direct, &deeper](RE::NiPointLight* a_light) {
+					RE::BSVisit::TraverseScenegraphLights(root, [opt, hue, root, kind, &direct, &deeper](RE::NiPointLight* a_light) {
 						if (hue && IsEnchantLight(a_light)) {
 							if (a_light->parent == root) {
 								gFlesh.emplace_back(a_light, hue);
@@ -116,6 +131,7 @@ namespace Plugin
 						}
 						if (IsEnchantLight(a_light)) {
 							gEnchant.emplace_back(a_light, opt);
+							gEnchantKind.emplace_back(a_light, kind);
 						}
 						return RE::BSVisit::BSVisitControl::kContinue;
 					});
@@ -135,6 +151,10 @@ namespace Plugin
 			std::ranges::stable_sort(gEnchant, {}, &std::pair<const RE::NiLight*, std::size_t>::first);
 			const auto enchantRepeats = std::ranges::unique(gEnchant, {}, &std::pair<const RE::NiLight*, std::size_t>::first);
 			gEnchant.erase(enchantRepeats.begin(), enchantRepeats.end());
+			std::ranges::reverse(gEnchantKind);
+			std::ranges::stable_sort(gEnchantKind, {}, &std::pair<const RE::NiLight*, Strength>::first);
+			const auto kindRepeats = std::ranges::unique(gEnchantKind, {}, &std::pair<const RE::NiLight*, Strength>::first);
+			gEnchantKind.erase(kindRepeats.begin(), kindRepeats.end());
 			std::ranges::stable_sort(gFlesh, {}, &std::pair<const RE::NiLight*, const RE::NiColor*>::first);
 			const auto fleshRepeats = std::ranges::unique(gFlesh, {}, &std::pair<const RE::NiLight*, const RE::NiColor*>::first);
 			gFlesh.erase(fleshRepeats.begin(), fleshRepeats.end());
@@ -179,6 +199,10 @@ namespace Plugin
 		{
 			const auto& opts = Options();
 			if (EnchantedWeaponsOn() || a_option >= opts.size() || !DataText::EnchantedOption(opts[a_option].name)) {
+				return false;
+			}
+			// a flesh spell's light on the body is no weapon's, whatever the hand holds
+			if (EnchantStrengthOf(a_light) == Strength::kGlows) {
 				return false;
 			}
 			auto*       ref = ReferenceOf(a_light);
@@ -348,6 +372,12 @@ namespace Plugin
 	{
 		const auto* option = Find(gEnchant, a_light);
 		return option ? *option : kNone;
+	}
+
+	Strength EnchantStrengthOf(const RE::NiLight* a_light)
+	{
+		const auto* kind = Find(gEnchantKind, a_light);
+		return kind ? *kind : Strength::kNone;
 	}
 
 	const RE::NiColor* FleshHueOf(const RE::NiLight* a_light)

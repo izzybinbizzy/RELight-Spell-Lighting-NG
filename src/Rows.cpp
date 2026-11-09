@@ -467,7 +467,7 @@ namespace Plugin
 			const bool isl = InverseSquare();
 			// the two sliders, then the per-lighting strength the rows were tuned with (no plain-drawing step:
 			// RowStrengthFor already holds the Vanilla / ENB difference)
-			const float brightNow = Brightness() * VanillaStrength();
+			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			const float bright = brightNow * RowStrengthFor(LightingFound()), reachPct = Reach();
 			const auto  epoch = TintEpoch();
 			// Dynamic Lighting (this session's, as the data was read with) makes the row flicker: a spray's own light is steady

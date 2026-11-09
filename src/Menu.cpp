@@ -203,6 +203,19 @@ namespace Plugin
 		bool gFecLoaded = false;  // read once at RegisterMenu (the main thread): the menu never asks the data handler
 		void DrawFrozenPick();
 		void DrawWardPick(bool a_beside);
+		void DrawStrength(Strength a_kind, bool a_beside);
+
+		// the switch each kind's strength sits beside (bd.5: a setting's own control on its line, to its right)
+		[[nodiscard]] Strength StrengthBeside(std::string_view a_option)
+		{
+			if (a_option == "Explosions") {
+				return Strength::kExplosions;
+			}
+			if (a_option == "Projectile Lights") {
+				return Strength::kStreams;
+			}
+			return a_option == "Cloaks" ? Strength::kGlows : Strength::kNone;
+		}
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
@@ -246,6 +259,7 @@ namespace Plugin
 			}
 			std::string shown{ a_open };  // a heading the page already drew
 			bool        wardShown = false;
+			std::array  strengthShown{ false, false, false };  // explosions, streams, glows
 			for (const auto& row : rows) {
 				auto& o = opts[row.index];
 				if (row.heading.text != shown) {
@@ -284,7 +298,22 @@ namespace Plugin
 					DrawWardPick(true);
 					wardShown = true;
 				}
+				if (const auto kind = a_page == Page::kConfigs ? StrengthBeside(o.name) : Strength::kNone; kind != Strength::kNone) {
+					DrawStrength(kind, true);
+					strengthShown[static_cast<std::size_t>(kind) - 1] = true;
+				}
 				ImGuiMCP::PopID();
+			}
+			// a kind whose switch is not there (its option not installed) still applies, so its strength keeps a heading of its own
+			if (a_page == Page::kConfigs && std::ranges::find(strengthShown, false) != strengthShown.end()) {
+				GlowHeading("Strength");
+				for (std::size_t i = 0; i < strengthShown.size(); ++i) {
+					if (!strengthShown[i]) {
+						ImGuiMCP::PushID(static_cast<int>(1000 + i));
+						DrawStrength(static_cast<Strength>(i + 1), false);
+						ImGuiMCP::PopID();
+					}
+				}
 			}
 			// no Wards row to sit beside: the color still applies, so it keeps a heading of its own
 			if (a_page == Page::kConfigs && !wardShown) {
@@ -383,6 +412,37 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"The ward's dome, the 360 Ward sphere and its flash, the art on your hand and the hand light, in one color. "
 				"Vanilla blue keeps the vanilla dome and gives 360 Ward's sphere the vanilla blue. Shows on the next cast."));
+		}
+
+		// a kind's strength on top of Brightness, 25 to 200 % (Settings.cpp); beside its switch, or on a line of its own when there is none
+		void DrawStrength(Strength a_kind, bool a_beside)
+		{
+			struct Look
+			{
+				Strength    kind;
+				const char* label;
+				const char* tip;
+			};
+			static constexpr Look kLooks[]{
+				{ Strength::kExplosions, "Strength", "How bright explosions are, on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kStreams, "Strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kGlows, "Strength", "How bright the glows on people are - cloaks, flesh spells and Frozen Electrocuted Combustion's bodies - on top of Brightness. 100% is as the mod sets them." },
+				{ Strength::kEnchanted, "Strength", "How bright enchanted weapons' lights are - VAER Reborn, Vibrant Weapons and the game's own - on top of Brightness. Bound weapons, staves and artifacts keep Brightness alone." },
+			};
+			const auto* look = std::ranges::find(kLooks, a_kind, &Look::kind);
+			if (look == std::end(kLooks)) {
+				return;
+			}
+			if (a_beside) {
+				ImGuiMCP::SameLine(0.0f, 24.0f);
+			}
+			ImGuiMCP::SetNextItemWidth(180.0f);
+			int v = StrengthPercent(a_kind);
+			if (ImGuiMCP::SliderInt(T(look->label), &v, 25, 200, "%d%%")) {
+				SetStrengthPercent(a_kind, v);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T(look->tip));
 		}
 
 		// one of the four art picks (Illuminated's Shock, Fire, Frost and Healing groups): the pick, and what the chosen one does. The
@@ -827,6 +887,9 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T("The light of enchanted weapons. Off puts only these out: bound weapons, staves and artifacts stay lit."));
+			ImGuiMCP::PushID("enchanted strength");
+			DrawStrength(Strength::kEnchanted, true);
+			ImGuiMCP::PopID();
 			// one row per id across both draws
 			std::unordered_set<std::string> seen;
 			DrawSwitches(Page::kEnchantments, seen, T("Weapon Enchantments"));

@@ -274,7 +274,8 @@ namespace Plugin
 		// fades with her spell lights (her held lights the same way - Held.cpp)
 		const bool  hidden = AllLightsOff();
 		const float sneak = SneakLevel();  // Hooks.cpp: her body glow comes off once it has faded out
-		const auto [scale, reachScale] = OwnLightScale();
+		const auto [ownScale, reachScale] = OwnLightScale();
+		const float scale = ownScale * StrengthOf(Strength::kGlows);
 		struct Todo
 		{
 			RE::NiPointer<RE::ReferenceEffect> art;

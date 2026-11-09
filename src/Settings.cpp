@@ -7,6 +7,10 @@
 //   [Settings]
 //   Brightness=100              percent, 10 to 200 - this mod's lights only; the reach is held
 //   Reach=100                   percent, 50 to 150 - the peak is held
+//   ExplosionStrength=100       percent, 25 to 200 - explosions, on top of Brightness (Brightness.cpp)
+//   StreamStrength=100          percent, 25 to 200 - the rows along streams, sprays and bolts and their own lights (Rows.cpp)
+//   GlowStrength=100            percent, 25 to 200 - glows on people: cloaks, flesh spells, FEC's bodies (BodyLights.cpp)
+//   EnchantedStrength=100       percent, 25 to 200 - enchanted weapons' lights, as the Enchanted weapons switch counts them
 //   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
 //   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
 //   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
@@ -49,7 +53,10 @@ namespace Plugin
 		constexpr const char* kOldFolder = "Data/SKSE/Plugins/RelightSpellAddon";  // a 2.5 install's data files
 		constexpr int         kMin = 10, kMax = 200;
 		constexpr int         kReachMin = 50, kReachMax = 150;
+		constexpr int         kStrengthMin = 25, kStrengthMax = 200;
 
+		// explosions, streams, glows on people, enchanted weapons (Strength, one slot each after kNone)
+		std::array<std::atomic<int>, 4> gStrength{ 100, 100, 100, 100 };
 		std::atomic<int>                gBrightness{ 100 };
 		std::atomic<int>                gReach{ 100 };
 		std::atomic<bool>               gSneak{ false };
@@ -110,6 +117,10 @@ namespace Plugin
 		inline constexpr Key kKeys[]{
 			{ "Brightness", [] { return gBrightness.load(); }, [](int v) { gBrightness = std::clamp(v, kMin, kMax); } },
 			{ "Reach", [] { return gReach.load(); }, [](int v) { gReach = std::clamp(v, kReachMin, kReachMax); } },
+			{ "ExplosionStrength", [] { return gStrength[0].load(); }, [](int v) { gStrength[0] = std::clamp(v, kStrengthMin, kStrengthMax); } },
+			{ "StreamStrength", [] { return gStrength[1].load(); }, [](int v) { gStrength[1] = std::clamp(v, kStrengthMin, kStrengthMax); } },
+			{ "GlowStrength", [] { return gStrength[2].load(); }, [](int v) { gStrength[2] = std::clamp(v, kStrengthMin, kStrengthMax); } },
+			{ "EnchantedStrength", [] { return gStrength[3].load(); }, [](int v) { gStrength[3] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
 			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
 			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
@@ -359,6 +370,24 @@ namespace Plugin
 		if (gReach.exchange(a_percent) != a_percent) {
 			BumpSettings();
 			SKSE::log::info("reach set to {}%", a_percent);
+		}
+	}
+
+	int StrengthPercent(Strength a_kind)
+	{
+		return a_kind == Strength::kNone ? 100 : gStrength[static_cast<std::size_t>(a_kind) - 1].load(std::memory_order_relaxed);
+	}
+
+	float StrengthOf(Strength a_kind) { return static_cast<float>(StrengthPercent(a_kind)) / 100.0f; }
+
+	void SetStrengthPercent(Strength a_kind, int a_percent)
+	{
+		if (a_kind == Strength::kNone) {
+			return;
+		}
+		a_percent = std::clamp(a_percent, kStrengthMin, kStrengthMax);
+		if (gStrength[static_cast<std::size_t>(a_kind) - 1].exchange(a_percent) != a_percent) {
+			BumpSettings();
 		}
 	}
 
