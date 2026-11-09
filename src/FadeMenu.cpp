@@ -311,7 +311,7 @@ namespace Fade
 			ImGuiMCP::BeginDisabled(!s.enabled);
 			Toggle("Charge gems on the HUD", s.hudGems,
 				"A soul gem for each enchanted weapon hand beside the health bar - the left hand's on the left, the right hand's on "
-				"the right - as full as that weapon's charge (a bound weapon's: the time its spell has left). It shows once the charge "
+				"the right - as full as that weapon's charge (a bound weapon's: the time its spell has left), in the color of the weapon's light. It shows once the charge "
 				"starts dropping, while your weapons are out - full ones too with Show at full charge. Needs Fading on.",
 				save);
 			ImGuiMCP::BeginDisabled(!s.hudGems);
@@ -705,8 +705,8 @@ namespace Fade
 
 		// THE HUD GEMS (his word: each hand has its own cut soul gem on its own side of the health bar). 🔁 HIS WORD
 		// "the enchantment gems should not work for spells and only show when the weapon enchantment is dropping"
-		// and "remove the circle surrounding the soul gem widgets" - a gem is a WEAPON hand's (soul-gem violet for an
-		// enchantment, pale blue for a bound weapon, ember under the sputter point), shown once its charge is below full - or
+		// and "remove the circle surrounding the soul gem widgets" - a gem is a WEAPON hand's (an enchantment's in that hand's light color,
+		// soul-gem violet with no light found, pale blue for a bound weapon, ember under the sputter point), shown once its charge is below full - or
 		// always with Show at full charge (his ask 2026-10-16) - with no halo. Render thread: it reads only Hud().
 		void __stdcall RenderHud()
 		{
@@ -714,6 +714,7 @@ namespace Fade
 			static std::array<float, 2>  shown{ 0.0f, 0.0f };  // each side's fade, 0..1
 			static std::array<float, 2>  fill{ 1.0f, 1.0f };
 			static std::array<ImVec4, 2> tint{ ImVec4{}, ImVec4{} };
+			static std::array<bool, 2>   colored{ false, false };  // a color was read while this gem shows: a frame with no reading keeps it
 			const auto                   hud = Hud();
 			auto*                        io = GetIO();
 			if (!io) {
@@ -728,12 +729,20 @@ namespace Fade
 					}
 					here[i] = true;
 					fill[i] = std::isfinite(h.fraction) ? std::clamp(h.fraction, 0.0f, 1.0f) : 0.0f;
-					tint[i] = h.bound ? ImVec4{ 0.62f, 0.84f, 1.0f, 1.0f } : ImVec4{ 0.72f, 0.46f, 1.0f, 1.0f };
+					if (h.bound) {
+						tint[i] = ImVec4{ 0.62f, 0.84f, 1.0f, 1.0f };
+					} else if (h.lit) {
+						tint[i] = ImVec4{ h.color.r, h.color.g, h.color.b, 1.0f };
+						colored[i] = true;
+					} else if (!colored[i]) {
+						tint[i] = ImVec4{ 0.72f, 0.46f, 1.0f, 1.0f };
+					}
 				}
 			}
 			const float dt = std::isfinite(io->DeltaTime) ? std::clamp(io->DeltaTime, 0.0f, 0.25f) : 0.0f;
 			for (std::size_t i = 0; i < 2; ++i) {
 				shown[i] = std::clamp(shown[i] + (here[i] ? dt : -dt) * 4.0f, 0.0f, 1.0f);
+				colored[i] = colored[i] && shown[i] > 0.0f;
 			}
 			if (shown[0] <= 0.0f && shown[1] <= 0.0f) {
 				return;
