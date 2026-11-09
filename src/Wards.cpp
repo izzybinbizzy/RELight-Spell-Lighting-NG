@@ -147,6 +147,12 @@ namespace Plugin
 			}
 			// one dome on a shield too: Artificer's Spellbreaker enchantment carries the worn ward beside two effects of its own in the vanilla ward art (Ward
 			// Power, Stamina), which drew two idle domes and two more hand lights. An effect a castable spell also carries keeps its art
+			static bool wornRead = false;
+			if (wornRead) {
+				gSilenced.assign(extras.begin(), extras.end());
+				return;
+			}
+			wornRead = true;
 			std::unordered_set<const RE::EffectSetting*> worn;
 			for (const auto& r : kWorn) {
 				if (const auto* e = dh->LookupForm<RE::EffectSetting>(r.id, r.plugin)) {
@@ -523,7 +529,7 @@ namespace Plugin
 	// A worn ward comes up through its enchantment, whose effects carry the condition IsBlocking == 1; the game re-checks an active effect's conditions
 	// only on its own timer (fActiveEffectConditionUpdateInterval, measured on Illuminated: the dome showed 0.1-1.0 s after the block). So when her block starts,
 	// each of her active effects from an ENCHANTMENT whose conditions ask IsBlocking is checked at once (ActiveEffect::EvaluateConditions, the effect's own
-	// virtual), and once more on the next frame in case the game has not yet marked her blocking. The wait is the game's, not the dome's, so this runs with or
+	// virtual). At that event the graph's IsBlocking already reads true, so once is enough. The wait is the game's, not the dome's, so this runs with or
 	// without Dynamic Wards. Illuminated's Wards.cpp, the same way.
 	namespace
 	{
@@ -587,15 +593,7 @@ namespace Plugin
 					}
 					// the graph's events may come off the main thread: the effects are read on it
 					if (auto* tasks = SKSE::GetTaskInterface()) {
-						tasks->AddTask([]() {
-							LightKit::Guarded("shield ward check", []() {
-								RecheckShieldWards();
-								// once more a frame later: IsBlocking may only read true after this frame's update
-								if (auto* again = SKSE::GetTaskInterface()) {
-									again->AddTask([]() { LightKit::Guarded("shield ward check (next frame)", RecheckShieldWards); });
-								}
-							});
-						});
+						tasks->AddTask([]() { LightKit::Guarded("shield ward check", RecheckShieldWards); });
 					}
 				});
 				return RE::BSEventNotifyControl::kContinue;
@@ -673,7 +671,8 @@ namespace Plugin
 	void WatchBlocking()
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
-		if (!player) {
+		// not on VR: kept SE / AE only, untested there, as HoldWornModels
+		if (!player || REL::Module::IsVR()) {
 			return;
 		}
 		static GraphWatch watch;

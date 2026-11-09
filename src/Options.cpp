@@ -184,11 +184,15 @@ namespace Plugin
 			auto*       ref = ReferenceOf(a_light);
 			auto*       actor = ref ? ref->As<RE::Actor>() : nullptr;
 			const auto* equipped = [&]() -> RE::TESForm* {
+				if (!actor) {
+					// in the world: the weapon is the reference's own base
+					return ref ? ref->GetBaseObject() : nullptr;
+				}
 				bool left = false;
 				for (const RE::NiAVObject* up = a_light; up && !left; up = up->parent) {
 					left = std::string_view(up->name.c_str()) == "SHIELD";
 				}
-				return actor ? actor->GetEquippedObject(left) : nullptr;
+				return actor->GetEquippedObject(left);
 			}();
 			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
 			return !weapon || (!weapon->IsStaff() && !weapon->IsBound());
