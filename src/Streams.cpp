@@ -117,6 +117,19 @@ namespace Plugin
 			{ 0x10FBEC, "MagicLightFireball02", 400, 0x4001, 1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 1.5f },
 		};
 
+		// a burst that wears a shared light record in another color than its art (his 538): it alone wears a copy in its art's color, beside
+		// RE::Light's own light for it (relightgen.EXPL_RECOLOR, the same color - keep the two equal); the record's other users keep the record
+		struct BurstColor
+		{
+			std::uint32_t    localID{ 0 };
+			std::string_view file{};
+			std::uint8_t     r{ 0 }, g{ 0 }, b{ 0 };
+		};
+
+		constexpr BurstColor kBurstColors[] = {
+			{ 0x1551, "KittyClass_DarkWarrior.esp", 110, 140, 255 },  // Gloaming Skewer, Death Skewer
+		};
+
 		// off Community Shaders the inverse square flag means nothing, so the light is made plain the way Illuminated's pass 0 does it
 		void WearLook(RE::TESObjectLIGH* a_copy, const SprayLook& a_look)
 		{
@@ -279,6 +292,15 @@ namespace Plugin
 			if (const auto* c = p && p->IsCone() ? CloudOf(p) : nullptr) {
 				rows[p->GetFormID()] = { c->color, c->fade, c->radius, false, c->option != kNone ? c->option : OptionOf(p), true };
 				++clouds;
+			}
+		}
+		for (const auto& burst : kBurstColors) {
+			auto* x = dh->LookupForm<RE::BGSExplosion>(burst.localID, burst.file);
+			if (auto* copy = x && x->data.light ? CopyOf(x->data.light) : nullptr) {
+				copy->data.color.red = burst.r;
+				copy->data.color.green = burst.g;
+				copy->data.color.blue = burst.b;
+				x->data.light = copy;
 			}
 		}
 		gReady.store(true, std::memory_order_release);
