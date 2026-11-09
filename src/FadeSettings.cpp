@@ -25,7 +25,10 @@ namespace Fade
 		{
 			gDebugLog.store(a_s.debugLog, std::memory_order_relaxed);
 			// with Fading off nothing else shows a weapon's charge, so the HUD's bar comes back (his answer 2026-10-13)
-			gHideChargeBar.store(a_s.hideChargeBar && a_s.enabled, std::memory_order_relaxed);
+			const bool hide = a_s.hideChargeBar && a_s.enabled;
+			if (gHideChargeBar.exchange(hide, std::memory_order_relaxed) != hide) {
+				RefreshChargeBar();
+			}
 		}
 	}
 
@@ -40,6 +43,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		gSettings = a_settings;
 		Mirror(gSettings);
+		WakeHands();
 	}
 
 	bool ApplySetting(std::string_view a_key, int a_value)
@@ -47,6 +51,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		const bool      known = SettingsText::Apply(gSettings, a_key, a_value);
 		Mirror(gSettings);
+		WakeHands();
 		return known;
 	}
 

@@ -77,6 +77,8 @@ namespace Plugin
 		};
 		RE::BGSArtObject* gWornDome = nullptr;
 		RE::BGSArtObject* gWornHand = nullptr;
+		// the worn wards' models, loaded once and held for the session: read off disk when a worn ward came up, its dome showed late
+		std::vector<RE::NiPointer<RE::NiNode>> gWornModels;
 
 		// the vanilla ward art, by the bare mesh name - also once we have pointed it at our own copies, which keep the names
 		bool IsVanillaWardArt(const RE::BGSArtObject* a_art)
@@ -143,6 +145,41 @@ namespace Plugin
 					extras.insert(others.begin(), others.end());
 				}
 			}
+			// one dome on a shield too: Artificer's Spellbreaker enchantment carries the worn ward beside two effects of its own in the vanilla ward art (Ward
+			// Power, Stamina), which drew two idle domes and two more hand lights. An effect a castable spell also carries keeps its art
+			static bool wornRead = false;
+			if (wornRead) {
+				gSilenced.assign(extras.begin(), extras.end());
+				return;
+			}
+			wornRead = true;
+			std::unordered_set<const RE::EffectSetting*> worn;
+			for (const auto& r : kWorn) {
+				if (const auto* e = dh->LookupForm<RE::EffectSetting>(r.id, r.plugin)) {
+					worn.insert(e);
+				}
+			}
+			std::unordered_set<const RE::EffectSetting*> castable;
+			for (const auto* spell : dh->GetFormArray<RE::SpellItem>()) {
+				if (spell && spell->GetSpellType() != RE::MagicSystem::SpellType::kEnchantment) {
+					for (const auto* effect : spell->effects) {
+						if (effect && effect->baseEffect) {
+							castable.insert(effect->baseEffect);
+						}
+					}
+				}
+			}
+			for (auto* ench : dh->GetFormArray<RE::EnchantmentItem>()) {
+				if (!ench || std::ranges::none_of(ench->effects, [&worn](const RE::Effect* a_e) { return a_e && worn.contains(a_e->baseEffect); })) {
+					continue;
+				}
+				for (auto* effect : ench->effects) {
+					auto* base = effect ? effect->baseEffect : nullptr;
+					if (base && !worn.contains(base) && !castable.contains(base) && WearsWardArt(base)) {
+						extras.insert(base);
+					}
+				}
+			}
 			gSilenced.assign(extras.begin(), extras.end());
 		}
 
@@ -164,6 +201,23 @@ namespace Plugin
 				d.light = nullptr;  // a second hand light (vanilla's white MagicLightWardHand01) goes with the second dome
 			}
 			return changed;
+		}
+
+		// main thread, data load; not on VR (kept SE / AE only, untested there)
+		void HoldWornModels()
+		{
+			if (REL::Module::IsVR() || !gWornModels.empty()) {
+				return;
+			}
+			for (const auto* model : { kVanillaBlue.wornHand, kVanillaBlue.sphereWornHand, kVanillaBlue.wornDome, kWhite.wornHand, kWhite.wornDome }) {
+				RE::NiPointer<RE::NiNode> root;
+				if (RE::BSModelDB::Demand(model, root, RE::BSModelDB::DBTraits::ArgsType{}) == RE::BSResource::ErrorCode::kNone && root) {
+					gWornModels.push_back(std::move(root));
+				} else {
+					SKSE::log::warn("wards: {} could not be loaded ahead - a worn ward reads it when it comes up", model);
+				}
+			}
+			SKSE::log::info("wards: {} worn ward model(s) held loaded for the session", gWornModels.size());
 		}
 
 		// Strange Wards (a vanilla ward replacer, Nexus 139921) puts its own dome at the vanilla mesh path; its textures sit
@@ -413,6 +467,7 @@ namespace Plugin
 						++worn;
 					}
 				}
+				HoldWornModels();
 				SKSE::log::info("wards: {} worn ward(s) (Spellbreaker, Crusader, Reman) wear the looping copies", worn);
 			}
 			// the game's own ward hand light, where no installed layer lights the ward hand (HandLights.cpp does where one does)
@@ -468,5 +523,179 @@ namespace Plugin
 		SKSE::log::info("wards: {} effect(s) wear the ward art beside a ward's rank and show no second dome ({} changed; {})",
 			gSilenced.size(), changed, a_why);
 		Paint();
+	}
+
+	// ------------------------------------------------------------------ the shield's ward at once
+	// A worn ward comes up through its enchantment, whose effects carry the condition IsBlocking == 1; the game re-checks an active effect's conditions
+	// only on its own timer (fActiveEffectConditionUpdateInterval, measured on Illuminated: the dome showed 0.1-1.0 s after the block). So when her block starts,
+	// each of her active effects from an ENCHANTMENT whose conditions ask IsBlocking is checked at once (ActiveEffect::EvaluateConditions, the effect's own
+	// virtual). At that event the graph's IsBlocking already reads true, so once is enough. The wait is the game's, not the dome's, so this runs with or
+	// without Dynamic Wards. Illuminated's Wards.cpp, the same way.
+	namespace
+	{
+		// the animation event her graph sends as a block begins ("blockStart" is the input event's name and never reaches the graph)
+		constexpr std::string_view kBlockTag = "blockStartOut";
+		constexpr std::string_view kBlockEndTag = "blockStop";
+
+		[[nodiscard]] bool WaitsForBlock(const RE::ActiveEffect* a_effect)
+		{
+			using Flag = RE::ActiveEffect::Flag;
+			if (!a_effect || !a_effect->effect || !a_effect->spell || a_effect->flags.none(Flag::kHasConditions) ||
+				a_effect->flags.any(Flag::kDispelled) || a_effect->spell->GetSpellType() != RE::MagicSystem::SpellType::kEnchantment) {
+				return false;
+			}
+			for (const auto* item = a_effect->effect->conditions.head; item; item = item->next) {
+				if (item->data.functionData.function.get() == RE::FUNCTION_DATA::FunctionID::kIsBlocking) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		class ShieldWards : public RE::MagicTarget::ForEachActiveEffectVisitor
+		{
+		public:
+			RE::BSContainer::ForEachResult Accept(RE::ActiveEffect* a_effect) override
+			{
+				if (WaitsForBlock(a_effect)) {
+					found.push_back(a_effect);
+				}
+				return RE::BSContainer::ForEachResult::kContinue;
+			}
+
+			std::vector<RE::ActiveEffect*> found;
+		};
+
+		// main thread: collected first, then checked, so the list is never walked while an effect changes state
+		void RecheckShieldWards()
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* target = player ? player->AsMagicTarget() : nullptr;
+			if (!target) {
+				return;
+			}
+			ShieldWards wards;
+			target->VisitEffects(wards);
+			for (auto* effect : wards.found) {
+				effect->EvaluateConditions(0.0f, true);
+			}
+		}
+
+		class BlockWatch : public RE::BSTEventSink<RE::BSAnimationGraphEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::BSAnimationGraphEvent* a_event,
+				RE::BSTEventSource<RE::BSAnimationGraphEvent>*) override
+			{
+				LightKit::Guarded("block watch", [a_event]() {
+					const std::string_view tag = a_event ? a_event->tag.c_str() : "";
+					if (!LightKit::SameText(tag, kBlockTag) && !LightKit::SameText(tag, kBlockEndTag)) {
+						return;
+					}
+					// the graph's events may come off the main thread: the effects are read on it
+					if (auto* tasks = SKSE::GetTaskInterface()) {
+						tasks->AddTask([]() { LightKit::Guarded("shield ward check", RecheckShieldWards); });
+					}
+				});
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+		BlockWatch gBlockWatch;
+		// the graph the watch is on (main thread only): a transformation or a 3D reset builds her a new one. Held, so a new graph can never take its address
+		RE::BSTSmartPointer<RE::BSAnimationGraphManager> gWatchedGraph;
+
+		void CheckBlockGraph()
+		{
+			auto*                                            player = RE::PlayerCharacter::GetSingleton();
+			RE::BSTSmartPointer<RE::BSAnimationGraphManager> graph;
+			if (player && player->GetAnimationGraphManager(graph) && graph && graph.get() != gWatchedGraph.get()) {
+				WatchBlocking();
+			}
+		}
+
+		void NoteGraphLook()
+		{
+			static std::atomic<bool> queued{ false };
+			auto*                    tasks = SKSE::GetTaskInterface();
+			if (tasks && !queued.exchange(true)) {
+				tasks->AddTask([]() {
+					queued = false;
+					LightKit::Guarded("block watch", []() { CheckBlockGraph(); });
+				});
+			}
+		}
+
+		// her graph is built with her 3D: SKSE's 3D-update event, her load event, a race change. She cannot block before she draws, so her own draw looks too
+		class GraphWatch final :
+			public RE::BSTEventSink<SKSE::NiNodeUpdateEvent>,
+			public RE::BSTEventSink<SKSE::ActionEvent>,
+			public RE::BSTEventSink<RE::TESObjectLoadedEvent>,
+			public RE::BSTEventSink<RE::TESSwitchRaceCompleteEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::NiNodeUpdateEvent* a_event, RE::BSTEventSource<SKSE::NiNodeUpdateEvent>*) override
+			{
+				if (a_event && a_event->reference && a_event->reference->IsPlayerRef()) {
+					NoteGraphLook();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent* a_event, RE::BSTEventSource<SKSE::ActionEvent>*) override
+			{
+				using T = SKSE::ActionEvent::Type;
+				if (a_event && a_event->actor && a_event->actor->IsPlayerRef() && (a_event->type.get() == T::kBeginDraw || a_event->type.get() == T::kEndDraw)) {
+					NoteGraphLook();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESObjectLoadedEvent* a_event, RE::BSTEventSource<RE::TESObjectLoadedEvent>*) override
+			{
+				if (a_event && a_event->loaded && a_event->formID == 0x14) {
+					NoteGraphLook();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESSwitchRaceCompleteEvent* a_event, RE::BSTEventSource<RE::TESSwitchRaceCompleteEvent>*) override
+			{
+				if (a_event && a_event->subject && a_event->subject->IsPlayerRef()) {
+					NoteGraphLook();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+	}
+
+	// a game loaded or a new one started (main.cpp), or her graph was rebuilt (GraphWatch): the watch goes on the graph she has, taken off first so it is never on twice
+	void WatchBlocking()
+	{
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		// not on VR: kept SE / AE only, untested there, as HoldWornModels
+		if (!player || REL::Module::IsVR()) {
+			return;
+		}
+		static GraphWatch watch;
+		static const bool watching = [] {
+			if (auto* updates = SKSE::GetNiNodeUpdateEventSource()) {
+				updates->AddEventSink(&watch);
+			}
+			if (auto* actions = SKSE::GetActionEventSource()) {
+				actions->AddEventSink(&watch);
+			}
+			if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+				events->AddEventSink<RE::TESObjectLoadedEvent>(&watch);
+				events->AddEventSink<RE::TESSwitchRaceCompleteEvent>(&watch);
+			}
+			return true;
+		}();
+		static_cast<void>(watching);
+		RE::BSTSmartPointer<RE::BSAnimationGraphManager> graph;
+		player->GetAnimationGraphManager(graph);
+		player->RemoveAnimationGraphEventSink(&gBlockWatch);
+		const bool added = graph && player->AddAnimationGraphEventSink(&gBlockWatch);
+		gWatchedGraph = added ? graph : nullptr;
+		SKSE::log::info("wards: the block watch is {} the player's animation graph", added ? "on" : "NOT on (no graph yet)");
 	}
 }

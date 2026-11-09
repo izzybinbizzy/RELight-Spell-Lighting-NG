@@ -30,10 +30,19 @@ namespace Fade
 	// change it while the main thread reads it every frame, so everyone works on a copy. The two switches the per-call hooks
 	// read (the HUD charge bar, every effect update) are kept beside it as atomics, so those hooks never lock or copy.
 	[[nodiscard]] Settings Config();                                           // a copy, safe from any thread
+	void                   WatchHands();                                       // data load: the events that wake the hands' pass
+	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
+	void                   NoteActor3D(const RE::Actor* a_actor) noexcept;     // any thread: that actor's 3D came or went (each mod's own hook)
+	[[nodiscard]] bool     HandsAsleep() noexcept;                             // the hands' pass is asleep (DevBench)
+	[[nodiscard]] bool     ShaderGlowsWanted() noexcept;                       // a hand whose glow the shader update could fade
+	[[nodiscard]] bool     EffectsWanted() noexcept;                           // any thread: an effect's update has fading work
+	[[nodiscard]] bool     ReapplyWanted() noexcept;                           // any thread: the cell's animation call has fading work
 	void                   SetConfig(const Settings& a_settings);              // replaces it whole; live on the next frame
 	bool                   ApplySetting(std::string_view a_key, int a_value);  // one Fading.ini line; false if unknown
 	[[nodiscard]] bool     DebugLogOn() noexcept;                              // lock-free
 	[[nodiscard]] bool     HideChargeBarOn() noexcept;                         // lock-free; the switch AND Fading on
+	[[nodiscard]] bool     ChargeBarHooked() noexcept;                         // false on VR, or when another plugin changed the calls first
+	void                   RefreshChargeBar() noexcept;                        // the switch flipped: the bar follows at once
 	void                   LoadSettings();
 	void                   SaveSettings();
 
@@ -168,7 +177,6 @@ namespace Fade
 		float       hudFraction{ 1.0f };  // what the HUD's gem shows (a bound weapon: its spell's whole time - Glow::HudFraction)
 		float       brightness{ 1.0f }, reach{ 1.0f }, cool{ 0.0f };
 		std::size_t lights{ 0 }, roots{ 0 };
-		float       chargeAV{ -1.0f };  // the game's own RightItemCharge / LeftItemCharge, to compare
 	};
 	[[nodiscard]] std::vector<HandView> Snapshot();  // the Debug page and DevBench (takes the per-frame lock)
 	struct LightNow
@@ -187,11 +195,12 @@ namespace Fade
 	// left hand, [1] the right.
 	struct HudHand
 	{
-		bool      shown{ false };  // a tracked spell or weapon in that hand that fades (not left alone)
-		bool      spell{ false }, bound{ false };
-		float     fraction{ 1.0f };
-		bool      lit{ false };  // a light of that hand was found this frame: `color` is its color (top channel 1)
-		Glow::Rgb color{};
+		bool       shown{ false };  // a tracked spell or weapon in that hand that fades (not left alone)
+		bool       spell{ false }, bound{ false };
+		float      fraction{ 1.0f };
+		bool       lit{ false };  // a light of that hand was found this frame: `color` is its color (top channel 1)
+		RE::FormID weapon{ 0 };
+		Glow::Rgb  color{};
 	};
 	struct HudState
 	{
@@ -207,6 +216,11 @@ namespace Fade
 		Glow::Rgb              shoutColor{};
 	};
 	[[nodiscard]] HudState Hud();
+	// a spell's magicka is not a gem's; a full weapon shows nothing unless Show at full charge is on
+	[[nodiscard]] inline bool GemShows(const HudState& a_hud, const HudHand& a_hand) noexcept
+	{
+		return a_hud.gems && a_hud.drawn && a_hand.shown && !a_hand.spell && (a_hand.fraction < 0.995f || a_hud.gemFull);
+	}
 	// a game menu is open (inventory, map, dialogue, the console ...): the HUD elements hide, as the game's own HUD does
 	// (his report). Kept by a menu open / close watcher (FadeMenu.cpp), read by the render thread
 	[[nodiscard]] bool MenusHideHud() noexcept;
@@ -236,6 +250,7 @@ namespace Fade
 		void                                     Reapply();                                                // under gLock, after ReapplyAll wrote the lights again: this frame's choices once more
 		void                                     ReapplyUnder(RE::NiAVObject* a_root);                     // under gLock, after Light Placer animated an effect's or a caster's lights: the same under one root
 		[[nodiscard]] bool                       Holding() noexcept;                                       // a choice is on a light now (any thread)
+		[[nodiscard]] bool                       AnyChoice() noexcept;                                     // a choice is saved, whoever's it may reach (any thread)
 		[[nodiscard]] std::optional<RE::NiColor> ChoiceColor(RE::FormID a_id);                             // main thread: an item's own color, black when off, none on Auto
 		bool                                     SetFromText(RE::FormID a_id, std::string_view a_choice);  // "auto", "off" or "r,g,b", as the menu would
 		void                                     Release();                                                // every light back as its owner left it (a load)

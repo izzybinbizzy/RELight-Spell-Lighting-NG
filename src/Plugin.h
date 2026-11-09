@@ -137,7 +137,8 @@ namespace Plugin
 
 	// GroundLights.cpp: a twin of each hand's casting light that lights the ground, off Community Shaders (Illuminated's)
 	void                      TickGroundLights();
-	void                      DropGroundLights();  // a game loads, or a new one starts: the twins and the hands they follow are the old game's
+	void                      DropGroundLights();   // a game loads, or a new one starts: the twins and the hands they follow are the old game's
+	void                      RenewGroundLights();  // a loading screen ended: every twin let go, the next visit hangs a new one
 	[[nodiscard]] std::size_t GroundLightCount();
 	[[nodiscard]] std::size_t GroundLightsMade();
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too
@@ -217,11 +218,7 @@ namespace Plugin
 	void                      SetSneakOn(bool a_on);
 	[[nodiscard]] int         SneakBrightness();  // percent, 0 to 100
 	void                      SetSneakBrightness(int a_percent);
-	[[nodiscard]] std::size_t GlowLimit();  // the most body glows on people lit at once; no limit when its switch is off
-	[[nodiscard]] bool        GlowLimitOn();
-	[[nodiscard]] int         GlowLimitCount();
-	void                      SetGlowLimitOn(bool a_on);
-	void                      SetGlowLimitCount(int a_count);
+	[[nodiscard]] std::size_t GlowLimit();    // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
 	[[nodiscard]] bool        RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
 	void                      SetRunesFadeOn(bool a_on);
 	[[nodiscard]] bool        SwirlsFadeOn();  // her weapons' enchantment art fades with her lights while she sneaks
@@ -236,13 +233,13 @@ namespace Plugin
 	void                      SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool        WeaponLightsOn();
 	void                      SetWeaponLightsOn(bool a_on);
+	[[nodiscard]] bool        EnchantedWeaponsOn();
+	void                      SetEnchantedWeaponsOn(bool a_on);
 	[[nodiscard]] int         WardColor();  // 0 vanilla blue, 1 white (Wards.cpp)
 	void                      SetWardColor(int a_color);
 	void                      SetOptionOn(std::size_t a_index, bool a_on);
 	// Illuminated's settings, ported (his "add everything from illuminated into relight ... sister mods"). The lighting is
 	// never a pick here: it is found by itself (LightingFound, Lighting.cpp), as his later word asked
-	[[nodiscard]] int  DimInDaylight();  // 0 off, 1 a little, 2 more
-	void               SetDimInDaylight(int a_v);
 	[[nodiscard]] int  HandLightsFor();  // 0 everyone, 1 everyone nearby, 2 player and followers, 3 player only
 	void               SetHandLightsFor(int a_v);
 	[[nodiscard]] bool AutoLightsOn();
@@ -299,9 +296,6 @@ namespace Plugin
 	// (DressHandLight), its Brightness bases - fade -1: none known, its values when this pass next meets it
 	void RememberLight(RE::NiLight* a_light, const HandFx* a_fx = nullptr, Pulse::Kind a_kind = Pulse::Kind::kNone, bool a_hand = false,
 		Dressed a_dressed = {});
-	// what this pass gives every light of ours, for the lights another file scales (Held.cpp): the daylight factor (looked
-	// at every two seconds, main thread)
-	[[nodiscard]] float DaylightFactor();
 
 	// ------------------------------------------------------------------ Streams.cpp: sprays, beams, breath shouts
 	void RaiseStreamLights();    // once, after the data is read and the lighting found, BEFORE MakeHandLights
@@ -338,7 +332,38 @@ namespace Plugin
 	// ------------------------------------------------------------------ Held.cpp: a weapon's own light while it is drawn
 	void                      UpdateHeldLights();  // every frame, after UpdateOptionLights
 	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
+	void                      RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
 	[[nodiscard]] std::size_t LiveHeldLights();
+	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
+	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
+	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
+	enum class SweepWhy : std::uint8_t
+	{
+		kDraw,
+		kCell,
+		kEquip,
+		kDeath,
+		kCamera,
+		kNiNode,
+		kActor3D,
+		kMagicObject,
+		kArtInit,
+		kArtDetach,
+		kRefLoad,
+		kRefDrop,
+		kGameLoad,
+		kCount,
+	};
+	inline constexpr std::array<const char*, static_cast<std::size_t>(SweepWhy::kCount)> kSweepWhyNames{ "draw", "cell", "equip", "death", "camera", "ni node update",
+		"actor 3d", "magic object", "art init", "art detach", "reference load", "reference drop", "game load" };
+	[[nodiscard]] std::uint32_t                                                          SweepNotes(std::size_t a_why) noexcept;  // how many times each kind of moment was heard: devbench's instrument
+	void                                                                                 NoteSweep(SweepWhy a_why) noexcept;      // any thread: something that can end or bring a light happened (Keep.cpp)
+	[[nodiscard]] bool                                                                   SweepWindowOpen() noexcept;              // the few frames after such a moment
+	[[nodiscard]] bool                                                                   BudgetByDistance();                      // Hand lights for: Everyone nearby, which no event announces (Hooks.cpp)
+	[[nodiscard]] std::vector<std::string>                                               SliderWalkLights();                      // main thread: for DevBench, the lights in the scene the sliders' walk calls ours
+	void                                                                                 NoteSliderLook() noexcept;               // any thread: the sliders' walk looks for a few frames (Brightness.cpp)
+	[[nodiscard]] const std::vector<RE::FormID>&                                         DrawnActorIds();                         // main thread: the actors with their hands out (Held.cpp)
+	void                                                                                 NoteActorLoaded() noexcept;              // any thread: an actor's 3D came in, it may arrive with its weapon out (Held.cpp)
 	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
 	[[nodiscard]] bool ShadowPatch();
@@ -346,9 +371,9 @@ namespace Plugin
 	[[nodiscard]] RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light);
 	[[nodiscard]] RE::BSLight*       MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
 		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
-	// the sliders and the daylight onto such a light (fade and reach as the caller worked them out)
+	// the sliders onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);
-	// what a held or body light's file fade and radius are multiplied by: Brightness x daylight, Reach, and off Community
+	// what a held or body light's file fade and radius are multiplied by: Brightness, Reach, and off Community
 	// Shaders the plain drawing (fade x 1.14, reach x 178 / 133)
 	struct OwnScale
 	{
@@ -357,13 +382,20 @@ namespace Plugin
 	[[nodiscard]] OwnScale OwnLightScale();
 
 	// ------------------------------------------------------------------ BodyLights.cpp: the body glow while casting
-	void                      UpdateBodyLights();  // every frame, after UpdateHeldLights
-	void                      DropBodyLights();    // a game loads, or a new one starts: the art they hang on is the old game's
-	void                      ForgetBodyArt();     // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
-	[[nodiscard]] std::size_t LiveBodyLights();
-	[[nodiscard]] std::size_t BodyLightsMade();
+	void                        UpdateBodyLights();    // every frame, after UpdateHeldLights
+	void                        RenewBodyLights();     // a loading screen ended: every body light let go, made again
+	void                        DropBodyLights();      // a game loads, or a new one starts: the art they hang on is the old game's
+	void                        ForgetBodyArt();       // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
+	void                        NoteArtStarted();      // an art started somewhere (any thread): the body lights look for new art
+	void                        NoteBodyComing();      // an actor's load is noted (any thread): the game stores its body a moment later
+	void                        NoteOptionsLook();     // something the option lights depend on happened (any thread): their walk runs
+	void                        BumpSettings();        // a setting or switch changed (Settings.cpp)
+	[[nodiscard]] std::uint32_t SettingsGeneration();  // bumped by every setting / switch change: a pass waiting on events looks again
+	[[nodiscard]] std::size_t   LiveBodyLights();
+	[[nodiscard]] std::size_t   BodyLightsMade();
 
 	// ------------------------------------------------------------------ Wards.cpp: one ward, one dome, and its color
+	void                                     WatchBlocking();                // Wards.cpp: a shield's ward comes up at once
 	void                                     ApplyWards(const char* a_why);  // one dome per ward and the color pick; nothing while Dynamic Wards is loaded
 	[[nodiscard]] bool                       WardsSteppedDown();             // Dynamic Wards is loaded: the wards are its
 	[[nodiscard]] bool                       StrangeWardsHandShows();        // Strange Wards installed and 360 Ward not: the game's ward hand shows

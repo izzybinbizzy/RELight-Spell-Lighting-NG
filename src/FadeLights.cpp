@@ -150,7 +150,7 @@ namespace Fade
 			std::size_t       lights{ 0 }, roots{ 0 };
 			std::string       actorName;
 			std::string       weaponLabel, enchLabel;  // made on the main thread, for the Debug page and DevBench
-			float             chargeAV{ -1.0f };       // the game's own item-charge value, read on the main thread
+			bool              sheathed{ false };       // a weapon hand: put away, as of this pass
 		};
 
 		std::mutex                                       gLock;  // the player update and the effect hooks may be on different threads
@@ -163,6 +163,8 @@ namespace Fade
 		// effect hooks: every art and shader effect in the world calls them each frame, and with no enchanted weapon out they need
 		// not look up (RTTI) whose effect it is
 		std::atomic<std::size_t> gActiveHands{ 0 };
+		// last frame a gem of ours could draw (PublishHud): only then is the HUD's alpha read (UpdateHands)
+		std::atomic<bool> gGemsShown{ false };
 		// the same hands, in gHands' order, for ActiveHand: rebuilt with gActiveHands under gLock (a map's nodes never move, so
 		// the pointers hold until the next rebuild or RestoreAll)
 		std::vector<HandTrack*> gActiveList;
@@ -454,6 +456,139 @@ namespace Fade
 			return out;
 		}
 
+		// the hands' pass sleeps on this (under gLock): no light or glow of ours left to put back, and no hand active but a spell with the
+		// hands down, which has nothing to follow until a draw wakes the pass
+		[[nodiscard]] bool NothingHeld()
+		{
+			return gLights.empty() && gShaders.empty() && gArt.empty() && std::ranges::none_of(gHands, [](const auto& a_hand) {
+				const auto& h = a_hand.second;
+				if (!h.active || !h.spell) {
+					return h.active;
+				}
+				const auto  actor = h.actor.get();
+				const auto* state = actor ? actor->AsActorState() : nullptr;
+				return state && state->GetWeaponState() != RE::WEAPON_STATE::kSheathed;
+			});
+		}
+
+		// a hand whose numbers cannot move, at full: a spell until the game writes magicka, a weapon until its holder's hit (TESHitEvent; a real hit
+		// takes the charge with no write the slots below hear) or a write of its charge. Not a staff while out: its charge goes with the cast, with no
+		// hit. Not a bound weapon: its time runs sheathed too
+		[[nodiscard]] bool AtRest(const HandTrack& a_hand) noexcept
+		{
+			const auto* weapon = a_hand.reading.weapon;
+			return Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
+		}
+
+		// what can put something of ours in a hand: an equip, a draw, sheathe or cast (SKSE's action events), an actor loading, her cell
+		// changing. Any thread: one flag, the main thread's pass reads the hands
+		std::atomic<bool> gHandsAsleep{ false }, gHandsWake{ false };
+		std::atomic<Who>  gWatched{ Who::kPlayer };   // Whose: another actor's value or leaving wakes the pass only when it follows others
+		std::atomic<bool> gNothingToFollow{ false };  // asleep with nothing held: a value write has no hand to wake it for
+		std::uint32_t     gRestPasses = 0;            // passes in a row with every hand at rest (main thread)
+
+		// an actor the pass follows (Whose): only its equip, action, hit or 3D can change a hand the pass reads. A Lights by Item choice reaches any
+		// actor's light, whoever Whose names, and only a wake takes it there. Any thread
+		[[nodiscard]] bool Followed(const RE::TESObjectREFR* a_ref) noexcept
+		{
+			if (!a_ref) {
+				return false;
+			}
+			if (a_ref->IsPlayerRef() || Items::AnyChoice()) {
+				return true;
+			}
+			const auto  who = gWatched.load(std::memory_order_relaxed);
+			const auto* actor = who == Who::kPlayer ? nullptr : a_ref->As<RE::Actor>();
+			return actor && (who == Who::kEveryone || actor->IsPlayerTeammate());
+		}
+
+		class HandWatch final :
+			public RE::BSTEventSink<RE::TESEquipEvent>,
+			public RE::BSTEventSink<RE::BGSActorCellEvent>,
+			public RE::BSTEventSink<SKSE::ActionEvent>,
+			public RE::BSTEventSink<RE::TESHitEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				if (a_event && Followed(a_event->actor.get())) {
+					WakeHands();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*) override
+			{
+				if (a_event && Followed(a_event->cause.get())) {
+					WakeHands();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent*, RE::BSTEventSource<RE::BGSActorCellEvent>*) override
+			{
+				WakeHands();
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const SKSE::ActionEvent* a_event, RE::BSTEventSource<SKSE::ActionEvent>*) override
+			{
+				if (a_event && Followed(a_event->actor)) {
+					WakeHands();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		// a spell hand at rest has nothing to follow until its magicka is written (a weapon's: its item charge), and the game writes a value through
+		// these four slots of its ActorValueOwner (Actor Value Generator and Valhalla Combat hook the same). Any thread: one flag
+		template <class Owner>
+		struct ValueWrites
+		{
+			static void Noted(RE::ActorValueOwner* a_this, RE::ActorValue a_value)
+			{
+				if ((a_value != RE::ActorValue::kMagicka && a_value != RE::ActorValue::kRightItemCharge && a_value != RE::ActorValue::kLeftItemCharge) ||
+					gNothingToFollow.load(std::memory_order_relaxed)) {
+					return;
+				}
+				if constexpr (!std::is_same_v<Owner, RE::PlayerCharacter>) {
+					const auto  who = gWatched.load(std::memory_order_relaxed);
+					const auto* actor = who == Who::kPlayer ? nullptr : skyrim_cast<RE::Actor*>(a_this);
+					if (!actor || (who != Who::kEveryone && !actor->IsPlayerTeammate())) {
+						return;
+					}
+				}
+				WakeHands();
+			}
+
+			template <std::size_t Slot>
+			struct Plain
+			{
+				static void thunk(RE::ActorValueOwner* a_this, RE::ActorValue a_value, float a_amount)
+				{
+					func(a_this, a_value, a_amount);
+					Noted(a_this, a_value);
+				}
+				static inline REL::Relocation<decltype(thunk)> func;
+			};
+
+			static void Mod(RE::ActorValueOwner* a_this, RE::ACTOR_VALUE_MODIFIER a_modifier, RE::ActorValue a_value, float a_amount)
+			{
+				mod(a_this, a_modifier, a_value, a_amount);
+				Noted(a_this, a_value);
+			}
+			static inline REL::Relocation<decltype(Mod)> mod;
+
+			static void Install()
+			{
+				REL::Relocation<std::uintptr_t> vtbl{ Owner::VTABLE[5] };
+				Plain<0x4>::func = vtbl.write_vfunc(0x4, Plain<0x4>::thunk);
+				Plain<0x5>::func = vtbl.write_vfunc(0x5, Plain<0x5>::thunk);
+				mod = vtbl.write_vfunc(0x6, Mod);
+				Plain<0x7>::func = vtbl.write_vfunc(0x7, Plain<0x7>::thunk);
+			}
+		};
+
 		void Sweep()
 		{
 			for (auto it = gLights.begin(); it != gLights.end();) {
@@ -560,7 +695,9 @@ namespace Fade
 			if (!effect || (effect->castingSource != Source::kLeftHand && effect->castingSource != Source::kRightHand)) {
 				return false;
 			}
-			auto*      target = effect->GetTargetActor();
+			// the actor's own override: the effect holds his MagicTarget part, and CommonLib's GetTargetActor at our pin returns that part as the actor
+			auto*      stats = effect->target ? effect->target->GetTargetStatsObject() : nullptr;
+			auto*      target = stats ? stats->As<RE::Actor>() : nullptr;
 			const auto caster = effect->GetCasterActor();
 			if (!target || caster.get() != target) {
 				return false;
@@ -598,8 +735,8 @@ namespace Fade
 			SKSE::log::info("  {} light(s) on {} in all", n, a_actor->GetName());
 		}
 
-		// every light, shader and art mesh back as we found it, and every hand forgotten (switched off, a load)
-		void RestoreAll()
+		// every light, shader and art mesh back as we found it, and let go
+		void PutBack()
 		{
 			for (auto& [light, seen] : gLights) {
 				RestoreLight(seen);
@@ -613,6 +750,12 @@ namespace Fade
 			gLights.clear();
 			gShaders.clear();
 			gArt.clear();
+		}
+
+		// and every hand forgotten (switched off, a load)
+		void RestoreAll()
+		{
+			PutBack();
 			gHands.clear();
 			gActiveList.clear();
 			gActiveHands = 0;
@@ -805,6 +948,7 @@ namespace Fade
 						side.spell = h.spell;
 						side.bound = h.reading.bound;
 						side.fraction = Glow::Clamp01(h.hudFraction);
+						side.weapon = h.reading.weapon ? h.reading.weapon->GetFormID() : 0;
 						const auto color = HandColor(key);
 						side.lit = color.has_value();
 						side.color = color.value_or(Glow::Rgb{});
@@ -816,6 +960,7 @@ namespace Fade
 				hud.shoutLit = shout.has_value();
 				hud.shoutColor = shout.value_or(Glow::Rgb{});
 			}
+			gGemsShown.store(GemShows(hud, hud.hands[0]) || GemShows(hud, hud.hands[1]), std::memory_order_relaxed);
 			std::lock_guard lock(gHudLock);
 			gHud = hud;
 		}
@@ -830,19 +975,98 @@ namespace Fade
 		}
 	}
 
+	void WakeHands() noexcept
+	{
+		gHandsWake.store(true, std::memory_order_relaxed);
+	}
+
+	void NoteActor3D(const RE::Actor* a_actor) noexcept
+	{
+		if (Followed(a_actor)) {
+			WakeHands();
+		}
+	}
+
+	bool HandsAsleep() noexcept
+	{
+		return gHandsAsleep.load(std::memory_order_relaxed);
+	}
+
+	bool ShaderGlowsWanted() noexcept
+	{
+		return gActiveHands.load(std::memory_order_relaxed) > 0 || gActiveSpellHands.load(std::memory_order_relaxed) > 0;
+	}
+
+	bool ReapplyWanted() noexcept
+	{
+		return !gHandsAsleep.load(std::memory_order_relaxed) || Items::Holding();
+	}
+
+	void WatchHands()
+	{
+		static HandWatch watch;
+		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+			events->AddEventSink<RE::TESEquipEvent>(&watch);
+			events->AddEventSink<RE::TESHitEvent>(&watch);
+		}
+		if (auto* actions = SKSE::GetActionEventSource()) {
+			actions->AddEventSink(&watch);
+		}
+		if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+			player->AsBGSActorCellEventSource()->AddEventSink(&watch);
+		}
+		ValueWrites<RE::PlayerCharacter>::Install();
+		ValueWrites<RE::Character>::Install();
+	}
+
+	bool EffectsWanted() noexcept
+	{
+		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding() ||
+		       gSneakArt.load(std::memory_order_relaxed) < 1.0f;
+	}
+
 	void UpdateHands(float a_delta)
 	{
-		// every weapon hand read BEFORE the lock: ReadHand walks a bound weapon's active effects, which the game locks, and the
-		// effect hooks hold that lock when they ask for gLock - read under gLock it could freeze (the outside review's threads M3)
-		const Settings                             s = Config();  // one copy for the frame
-		static std::vector<std::array<Reading, 2>> readings;      // main thread; its storage kept between frames
+		// asleep: nothing of ours in any hand and nothing to put back, or every hand at rest; only what can change that wakes the pass
+		// (HandWatch, ValueWrites, a setting, a load). A choice of Lights by Item or the fading preview keeps it awake
+		if (gHandsAsleep.load(std::memory_order_relaxed) && !(gHandsWake.load(std::memory_order_relaxed) && gHandsWake.exchange(false, std::memory_order_relaxed)) &&
+			!Items::Holding() && !PreviewState().on) {
+			gActors.clear();  // asleep: nothing is read until a wake, and no actor is held meanwhile
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 15, "fading hands" };
+		gHandsWake.store(false, std::memory_order_relaxed);
+		if (gHandsAsleep.load(std::memory_order_relaxed)) {
+			gRestPasses = 0;  // woken: what left a hand gets its passes to be let go
+		}
+		// every weapon hand read BEFORE the lock, on the main thread: ReadHand walks the actor's active effects, and the game's own
+		// walk takes no lock (MagicTarget::VisitEffects, read in the exe), so it stays off the effect threads and out of gLock
+		const auto     settingsStart = std::chrono::steady_clock::now();
+		const Settings s = Config();  // one copy for the frame
+		gWatched.store(s.who, std::memory_order_relaxed);
+		LightKit::Cost::Note(23, "fading: the settings copy",
+			std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - settingsStart).count());
+		static std::vector<std::array<Reading, 2>> readings;  // main thread; its storage kept between frames
 		readings.clear();
 		if (s.enabled) {
+			const LightKit::Cost::Scope c{ 20, "fading: the hands read" };
 			for (auto& actor : Actors(s.who)) {
 				readings.push_back({ ReadHand(actor.get(), false), ReadHand(actor.get(), true) });
 			}
 		}
-		const bool      hudHidden = s.enabled && s.hudGems && HudMovieHidden();
+		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw, at once when
+		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames
+		static bool          hudHiddenWas = false;
+		static bool          gemsWere = false;
+		static std::uint32_t hudLook = 0;
+		const bool           gems = s.enabled && s.hudGems && gGemsShown.load(std::memory_order_relaxed);
+		bool                 hudHidden = false;
+		if (gems) {
+			const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
+			hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
+		}
+		gemsWere = gems;
+		hudHiddenWas = hudHidden;
 		std::lock_guard lock(gLock);
 		++gFrame;
 		gFrameSettings = s;
@@ -865,6 +1089,8 @@ namespace Fade
 			RestoreAll();
 			PublishHud(s, hudHidden);
 			Items::Apply();  // Lights by Item works with Fading off too
+			gNothingToFollow.store(NothingHeld(), std::memory_order_relaxed);
+			gHandsAsleep.store(gNothingToFollow.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			return;
 		}
 		auto&       preview = PreviewState();
@@ -905,8 +1131,8 @@ namespace Fade
 					h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
 					h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
 				}
-				if (auto* av = actor->AsActorValueOwner()) {
-					h.chargeAV = av->GetActorValue(left ? RE::ActorValue::kLeftItemCharge : RE::ActorValue::kRightItemCharge);
+				if (const auto* state = actor->AsActorState()) {
+					h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
 				}
 				if (h.verdict.mode == Mode::kExempt) {
 					if (h.active || h.weapon != h.reading.weapon) {
@@ -958,6 +1184,7 @@ namespace Fade
 		}
 		// the spells in hand: their lights and glow follow the caster's magicka
 		if (s.spells) {
+			const LightKit::Cost::Scope c{ 21, "fading: the spell hands" };
 			for (auto& actor : gActors) {
 				for (const bool left : { false, true }) {
 					UpdateSpellHand(actor.get(), left, s, a_delta, previewOn, previewToggled, preview.fraction);
@@ -972,6 +1199,7 @@ namespace Fade
 				hand.effectRoots.clear();  // its effects' 3D is not ours to keep
 			}
 		}
+		const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
 		Sweep();
 		gActiveList.clear();
 		std::size_t spells = 0;
@@ -985,15 +1213,38 @@ namespace Fade
 		gActiveSpellHands = spells;
 		PublishHud(s, hudHidden);
 		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
+		// asleep too with every hand at rest, once Sweep has had its passes; a gem on screen keeps the pass for its HUD check. Full is what the
+		// lights already show, so the effect hooks have nothing to do either, and no actor is held
+		const bool rest = !gems && !previewOn && !Items::Holding() && std::ranges::all_of(gHands, [](const auto& a_hand) { return !a_hand.second.active || AtRest(a_hand.second); });
+		gRestPasses = rest ? gRestPasses + 1 : 0;
+		const bool rested = gRestPasses > kKeepFrames;
+		if (rested) {
+			gActiveHands = 0;
+			gActiveSpellHands = 0;
+			gActors.clear();
+			// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
+			// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
+			PutBack();
+		}
+		const bool nothing = NothingHeld();
+		if ((rested || nothing) && !Items::Holding()) {
+			for (auto& [key, hand] : gHands) {
+				hand.effectRoots.clear();  // the effects' 3D
+			}
+			gItemRoots.clear();
+			gNotedLights.clear();
+		}
+		gNothingToFollow.store(nothing, std::memory_order_relaxed);
+		gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
 	}
 
 	void AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D)
 	{
-		const bool  items = gItemRootsWanted.load(std::memory_order_relaxed);
-		const float sneakArt = gSneakArt.load(std::memory_order_relaxed);
-		if (gActiveHands.load(std::memory_order_relaxed) == 0 && !items && !Items::Holding() && sneakArt >= 1.0f) {
+		if (!EffectsWanted()) {
 			return;
 		}
+		const bool      items = gItemRootsWanted.load(std::memory_order_relaxed);
+		const float     sneakArt = gSneakArt.load(std::memory_order_relaxed);
 		RE::Actor*      actor = nullptr;
 		bool            left = false;
 		RE::NiAVObject* root = nullptr;
@@ -1085,6 +1336,7 @@ namespace Fade
 		auto& seen = it->second;
 		if (added) {
 			seen.effect.reset(a_effect);
+			WakeHands();  // the pass may sleep with this spell sheathed: this glow follows the hand from now on
 		}
 		seen.frame = gFrame;
 		// a shader's alpha tops out at 1: a pulse or flare can brighten a dimmed glow back up, not past its own
@@ -1174,6 +1426,7 @@ namespace Fade
 		std::lock_guard lock(gLock);
 		RestoreAll();
 		Items::Release();
+		WakeHands();
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();
@@ -1278,7 +1531,6 @@ namespace Fade
 			v.cool = h.active ? h.out.cool : 0.0f;
 			v.lights = h.lights;
 			v.roots = h.roots;
-			v.chargeAV = h.chargeAV;  // nothing of the game is touched here: this runs on the menu's and DevBench's threads
 			out.push_back(std::move(v));
 		}
 		std::ranges::sort(out, {}, [](const HandView& v) { return std::make_pair(v.actor, v.left); });

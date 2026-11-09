@@ -228,13 +228,14 @@ namespace Fade
 			Toggle("Weapon enchantments", s.weapons, "An enchanted weapon's lights and glow follow its charge.", save);
 			ImGuiMCP::SameLine(column);
 			Toggle("Staves", s.staves, "A staff's lights and glow follow its charge.", save);
-			Toggle("Bound weapons", s.bound,
-				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
-			ImGuiMCP::SameLine(column);
 			Toggle("Spells", s.spells,
 				"A spell in hand: the lights and glow on the casting hand follow your magicka, dimming as it runs low and "
 				"coming back as it refills.",
 				save);
+			Toggle("Bound weapons", s.bound,
+				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
+			ImGuiMCP::SameLine(column);
+			ImGuiMCP::SetNextItemWidth(column * 0.6f);
 			ImGuiMCP::BeginDisabled(!s.bound);
 			{
 				int secs = static_cast<int>(s.boundFadeSeconds);
@@ -297,10 +298,12 @@ namespace Fade
 			GlowHeading(Icon::kGauge, "Charge bar");
 			// his answer 2026-10-13: with Fading off nothing else shows a weapon's charge, so the bar comes back and this
 			// switch greys out (FadeSettings.cpp hides the bar only while both are on)
-			ImGuiMCP::BeginDisabled(!s.enabled);
+			const bool hooked = ChargeBarHooked();
+			ImGuiMCP::BeginDisabled(!s.enabled || !hooked);
 			Toggle("Hide the charge bar", s.hideChargeBar,
-				"The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
-				"vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows.",
+				hooked ? "The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
+						 "vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows." :
+						 "Not available here: this is Skyrim VR, or another mod changed the charge bar first.",
 				save);
 			ImGuiMCP::EndDisabled();
 
@@ -308,7 +311,7 @@ namespace Fade
 			ImGuiMCP::BeginDisabled(!s.enabled);
 			Toggle("Charge gems on the HUD", s.hudGems,
 				"A soul gem for each enchanted weapon hand beside the health bar - the left hand's on the left, the right hand's on "
-				"the right - as full as that weapon's charge (a bound weapon's: the time its spell has left). It shows once the charge "
+				"the right - as full as that weapon's charge (a bound weapon's: the time its spell has left), in the color of the weapon's light. It shows once the charge "
 				"starts dropping, while your weapons are out - full ones too with Show at full charge. Needs Fading on.",
 				save);
 			ImGuiMCP::BeginDisabled(!s.hudGems);
@@ -360,11 +363,13 @@ namespace Fade
 			}
 			if (ImGuiMCP::Button(T("Pulse"))) {
 				preview.pulse = true;
+				WakeHands();
 			}
 			Tip("The flash a spending hit makes, now.");
 			ImGuiMCP::SameLine();
 			if (ImGuiMCP::Button(T("Flare"))) {
 				preview.flare = true;
+				WakeHands();
 			}
 			Tip("The swell a recharge makes, now.");
 
@@ -394,9 +399,6 @@ namespace Fade
 					ImGuiMCP::TextColored(h.lights ? kDim : kGold, T("%zu light(s) under %zu root(s)%s"), h.lights, h.roots,
 						h.lights ? "" : T(" - nothing to dim: no lighting mod lights this weapon?"));
 					ImGuiMCP::TextDisabled(T("decided by: %s"), h.why.c_str());
-				}
-				if (h.chargeAV >= 0.0f && !h.bound && !h.spell) {
-					ImGuiMCP::TextDisabled(T("the game's own %s actor value: %.1f"), h.left ? "LeftItemCharge" : "RightItemCharge", h.chargeAV);
 				}
 				ImGuiMCP::Unindent();
 				ImGuiMCP::PopID();
@@ -705,35 +707,49 @@ namespace Fade
 
 		// THE HUD GEMS (his word: each hand has its own cut soul gem on its own side of the health bar). 🔁 HIS WORD
 		// "the enchantment gems should not work for spells and only show when the weapon enchantment is dropping"
-		// and "remove the circle surrounding the soul gem widgets" - a gem is a WEAPON hand's (soul-gem violet for an
-		// enchantment, pale blue for a bound weapon, ember under the sputter point), shown once its charge is below full - or
+		// and "remove the circle surrounding the soul gem widgets" - a gem is a WEAPON hand's (an enchantment's in that hand's light color,
+		// soul-gem violet with no light found, pale blue for a bound weapon, ember under the sputter point), shown once its charge is below full - or
 		// always with Show at full charge (his ask 2026-10-16) - with no halo. Render thread: it reads only Hud().
 		void __stdcall RenderHud()
 		{
 			using namespace ImGuiMCP;
-			static std::array<float, 2>  shown{ 0.0f, 0.0f };  // each side's fade, 0..1
-			static std::array<float, 2>  fill{ 1.0f, 1.0f };
-			static std::array<ImVec4, 2> tint{ ImVec4{}, ImVec4{} };
-			const auto                   hud = Hud();
-			auto*                        io = GetIO();
+			static std::array<float, 2>      shown{ 0.0f, 0.0f };  // each side's fade, 0..1
+			static std::array<float, 2>      fill{ 1.0f, 1.0f };
+			static std::array<ImVec4, 2>     tint{ ImVec4{}, ImVec4{} };
+			static std::array<RE::FormID, 2> weapon{ 0, 0 };
+			static std::array<bool, 2>       colored{ false, false };  // a color was read while this gem shows: a frame with no reading keeps it
+			const auto                       hud = Hud();
+			auto*                            io = GetIO();
 			if (!io) {
 				return;
 			}
 			std::array<bool, 2> here{ false, false };
-			if (hud.gems && hud.drawn && !hud.hudHidden && !HideHud()) {
+			if (!hud.hudHidden && !HideHud()) {
 				for (std::size_t i = 0; i < 2; ++i) {
 					const auto& h = hud.hands[i];
-					if (!h.shown || h.spell || (h.fraction >= 0.995f && !hud.gemFull)) {
-						continue;  // a spell's magicka is not a gem's; a full weapon shows nothing unless Show at full charge is on
+					if (!GemShows(hud, h)) {
+						continue;
 					}
 					here[i] = true;
+					if (h.weapon != weapon[i]) {
+						weapon[i] = h.weapon;
+						colored[i] = false;  // another weapon: the last one's color is not this one's
+					}
 					fill[i] = std::isfinite(h.fraction) ? std::clamp(h.fraction, 0.0f, 1.0f) : 0.0f;
-					tint[i] = h.bound ? ImVec4{ 0.62f, 0.84f, 1.0f, 1.0f } : ImVec4{ 0.72f, 0.46f, 1.0f, 1.0f };
+					if (h.bound) {
+						tint[i] = ImVec4{ 0.62f, 0.84f, 1.0f, 1.0f };
+					} else if (h.lit) {
+						tint[i] = ImVec4{ h.color.r, h.color.g, h.color.b, 1.0f };
+						colored[i] = true;
+					} else if (!colored[i]) {
+						tint[i] = ImVec4{ 0.72f, 0.46f, 1.0f, 1.0f };
+					}
 				}
 			}
 			const float dt = std::isfinite(io->DeltaTime) ? std::clamp(io->DeltaTime, 0.0f, 0.25f) : 0.0f;
 			for (std::size_t i = 0; i < 2; ++i) {
 				shown[i] = std::clamp(shown[i] + (here[i] ? dt : -dt) * 4.0f, 0.0f, 1.0f);
+				colored[i] = colored[i] && shown[i] > 0.0f;
 			}
 			if (shown[0] <= 0.0f && shown[1] <= 0.0f) {
 				return;

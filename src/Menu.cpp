@@ -3,7 +3,7 @@
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
 // Pages in SKSE Menu Framework's Mod Control Panel, under their own section so nothing of RE::Light's own menu is touched, laid out
-// as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, daylight, sneaking, Flicker, hand and weapon lights,
+// as Illuminated's: Lights (the lighting found, presets, Brightness, Reach, sneaking, Flicker, hand and weapon lights,
 // the ward color), Choose Your Own Color (the four art picks, automatic lights, the item list), Configs (the weapon enchantment
 // mods, the spells' own switches, Creation Club, then the other mods' groups) and Praedy's Staves. The fading module adds HUD and
 // Fading after them, then this file Performance, the last page. Every change is saved at once (Settings.cpp) and reaches lights
@@ -206,7 +206,7 @@ namespace Plugin
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
-		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen)
+		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen, const char* a_open = "")
 		{
 			auto& opts = Options();
 			struct Row
@@ -244,7 +244,7 @@ namespace Plugin
 					c.second += m.heldOut;
 				}
 			}
-			std::string shown;
+			std::string shown{ a_open };  // a heading the page already drew
 			bool        wardShown = false;
 			for (const auto& row : rows) {
 				auto& o = opts[row.index];
@@ -564,18 +564,18 @@ namespace Plugin
 #endif
 			GlowHeading("Presets", Icon::kBulb);
 			// Illuminated's presets, the same three (his word: "remove performance preset, only subtle default and cinematic"):
-			// one click sets the two sliders, the light budget and Dim in daylight (-1 leaves one as it is); Default puts back all
-			// four as the mod ships them, as its tip says. The player's own presets are kept per lighting
+			// one click sets the two sliders and the light budget (-1 leaves it as it is); Default puts back all
+			// three as the mod ships them, as its tip says. The player's own presets are kept per lighting
 			struct Preset
 			{
 				const char* name;
 				const char* tip;
-				int         brightness, reach, hands, daylight;
+				int         brightness, reach, hands;
 			};
 			const Preset presets[] = {
-				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1, -1 },
-				{ T("Default"), T("The lights as the mod was made."), 100, 100, 0, 1 },  // Dim in daylight too, as its tip says (the audit)
-				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1, -1 },
+				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1 },
+				{ T("Default"), T("The lights as the mod was made."), 100, 100, 0 },
+				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1 },
 			};
 			for (std::size_t i = 0; i < std::size(presets); ++i) {
 				const auto& p = presets[i];
@@ -587,9 +587,6 @@ namespace Plugin
 					SetReachPercent(p.reach);
 					if (p.hands >= 0) {
 						SetHandLightsFor(p.hands);
-					}
-					if (p.daylight >= 0) {
-						SetDimInDaylight(p.daylight);
 					}
 					SaveSettings();
 				}
@@ -660,18 +657,6 @@ namespace Plugin
 				"How far this mod's lights carry. 100% is the measured reach. How bright they are does not change - "
 				"that is the Brightness slider."));
 
-			// LightKit::Daylight dims at most a quarter / a half
-			const std::vector<const char*> kDaylight{ T("Off"), T("25% dimmer"), T("50% dimmer") };
-			const std::vector<const char*> kDaylightTips{ T("Lights stay at full strength day and night."),
-				T("By day and in bright rooms lights are up to a quarter dimmer; full strength at night and in the dark."),
-				T("By day and in bright rooms lights are up to half as bright; full strength at night and in the dark.") };
-			int                            day = std::clamp(DimInDaylight(), 0, 2);
-			if (ChoiceCombo(T("Dim in daylight"), day, kDaylight, kDaylightTips)) {
-				SetDimInDaylight(day);
-				SaveSettings();
-			}
-			MenuStyle::Tip(kDaylightTips[static_cast<std::size_t>(day)]);
-
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
 			if (const auto* cs = CSLightLoaded()) {
 				GlowHeading("Other Light Mods", Icon::kBulb);
@@ -701,6 +686,10 @@ namespace Plugin
 			}
 			MenuStyle::Tip(kSneakingTips[static_cast<std::size_t>(sneak)]);
 			if (SneakOn()) {
+				// beside the Sneaking pick, the two in one column
+				ImGuiMCP::SameLine(0.0f, 24.0f);
+				const float column = ImGuiMCP::GetCursorPosX();
+				ImGuiMCP::SetNextItemWidth(220.0f);
 				int dim = SneakBrightness();
 				if (ImGuiMCP::SliderInt(T("Sneaking brightness"), &dim, 0, 100, "%d%%")) {
 					SetSneakBrightness(dim);
@@ -709,6 +698,8 @@ namespace Plugin
 					SaveSettings();
 				}
 				MenuStyle::Tip(T("How bright your lights stay while you sneak. At 0% they fade out completely."));
+				ImGuiMCP::SetCursorPosX(column);
+				ImGuiMCP::SetNextItemWidth(220.0f);
 				const std::vector<const char*> kSwirls{ T("Stay as they are"), T("Fade too") };
 				const std::vector<const char*> kSwirlsTips{ T("The glowing swirls on your enchanted weapons stay bright while you sneak."),
 					T("The glowing swirls on your enchanted weapons (VAER Reborn and the like) fade with your lights while you sneak.") };
@@ -808,29 +799,6 @@ namespace Plugin
 				"Which casters' hands carry a spell light. In a big fight fewer lights keep the game smooth. Everyone nearby lights "
 				"only casters within about forty paces of you, as they come and go. Lights lit under Everyone nearby follow a change at "
 				"once; the others reach the next spell a caster readies."));
-			bool limit = GlowLimitOn();
-			if (ImGuiMCP::Checkbox(T("Limit glows on people"), &limit)) {
-				SetGlowLimitOn(limit);
-				SaveSettings();
-			}
-			MenuStyle::Tip(T(
-				"Cloaks, healing and other spells on people each carry a glow. On: at most the count below are lit at once - "
-				"past it a new one waits until another goes out. Yours always light."));
-			ImGuiMCP::BeginDisabled(!limit);
-			int count = GlowLimitCount();
-			// the word translated, the number not: a % in a translation is doubled so it can never become a format of its own
-			std::string format = "%d ";
-			for (const char* c = T("lights"); *c; ++c) {
-				format += *c == '%' ? std::string("%%") : std::string(1, *c);
-			}
-			if (ImGuiMCP::SliderInt(T("Maximum glow lights"), &count, 4, 64, format.c_str())) {
-				SetGlowLimitCount(count);
-			}
-			if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
-				SaveSettings();
-			}
-			ImGuiMCP::EndDisabled();
-			MenuStyle::Tip(T("How many glows on people can be lit at the same time. Fewer keeps big fights smoother."));
 			// his list: "under performance add a toggle to turn off lights completely for the entire mod"
 			bool allOff = AllLightsOff();
 			if (ImGuiMCP::Checkbox(T("All RELight - Spell Lighting NG lights off"), &allOff)) {
@@ -852,9 +820,16 @@ namespace Plugin
 			if (!WeaponLightsOn()) {
 				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so weapon lights here are out."));
 			}
+			GlowHeading("Weapon Enchantments");
+			bool enchanted = EnchantedWeaponsOn();
+			if (ImGuiMCP::Checkbox(T("Enchanted weapons"), &enchanted)) {
+				SetEnchantedWeaponsOn(enchanted);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("The light of enchanted weapons. Off puts only these out: bound weapons, staves and artifacts stay lit."));
 			// one row per id across both draws
 			std::unordered_set<std::string> seen;
-			DrawSwitches(Page::kEnchantments, seen);
+			DrawSwitches(Page::kEnchantments, seen, T("Weapon Enchantments"));
 			DrawSwitches(Page::kConfigs, seen);
 		}
 

@@ -199,6 +199,9 @@ namespace Fade
 					files.push_back(it->path());
 				}
 			}
+			if (ec) {
+				SKSE::log::warn("rules: the folder could not be read to its end ({}); the files after that point were not read", ec.message());
+			}
 			std::ranges::sort(files, {}, [](const auto& a_p) { return Lower(PathText(a_p.filename())); });
 			for (const auto& path : files) {
 				const auto    file = PathText(path.filename());
@@ -231,6 +234,7 @@ namespace Fade
 			SKSE::log::info("rules: {} rule(s) from {} file(s), {} problem(s)", gRuleCount, gFiles, gProblems.size());
 		}
 		RulesLoaded();  // after the lock: it reads the counts through RuleCount() / RuleProblems(), which take it again
+		WakeHands();    // a sleeping hands' pass reads the weapons under the new rules
 	}
 
 	Verdict Judge(const RE::TESObjectWEAP* a_weapon, const RE::EnchantmentItem* a_ench, const Settings& a_settings)

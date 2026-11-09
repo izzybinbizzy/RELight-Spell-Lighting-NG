@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -355,6 +356,9 @@ namespace DataText
 
 	[[nodiscard]] inline Result ReadText(std::string_view a_text)
 	{
+		if (a_text.starts_with("\xEF\xBB\xBF")) {
+			a_text.remove_prefix(3);
+		}
 		Result      r;
 		std::size_t n = 0;
 		for (std::size_t start = 0; start <= a_text.size();) {
@@ -375,5 +379,16 @@ namespace DataText
 		}
 		r.ok = r.file.sawVersion && r.file.sawFile;
 		return r;
+	}
+
+	// the "Enchanted weapons" switch reaches an option's enchantment lights unless it is the artifacts' or a bound weapons' option (Illuminated's rule)
+	[[nodiscard]] inline bool EnchantedOption(std::string_view a_name)
+	{
+		const auto holds = [a_name](std::string_view a_word) {
+			return !std::ranges::search(a_name, a_word, [](char a_x, char a_y) {
+				return std::tolower(static_cast<unsigned char>(a_x)) == std::tolower(static_cast<unsigned char>(a_y));
+			}).empty();
+		};
+		return !holds("bound") && !holds("artifact");
 	}
 }

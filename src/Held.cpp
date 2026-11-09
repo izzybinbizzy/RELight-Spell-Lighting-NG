@@ -69,6 +69,52 @@ namespace Plugin
 		};
 		std::vector<Failed> gFailed;
 
+		// the actors whose weapon is out or coming out: SKSE's draw events note them (any thread, Events.cpp) and a look at an actor's
+		// or a game's load adds any that sent none (one loaded with it drawn), so the pass walks these, not every actor near her
+		std::mutex              gDrawnLock;
+		std::vector<RE::FormID> gDrawnNoted;              // gDrawnLock
+		std::atomic<bool>       gDrawnNotedAny{ false };  // a sink noted one since the last pass
+		std::vector<RE::FormID> gDrawn;                   // the main thread's
+		std::atomic<bool>       gLookNow{ true };         // a game loaded or an actor's 3D came in: look at once
+		// the game stores a body a moment after its load is noted, and nothing says so: such an actor is looked at again for about 5 s
+		constexpr int           kWaitLooksMost = 300;
+		int                     gWaitLooks = 0;  // the main thread's
+		bool                    gWaitingBody = false;
+		std::vector<RE::FormID> gFar;  // listed but out of the high process: nothing announces one coming near
+
+		// a far actor came near, or left: read only while one is listed
+		[[nodiscard]] bool FarChanged()
+		{
+			return std::ranges::any_of(gFar, [](RE::FormID a_id) {
+				const auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+				const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
+				return !actor || (process && process->InHighProcess());
+			});
+		}
+
+		void AddDrawn(RE::FormID a_id)
+		{
+			if (std::ranges::find(gDrawn, a_id) == gDrawn.end()) {
+				gDrawn.push_back(a_id);
+			}
+		}
+
+		[[nodiscard]] bool WeaponOut(RE::Actor* a_actor) { return a_actor->AsActorState()->GetWeaponState() != RE::WEAPON_STATE::kSheathed; }
+
+		void LookForDrawn(RE::PlayerCharacter* a_player)
+		{
+			if (WeaponOut(a_player)) {
+				AddDrawn(a_player->GetFormID());
+			}
+			if (auto* lists = RE::ProcessLists::GetSingleton()) {
+				for (auto& handle : lists->highActorHandles) {
+					if (auto actor = handle.get(); actor && WeaponOut(actor.get())) {
+						AddDrawn(actor->GetFormID());
+					}
+				}
+			}
+		}
+
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)
 		{
 			if (a_scene && a_v.bs) {
@@ -200,13 +246,13 @@ namespace Plugin
 		}
 	}
 
-	// the same Brightness x daylight factor the brightness pass gives every other light of ours (the re-score's P5: held
-	// lights missed Dim in daylight); off Community Shaders a light made for inverse square lighting is drawn plain - the
+	// the same Brightness the brightness pass gives every other light of ours; off Community Shaders a light made for inverse
+	// square lighting is drawn plain - the
 	// house light the hand lights take (LightMath.h PlainAt: fade x 1.14, the reach drawn at 178 / 133)
 	OwnScale OwnLightScale()
 	{
 		const bool isl = InverseSquare();
-		return { Brightness() * DaylightFactor() * VanillaStrength() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
+		return { Brightness() * VanillaStrength() * (isl ? 1.0f : 1.14f), Reach() * (isl ? 1.0f : 178.0f / 133.0f) };
 	}
 
 	// one light made and registered the ReLight way, on the main thread; nullptr when it could not be. Held lights and body
@@ -249,7 +295,7 @@ namespace Plugin
 		return bs;
 	}
 
-	// the sliders and the daylight onto a light MakeOwnLight made: fade and reach as the caller worked them out
+	// the sliders onto a light MakeOwnLight made: fade and reach as the caller worked them out
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved)
 	{
 		// in a turn: the fading module's effect hooks write a held light too, from other threads (LightKit.h)
@@ -265,10 +311,19 @@ namespace Plugin
 		}
 	}
 
+	void NoteActorLoaded() noexcept { gLookNow.store(true, std::memory_order_relaxed); }
+
+	const std::vector<RE::FormID>& DrawnActorIds() { return gDrawn; }
+
 	void UpdateHeldLights()
 	{
-		auto* scene = LightKit::Scene();
-		auto* player = RE::PlayerCharacter::GetSingleton();
+		// no weapon out, nothing lit, nothing noted and no look asked
+		if (gDrawn.empty() && gLive.empty() && gFailed.empty() && !gDrawnNotedAny.load(std::memory_order_relaxed) && !gLookNow.load(std::memory_order_relaxed)) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 7, "held lights" };
+		auto*                      scene = LightKit::Scene();
+		auto*                      player = RE::PlayerCharacter::GetSingleton();
 		if (!scene || !player) {
 			return;
 		}
@@ -279,16 +334,58 @@ namespace Plugin
 		const auto  ownFade = [&](const Stream& a_held, RE::FormID a_actor) {
 			return a_held.fade * (a_actor == player->GetFormID() ? sneak : 1.0f);
 		};
-		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
-		want.clear();
-		WantsOf(player, hidden, want);
-		if (auto* lists = RE::ProcessLists::GetSingleton()) {
-			for (auto& handle : lists->highActorHandles) {
-				if (auto actor = handle.get(); actor && actor.get() != player) {
-					WantsOf(actor.get(), false, want);
-				}
+		{
+			std::lock_guard lock(gDrawnLock);
+			for (const auto id : gDrawnNoted) {
+				AddDrawn(id);
+			}
+			gDrawnNoted.clear();
+			gDrawnNotedAny.store(false, std::memory_order_relaxed);
+		}
+		const bool looked = gLookNow.exchange(false, std::memory_order_relaxed);
+		if (looked) {
+			LookForDrawn(player);
+			if (!gWaitingBody) {
+				gWaitLooks = kWaitLooksMost;
 			}
 		}
+		gWaitingBody = false;
+		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
+			return;  // no weapon out and nothing lit
+		}
+		// what a weapon wants changes only with what NoteSweep hears (a draw, a sheathe, an equip, a death, a 3D, a view, her cell, an art's start), a
+		// setting or her sneak level; a refused light is tried again, and neither a far actor coming near nor Everyone nearby has an event
+		static std::uint32_t genWas = 0;
+		static float         sneakWas = -1.0f;
+		const auto           gen = SettingsGeneration();
+		const bool           changed = gen != genWas || sneak != sneakWas;
+		genWas = gen;
+		sneakWas = sneak;
+		if (!changed && !looked && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
+			return;
+		}
+		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
+		want.clear();
+		gFar.clear();
+		// an actor leaves the list once its weapon is fully away or it is gone; a far one stays listed and is looked at from the moment it
+		// comes near again, with no event to say so; the rest say what they want
+		std::erase_if(gDrawn, [&](RE::FormID a_id) {
+			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
+			if (!actor || !WeaponOut(actor)) {
+				return true;
+			}
+			if (!actor->Is3DLoaded()) {
+				gWaitingBody = gWaitLooks > 0;
+				return !gWaitingBody;
+			}
+			if (process && process->InHighProcess()) {
+				WantsOf(actor, actor == player && hidden, want);
+			} else {
+				gFar.push_back(a_id);
+			}
+			return false;
+		});
 		// what is no longer wanted, or hangs on a node the actor no longer has (a view switch rebuilds it), comes off
 		std::erase_if(gLive, [&](Live& v) {
 			const bool keep = std::ranges::any_of(want, [&v](const Want& w) {
@@ -300,8 +397,12 @@ namespace Plugin
 			}
 			return !keep;
 		});
+		if (gWaitingBody) {
+			--gWaitLooks;
+			gLookNow.store(true, std::memory_order_relaxed);
+		}
 		std::erase_if(gFailed, [&](const Failed& f) { return std::ranges::none_of(want, [&f](const Want& w) { return f.Is(w); }); });
-		// the sliders, the daylight and (🔁 his "re add the enb and cs and vanilla versions ... auto detect") the plain drawing
+		// the sliders and (🔁 his "re add the enb and cs and vanilla versions ... auto detect") the plain drawing
 		// off Community Shaders; the color is the light's own
 		const auto [scale, reachScale] = OwnLightScale();
 		for (const auto& w : want) {
@@ -342,7 +443,7 @@ namespace Plugin
 					w.left ? "left" : "right", w.firstPerson ? "first" : "third", fade, reach);
 			}
 		}
-		// the sliders and the daylight reach a light already hung
+		// the sliders reach a light already hung
 		for (auto& v : gLive) {
 			const float fade = ownFade(*v.held, v.actor) * scale;
 			const float reach = v.held->radius * reachScale;
@@ -355,6 +456,18 @@ namespace Plugin
 		gLiveCount = gLive.size();
 	}
 
+	void RenewHeldLights()
+	{
+		auto* scene = LightKit::Scene();
+		for (auto& v : gLive) {
+			TakeOff(v, scene);
+		}
+		gLive.clear();
+		gLiveCount = 0;
+		gFailed.clear();
+		gLookNow = true;
+	}
+
 	void DropHeldLights()
 	{
 		auto* scene = LightKit::Scene();
@@ -364,6 +477,22 @@ namespace Plugin
 		gLive.clear();
 		gLiveCount = 0;
 		gFailed.clear();
+		{
+			std::lock_guard lock(gDrawnLock);
+			gDrawnNoted.clear();
+		}
+		gDrawn.clear();
+		gFar.clear();
+		gLookNow = true;
+	}
+
+	void NoteDrawing(RE::FormID a_actor)
+	{
+		std::lock_guard lock(gDrawnLock);
+		if (std::ranges::find(gDrawnNoted, a_actor) == gDrawnNoted.end()) {
+			gDrawnNoted.push_back(a_actor);
+			gDrawnNotedAny.store(true, std::memory_order_relaxed);
+		}
 	}
 
 	std::size_t LiveHeldLights() { return gLiveCount.load(); }

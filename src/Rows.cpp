@@ -53,7 +53,8 @@ namespace Plugin
 		std::size_t                                     gLights = 0;
 		std::size_t                                     gMade = 0;
 		std::mutex                                      gQueueLock;
-		std::vector<RE::NiPointer<RE::TESObjectREFR>>   gQueue;  // what a loader thread loaded, for the next frame (under gQueueLock)
+		std::vector<RE::NiPointer<RE::TESObjectREFR>>   gQueue;               // what a loader thread loaded, for the next frame (under gQueueLock)
+		std::atomic<bool>                               gRowsAwake{ false };  // set under gQueueLock, so a load is never missed as the pass goes to sleep
 		// a projectile whose row a switch took off while it still flies (Performance, All lights off, sneaking, its option, the light
 		// cap): hung again when the rows come back, or a held stream stays bare until the next cast (main thread)
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> gParked;
@@ -132,7 +133,8 @@ namespace Plugin
 		// a light's strength, reach and color written whole; past its top the reach would grow instead of the light brightening
 		void Dress(RE::NiPointLight* a_light, const RE::NiColor& a_color, float a_fade, float a_radius, bool a_isl)
 		{
-			auto& data = a_light->GetLightRuntimeData();
+			const auto turn = LightKit::Turn();  // an effect or cell pass can restore and dim a row light on another thread
+			auto&      data = a_light->GetLightRuntimeData();
 			data.diffuse = a_color;
 			data.fade = a_fade;
 			data.radius = { a_radius, a_radius, LightKit::kLightSize };
@@ -342,7 +344,7 @@ namespace Plugin
 			}
 			const auto& rec = *a_c.recipe;
 			const bool  isl = InverseSquare();
-			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
+			const float brightNow = Brightness() * VanillaStrength();
 			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
 			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
@@ -461,9 +463,9 @@ namespace Plugin
 		void Move()
 		{
 			const bool isl = InverseSquare();
-			// the two sliders and Dim in daylight, then the per-lighting strength the rows were tuned with (no plain-drawing step:
+			// the two sliders, then the per-lighting strength the rows were tuned with (no plain-drawing step:
 			// RowStrengthFor already holds the Vanilla / ENB difference)
-			const float brightNow = Brightness() * DaylightFactor() * VanillaStrength();
+			const float brightNow = Brightness() * VanillaStrength();
 			const float bright = brightNow * RowStrengthFor(LightingFound()), reachPct = Reach();
 			const auto  epoch = TintEpoch();
 			// Dynamic Lighting (this session's, as the data was read with) makes the row flicker: a spray's own light is steady
@@ -523,7 +525,7 @@ namespace Plugin
 					const float reach = s.reach * reachPct * RowReachFor(LightingFound());
 					// at full strength five lights wash a stream out white off Community Shaders
 					const float want = rec.fade * s.strength * bright * (isl ? 1.0f : kRowPlain);
-					// a dimmer Brightness or daylight lowers the cap too, so the sliders still reach a capped row
+					// a dimmer Brightness lowers the cap too, so the sliders still reach a capped row
 					const float steady = BeamRow::Steady(want, isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
 					Dress(light, color, steady * (flickers ? BeamRow::Pulsing(kind, seconds, i, seed) : 1.0f), reach, isl);
 					light->local.translate = toLocal * (axis.start + axis.dir * (s.along * length));  // on the path, in the root's units
@@ -559,10 +561,16 @@ namespace Plugin
 		}
 		std::lock_guard l{ gQueueLock };
 		gQueue.emplace_back(a_ref);  // held by its refcount; no handle made on a loader thread
+		gRowsAwake.store(true, std::memory_order_relaxed);
 	}
 
 	void UpdateRows()
 	{
+		// asleep with nothing flying, parked or waiting: the load of a projectile that wears a row wakes it (QueueRow)
+		if (!gRowsAwake.load(std::memory_order_relaxed)) {
+			return;
+		}
+		const LightKit::Cost::Pass                    pass{ 9, "rows" };
 		auto*                                         scene = LightKit::Scene();
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
 		{
@@ -610,6 +618,12 @@ namespace Plugin
 		}
 		if (!gLive.empty()) {
 			Move();
+		}
+		if (gLive.empty() && gClouds.empty() && gCloudWait.empty() && gParked.empty()) {
+			std::lock_guard l{ gQueueLock };
+			if (gQueue.empty()) {
+				gRowsAwake.store(false, std::memory_order_relaxed);
+			}
 		}
 	}
 

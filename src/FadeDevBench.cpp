@@ -76,6 +76,7 @@ namespace Fade
 				out["art"].push_back({ { "base", base }, { "now", now } });
 			}
 			out["hideChargeBar"] = s.hideChargeBar;
+			out["handsAsleep"] = HandsAsleep();
 			DevBenchGlue::Reply(a_sink, a_write, out);
 		}
 
@@ -122,6 +123,7 @@ namespace Fade
 			}
 			if (action == "pulse" || action == "flare") {
 				(action == "pulse" ? p.pulse : p.flare) = true;  // read by the next frame's update
+				WakeHands();
 				return json{ { "ok", true }, { "started", action }, { "note", "plays on every tracked hand from the next frame" } };
 			}
 			if (action == "setting") {

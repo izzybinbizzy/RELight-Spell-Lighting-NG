@@ -10,7 +10,6 @@
 //   NewForm      a form made in memory by the game's own factory; IsCallAt, a call site's check before it is hooked
 //   Isl          the two words Community Shaders' inverse-square lighting reads off a light
 //   CloneLight   a new light for the scene, and AddToScene to register it (ReLight's method, Truman's permission)
-//   Daylight     how much dimmer the lights are by day and in bright rooms: the "Dim in daylight" setting
 //   FleshFx      which flesh spells wear FleshFX's look, and the color their lights then take
 //   ArtColor     an art model's color off its effect shaders (an automatic hand light's third source)
 //   Guarded      runs a hook's or a frame's own work and lets no exception out into the game
@@ -23,10 +22,106 @@
 #include "LightMath.h"
 #include "Pulse.h"
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 namespace LightKit
 {
+	// What each per-frame pass costs on the main thread, in microseconds: a pass wraps itself in one Cost::Scope with a fixed slot
+	// and name, devbench reads Cost::Slots(); about the last 20 frames as the average, the worst since the last Reset (a load)
+	namespace Cost
+	{
+		inline constexpr std::size_t kSlots = 24;
+
+		struct Slot
+		{
+			std::atomic<const char*>   name{ nullptr };
+			std::atomic<float>         usAvg{ 0.0f };
+			std::atomic<float>         usMax{ 0.0f };
+			std::atomic<std::uint32_t> calls{ 0 };  // runs since the last Reset: the idle proof wants 0 new ones with nothing lit
+		};
+
+		[[nodiscard]] inline std::array<Slot, kSlots>& Slots()
+		{
+			static std::array<Slot, kSlots> slots{};
+			return slots;
+		}
+
+		inline void Note(std::size_t a_slot, const char* a_name, float a_us)
+		{
+			if (a_slot >= kSlots) {
+				return;
+			}
+			auto&       s = Slots()[a_slot];
+			const float avg = s.usAvg.load(std::memory_order_relaxed);
+			s.calls.fetch_add(1, std::memory_order_relaxed);
+			s.name.store(a_name, std::memory_order_relaxed);
+			s.usAvg.store(avg <= 0.0f ? a_us : avg + (a_us - avg) * 0.05f, std::memory_order_relaxed);
+			if (a_us > s.usMax.load(std::memory_order_relaxed)) {
+				s.usMax.store(a_us, std::memory_order_relaxed);
+			}
+		}
+
+		inline void Reset()
+		{
+			for (auto& s : Slots()) {
+				s.usAvg.store(0.0f, std::memory_order_relaxed);
+				s.usMax.store(0.0f, std::memory_order_relaxed);
+				s.calls.store(0, std::memory_order_relaxed);
+			}
+		}
+
+		// times its own lifetime into one slot
+		class Scope
+		{
+		public:
+			Scope(std::size_t a_slot, const char* a_name) noexcept : slot(a_slot), name(a_name), start(std::chrono::steady_clock::now()) {}
+			~Scope() { Note(slot, name, std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - start).count()); }
+			Scope(const Scope&) = delete;
+			Scope& operator=(const Scope&) = delete;
+
+		private:
+			std::size_t                           slot{ 0 };
+			const char*                           name{ nullptr };
+			std::chrono::steady_clock::time_point start{};
+		};
+
+		inline float gFrameUs = 0.0f;  // main thread: this frame's passes so far
+
+		// a per-frame pass of ours, started after its own early return: with nothing to do it reads no clock and counts no call. Main thread only
+		class Pass
+		{
+		public:
+			Pass(std::size_t a_slot, const char* a_name) noexcept : slot(a_slot), name(a_name), start(std::chrono::steady_clock::now()) {}
+			~Pass()
+			{
+				const float us = std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - start).count();
+				Note(slot, name, us);
+				gFrameUs += us;
+			}
+			Pass(const Pass&) = delete;
+			Pass& operator=(const Pass&) = delete;
+
+		private:
+			std::size_t                           slot{ 0 };
+			const char*                           name{ nullptr };
+			std::chrono::steady_clock::time_point start{};
+		};
+
+		// slot 0, on a frame a pass ran: what all of them cost that frame
+		inline void FrameEnd()
+		{
+			if (gFrameUs > 0.0f) {
+				Note(0, "player update, all of ours", gFrameUs);
+				gFrameUs = 0.0f;
+			}
+		}
+	}
+
 	// A value read and written on different threads (the menu's render thread, the main thread, the game's loader threads)
 	// with no other value depending on it: relaxed atomic loads and stores. Copyable, so it can live in a vector that is
 	// built once at load.
@@ -238,29 +333,6 @@ namespace LightKit
 
 	// the ambient a light of ours wears off Community Shaders: a tenth of its color (RE::Light's rule, Truman)
 	[[nodiscard]] inline RE::NiColor Tenth(const RE::NiColor& a_color) { return { a_color.red * 0.1f, a_color.green * 0.1f, a_color.blue * 0.1f }; }
-
-	// "Dim in daylight" (LightMath.h's DaylightShare): 1 at night and in the dark; a_pick 0 off, 1 a little, 2 more. Main thread:
-	// it reads the player's cell (an interior by its own light, outdoors by the hour).
-	[[nodiscard]] inline float Daylight(int a_pick)
-	{
-		auto* player = a_pick > 0 ? RE::PlayerCharacter::GetSingleton() : nullptr;
-		auto* cell = player ? player->GetParentCell() : nullptr;
-		if (!cell) {
-			return 1.0f;
-		}
-		float bright = 0.0f;
-		if (cell->IsInteriorCell()) {
-			if (const auto* l = cell->GetLighting()) {
-				const auto lum = [](const RE::Color& a_c) {
-					return (0.2126f * a_c.red + 0.7152f * a_c.green + 0.0722f * a_c.blue) / 255.0f;
-				};
-				bright = DaylightOfRoom((std::max)(lum(l->ambient), lum(l->directional)));
-			}
-		} else if (const auto* calendar = RE::Calendar::GetSingleton()) {
-			bright = DaylightOfHour(calendar->GetHour());
-		}
-		return DaylightShare(a_pick, bright);
-	}
 
 	// FleshFX (LightMath.h kFleshLooks): which flesh spells wear its look in this load order. Find() runs once at data load, on
 	// the main thread, before any light is drawn; HueOf and Shown only read after it, from any thread.

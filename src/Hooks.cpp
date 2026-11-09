@@ -488,6 +488,10 @@ namespace
 	// switched-off one goes out again in UpdateOptionLights), one whose caster is far goes out
 	void UpdateBudgetLights()
 	{
+		if (gBudgetLights.empty()) {
+			return;
+		}
+		const LightKit::Cost::Pass                                 pass{ 4, "budget lights" };
 		static std::unordered_map<RE::FormID, std::optional<bool>> leftOut;  // main thread; its storage kept between frames
 		leftOut.clear();
 		for (auto& [light, b] : gBudgetLights) {
@@ -512,6 +516,10 @@ namespace
 	// main thread, after the switches: a light a switch gave back stays out while its caster is far
 	void HoldBudgetLightsOut()
 	{
+		if (gBudgetLights.empty()) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 6, "budget held out" };
 		for (const auto& [light, b] : gBudgetLights) {
 			if (b.out) {
 				light->SetAppCulled(true);
@@ -549,6 +557,7 @@ namespace
 	// at one point between them, so she throws one shadow, not two crossed ones. Filled on any thread, pruned on the main thread;
 	// Keep.cpp holds each light, ForgetSpellLights drops it here first
 	std::mutex                       gHerShadowLock;
+	std::atomic<bool>                gHerShadowsAny{ false };  // set when one joins; the pass clears it when none is left
 	std::unordered_set<RE::NiLight*> gHerShadows;
 	std::unordered_set<RE::NiLight*> gShadowsBetween;  // the casters moved between her hands; main thread only
 
@@ -597,6 +606,9 @@ namespace
 	// shadow; a hand lit alone casts from out of its own palm (OutOfThePalm's place)
 	void PlaceHerShadow()
 	{
+		if (!gHerShadowsAny.load(std::memory_order_relaxed)) {
+			return;
+		}
 		static std::vector<RE::NiLight*> lights;
 		lights.clear();
 		{
@@ -604,10 +616,12 @@ namespace
 			std::erase_if(gHerShadows, [](const RE::NiLight* a_l) { return !a_l->parent; });
 			lights.assign(gHerShadows.begin(), gHerShadows.end());
 			std::erase_if(gShadowsBetween, [](RE::NiLight* a_l) { return !gHerShadows.contains(a_l); });
+			gHerShadowsAny.store(!gHerShadows.empty(), std::memory_order_relaxed);
 		}
 		if (lights.empty() || !Plugin::InverseSquare() || REL::Module::IsVR()) {
 			return;
 		}
+		const LightKit::Cost::Pass pass{ 10, "her shadow, promoted hands" };
 		// her two hands are paired per skeleton: a first-person hand never pairs with a third-person one
 		const auto rootOf = [](RE::NiAVObject* a_node) {
 			while (a_node->parent) {
@@ -674,6 +688,10 @@ namespace
 		if (!on || !player || !strings || (gMagicLights.empty() && gPromotedBetween.empty())) {
 			return;
 		}
+		if (gPromotedBetween.empty() && player->AsActorState()->GetWeaponState() == RE::WEAPON_STATE::kSheathed) {
+			return;  // her hands down: nothing to place and nothing to put back (a draw's first frames already light her hands)
+		}
+		const LightKit::Cost::Pass            pass{ 10, "her shadow, promoted hands" };
 		static std::vector<RE::NiPointLight*> between;
 		between.clear();
 		for (const bool first : { false, true }) {
@@ -726,6 +744,7 @@ namespace
 			if (hers && use != a_light && made) {
 				std::lock_guard lock(gHerShadowLock);
 				gHerShadows.insert(made);
+				gHerShadowsAny.store(true, std::memory_order_relaxed);
 			}
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 			OutOfThePalm(made, a_node);
@@ -873,6 +892,10 @@ namespace
 						tasks->AddTask([lights = std::move(culled)]() { LightKit::Guarded("sneak lights task", [&]() { AdoptSneakCulled(lights); }); });
 					}
 				}
+				Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
+				if constexpr (std::is_same_v<T, RE::Hazard>) {
+					Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
+				}
 				if constexpr (std::is_base_of_v<RE::Projectile, T>) {
 					Plugin::QueueRow(a_this);  // a bolt / spray / cone our data lights: its row of lights, hung on the main thread (Rows.cpp)
 				}
@@ -891,13 +914,22 @@ namespace
 		static void thunk(RE::PlayerCharacter* a_this, float a_delta)
 		{
 			// the dimmed lights get the others' numbers back BEFORE the update: RE::Light writes this frame's fades inside it
-			LightKit::Guarded("player update undim", []() { UndimForFrame(); });
+			using LightKit::Cost::Scope;
+			{
+				const Scope c{ 1, "undim" };
+				LightKit::Guarded("player update undim", []() { UndimForFrame(); });
+			}
 			func(a_this, a_delta);
 			LightKit::Guarded("player update", [a_this, a_delta]() {
+				// each pass times itself after its own early return (LightKit::Cost::Pass); only Ivy's sneak calls keep their meter here
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
-				const float sneak = StepSneakLevel(a_this, a_delta);
-				Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
+				float sneak = 1.0f;
+				{
+					const Scope c{ 3, "sneak level" };
+					sneak = StepSneakLevel(a_this, a_delta);
+					Fade::SetSneakArt(StepSwirlLevel(a_this, a_delta));
+				}
 				UpdateBudgetLights();
 				Plugin::UpdateOptionLights();
 				HoldBudgetLightsOut();
@@ -911,8 +943,12 @@ namespace
 				// Brightness.cpp's NoteFadeWrite)
 				Plugin::UpdateBrightness(a_delta);
 				Fade::UpdateHands(a_delta);
-				DimSpellLights(sneak);       // over every fade written above
+				{
+					const Scope c{ 13, "sneak dim" };
+					DimSpellLights(sneak);  // over every fade written above
+				}
 				Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				LightKit::Cost::FrameEnd();
 			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -926,6 +962,11 @@ namespace
 		static void thunk(T* a_this)
 		{
 			func(a_this);
+			// every effect in the loaded world comes through here: nothing of the fading module's to do, and nothing dimmed for the pass below
+			// to dim again after RE::Light's write, is the common case
+			if (!Fade::EffectsWanted() && !gDimming.load(std::memory_order_acquire)) {
+				return;
+			}
 			LightKit::Guarded("effect update", [a_this]() {
 				const auto pass = [a_this]() {
 					Fade::AfterReferenceEffect(a_this, std::is_same_v<T, RE::ModelReferenceEffect>);  // an art model, not a shader's actor
@@ -944,13 +985,92 @@ namespace
 		}
 	};
 
+	// an art starting on anything (Light Placer's Init way - powerof3, GPL-3.0, used with his permission): the body lights hear of
+	// it (BodyLights.cpp), and a shader's start asks for the option walk - RE::Light hangs an enchantment light there. Flags only
+	template <class T>
+	struct ArtInit
+	{
+		// the game acts on what Init returns, though CommonLib declares it void: a thunk that loses it drops the effect
+		static bool thunk(T* a_this)
+		{
+			const bool started = func(a_this);
+			Plugin::NoteSweep(Plugin::SweepWhy::kArtInit);
+			Plugin::NoteArtStarted();
+			if constexpr (std::is_same_v<T, RE::ShaderReferenceEffect>) {
+				Plugin::NoteOptionsLook();
+			}
+			return started;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(T::VTABLE[0]).write_vfunc(0x36, thunk);  // ReferenceEffect::Init
+		}
+	};
+
+	// a shader effect taken off the game's list by this call is never marked finished (a temporary-effects clear): the body lights look again. Flags only
+	struct ArtDetach
+	{
+		static void thunk(RE::ShaderReferenceEffect* a_this)
+		{
+			Plugin::NoteSweep(Plugin::SweepWhy::kArtDetach);
+			Plugin::NoteArtStarted();
+			func(a_this);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::ShaderReferenceEffect::VTABLE[0]).write_vfunc(0x27, thunk);  // BSTempEffect::Detach
+		}
+	};
+
+	// a plain reference's 3D in, where RE::Light hangs its light: the game's load event names no reference placed by a script. Flags only, any thread
+	struct RefLoad3D
+	{
+		static RE::NiAVObject* thunk(RE::TESObjectREFR* a_this, bool a_backgroundLoading)
+		{
+			auto* root = func(a_this, a_backgroundLoading);
+			Plugin::NoteSweep(Plugin::SweepWhy::kRefLoad);
+			return root;
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::TESObjectREFR::VTABLE[0]).write_vfunc(0x6A, thunk);
+		}
+	};
+
+	// and out: lights hung on it leave with it. Flags only, any thread
+	struct RefSet3D
+	{
+		static void thunk(RE::TESObjectREFR* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
+		{
+			func(a_this, a_object, a_queue3DTasks);
+			if (!a_object) {
+				Plugin::NoteSweep(Plugin::SweepWhy::kRefDrop);
+			}
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::TESObjectREFR::VTABLE[0]).write_vfunc(0x6C, thunk);
+		}
+	};
+
 	struct CellAnimations
 	{
 		static void thunk(RE::TESObjectCELL* a_cell)
 		{
 			func(a_cell);
+			// every loaded cell comes through here: nothing to write again and nothing dimmed is the common case
+			if (!Fade::ReapplyWanted() && !gDimming.load(std::memory_order_acquire)) {
+				return;
+			}
 			// this frame's fading numbers again for every hand's lights, without advancing any timer
-			LightKit::Guarded("cell animations", []() { UndimmedFor([]() { Fade::ReapplyAll(); }); });
+			LightKit::Guarded("cell animations", []() {
+				const LightKit::Cost::Scope c{ 16, "cell animations" };
+				UndimmedFor([]() { Fade::ReapplyAll(); });
+			});
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 		static void                                    Install()
@@ -1056,10 +1176,15 @@ namespace
 		Load3D<RE::BarrierProjectile>::Install();
 		Load3D<RE::Explosion>::Install();
 		Load3D<RE::Hazard>::Install();
+		RefLoad3D::Install();
+		RefSet3D::Install();
 		REL::Relocation<std::uintptr_t> vtbl{ RE::PlayerCharacter::VTABLE[0] };
 		PlayerUpdate::func = vtbl.write_vfunc(REL::Relocate(0xAD, 0xAD, 0xAF), PlayerUpdate::thunk);  // Actor::Update (CommonLib's Actor.cpp)
 		EffectUpdate<RE::ShaderReferenceEffect>::Install();
 		EffectUpdate<RE::ModelReferenceEffect>::Install();
+		ArtInit<RE::ShaderReferenceEffect>::Install();
+		ArtInit<RE::ModelReferenceEffect>::Install();
+		ArtDetach::Install();
 		CellAnimations::Install();
 		SKSE::log::info(
 			"projectile, explosion and hazard loads, the player update, effect updates and cell animations hooked after every "
@@ -1105,6 +1230,8 @@ bool Plugin::KeptOutByBudget(RE::NiLight* a_light)
 float Plugin::SneakLevel() { return gSneakLevel.load(std::memory_order_relaxed); }
 
 bool Plugin::CastByPlayer(const RE::TESObjectREFR* a_ref) { return CastByHer(a_ref); }
+
+bool Plugin::BudgetByDistance() { return NearbyBudget(); }
 
 bool Plugin::LeftOutByBudget(const RE::Actor* a_actor)
 {

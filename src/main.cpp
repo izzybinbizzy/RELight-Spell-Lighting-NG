@@ -84,6 +84,7 @@ namespace
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
+		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
@@ -147,14 +148,19 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
 			ForgetOldGame();
+			LightKit::Cost::Reset();  // the worst times start again with each game
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
 			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
 				ForgetOldGame();
 			}
+			Plugin::WatchBlocking();              // her animation graph is new after a load: the shield's ward watch goes on it again
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
+			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers
+			Plugin::NoteOptionsLook();
+			Plugin::NoteSweep(Plugin::SweepWhy::kGameLoad);
 			break;
 		default:
 			break;
@@ -182,6 +188,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 	// the spell-light hooks are installed at SKSE's post-load (OnMessage), after every plugin has loaded
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
-	SKSE::log::info("RELight - Spell Lighting NG plugin loaded; waiting for the game's data");
+	SKSE::log::info("RELight - Spell Lighting NG {} loaded on Skyrim {} ({}); waiting for the game's data", SKSE::GetPluginVersion().string("."), REL::Module::get().version().string("."),
+		REL::Module::IsVR() ? "VR build" : "SE / AE build");
 	return true;
 }

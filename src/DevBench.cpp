@@ -55,10 +55,23 @@ namespace Plugin
 			out["heldLights"] = LiveHeldLights();
 			out["bodyLights"] = { { "now", LiveBodyLights() }, { "made", BodyLightsMade() } };  // BodyLights.cpp
 			out["keptLights"] = KeptLights();
+			out["sweepNotes"] = json::object();
+			for (std::size_t i = 0; i < kSweepWhyNames.size(); ++i) {
+				out["sweepNotes"][kSweepWhyNames[i]] = SweepNotes(i);
+			}
 			out["sprayRecords"] = SprayLightRecords().size();
 			out["beamRecords"] = BeamLightRecords().size();
 			out["streamCopies"] = { { "raised", RaisedLights() }, { "plain", PlainLights() } };
 			out["wardsSteppedDown"] = WardsSteppedDown();
+			out["sliderLights"] = SliderWalkLights();
+			out["cost"] = json::array();  // each per-frame pass's main-thread time (LightKit::Cost)
+			for (const auto& s : LightKit::Cost::Slots()) {
+				if (const char* name = s.name.load(std::memory_order_relaxed)) {
+					out["cost"].push_back({ { "pass", name }, { "usAvg", s.usAvg.load(std::memory_order_relaxed) },
+						{ "usMax", s.usMax.load(std::memory_order_relaxed) },
+						{ "calls", s.calls.load(std::memory_order_relaxed) } });
+				}
+			}
 			out["options"] = json::array();
 			for (const auto& o : Options()) {
 				out["options"].push_back({ { "id", o.id }, { "name", o.name }, { "switchable", o.switchable }, { "on", o.on.load() },

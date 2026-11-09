@@ -25,6 +25,7 @@
 // the same address (its name or parent changed) - the walk up to the reference and the data lookup are not done for every
 // light every frame.
 
+#include "DataText.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -172,6 +173,33 @@ namespace Plugin
 		// discovery reads at load (CodeRabbit, #24: a game started with the switch on found no automatic hand light)
 		bool Off(std::size_t a_option) { return a_option != kNone && (AllLightsOff() || !OptionLit(a_option)); }
 
+		// the Enchanted weapons switch (Configs): an enchantment light of ours goes out, unless its option is the artifacts' or a bound weapons', or
+		// the weapon in that hand is a staff or a bound weapon. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
+		bool EnchantedOut(RE::NiLight* a_light, std::size_t a_option)
+		{
+			const auto& opts = Options();
+			if (EnchantedWeaponsOn() || a_option >= opts.size() || !DataText::EnchantedOption(opts[a_option].name)) {
+				return false;
+			}
+			auto*       ref = ReferenceOf(a_light);
+			auto*       actor = ref ? ref->As<RE::Actor>() : nullptr;
+			const auto* equipped = [&]() -> RE::TESForm* {
+				if (!actor) {
+					// in the world: the weapon is the reference's own base
+					return ref ? ref->GetBaseObject() : nullptr;
+				}
+				bool left = false;
+				for (const RE::NiAVObject* up = a_light; up && !left; up = up->parent) {
+					left = std::string_view(up->name.c_str()) == "SHIELD";
+				}
+				return actor->GetEquippedObject(left);
+			}();
+			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
+			return weapon && !weapon->IsStaff() && !weapon->IsBound();
+		}
+
+		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
+
 		void HoldOut(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
 		{
 			if (gHeldSet.insert(a_light).second) {
@@ -211,7 +239,7 @@ namespace Plugin
 					return false;
 				}
 				// a switched-off option keeps it out: it moves to that option's list, which gives it back with the switch
-				if (const auto opt = OptionOfLight(a_light); Off(opt)) {
+				if (const auto opt = OptionOfLight(a_light); OffFor(a_light, opt, true)) {
 					HoldOut(a_light, opt, true);
 				} else if (!HeldOutForOption(a_light)) {
 					a_light->SetAppCulled(false);
@@ -249,7 +277,13 @@ namespace Plugin
 
 		// RE::Light puts the player's enchantment lights back into the scene only when she goes indoors or outdoors
 		// (ReinitializeEnchantmentLights): after an outdoor-to-outdoor fast travel her drawn weapon's light stays out of it until
-		// a new equip makes a new light. Twice a second her drawn weapons' RE::Light lights missing from both lists are added back.
+		// a new equip makes a new light. For four seconds after her cell changes or she draws (Events.cpp), twice a second, her
+		// drawn weapons' RE::Light lights missing from both lists are added back; nothing is walked the rest of the time.
+		std::atomic<int> gWeaponChecks{ 0 };
+		// the option-lights walk is wanted (NoteOptionsLook - any thread)
+		std::atomic<bool> gOptionsLook{ true };
+		constexpr int     kWeaponChecks = 8;
+
 		bool InScene(RE::ShadowSceneNode* a_ssn, const RE::NiLight* a_light)
 		{
 			auto& rt = a_ssn->GetRuntimeData();
@@ -257,13 +291,19 @@ namespace Plugin
 			       std::ranges::any_of(rt.activeShadowLights, [a_light](const auto& b) { return b && b->light.get() == a_light; });
 		}
 
-		void GiveBackDroppedWeaponLights(RE::ShadowSceneNode* a_ssn)
+		void GiveBackDroppedWeaponLights(RE::ShadowSceneNode* a_ssn, bool a_timed)
 		{
 			constexpr std::uint32_t kEvery = 30;
 			auto*                   player = RE::PlayerCharacter::GetSingleton();
-			if (gFrame % kEvery != 0 || !player) {
+			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
 				return;
 			}
+			// a full walk times itself: this check inside it is not counted twice
+			std::optional<LightKit::Cost::Pass> pass;
+			if (a_timed) {
+				pass.emplace(std::size_t{ 5 }, "option lights");
+			}
+			gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
 			static std::vector<RE::NiPointLight*> mine;  // main thread; its storage kept between checks
 			mine.clear();
 			// the third-person skeleton only: RE::Light hangs the light on the third-person node whenever it finds one, so a light
@@ -282,9 +322,12 @@ namespace Plugin
 			}
 			static std::uint32_t logged = 0;
 			for (auto* light : mine) {
-				if (light->parent && !InScene(a_ssn, light) && LightKit::AddToScene(a_ssn, light, 1.0f, false) && logged < 5) {
-					++logged;
-					SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+				if (light->parent && !InScene(a_ssn, light) && LightKit::AddToScene(a_ssn, light, 1.0f, false)) {
+					gOptionsLook.store(true, std::memory_order_relaxed);  // the sheathed net and the switches see it too
+					if (logged < 5) {
+						++logged;
+						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+					}
 				}
 			}
 		}
@@ -325,26 +368,55 @@ namespace Plugin
 
 	bool HeldOutForOption(const RE::NiLight* a_light) { return gHeldSet.contains(a_light); }
 
+	void WatchWeaponLights() { gWeaponChecks.store(kWeaponChecks, std::memory_order_relaxed); }
+
 	void ForgetOptionLights(const GoneLights& a_gone)
 	{
 		std::erase_if(gHeldOut, [&](const Held& h) { return a_gone.contains(h.light); });
 		std::erase_if(gHeldSet, [&](const RE::NiLight* l) { return a_gone.contains(l); });
 		std::erase_if(gSheathedOut, [&](RE::NiLight* l) { return a_gone.contains(l); });
 		std::erase_if(gKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+		// kept between walks now: a freed light's address must not keep its option or hue for a new light
+		std::erase_if(gEnchant, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+		std::erase_if(gFlesh, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	}
+
+	void NoteOptionsLook() { gOptionsLook.store(true, std::memory_order_relaxed); }
 
 	void UpdateOptionLights()
 	{
 		++gFrame;
 		auto& opts = Options();
+		// a switch off holds its lights out as they come, so then the walk runs every frame: RE::Light hangs them in its own load hooks and
+		// names none of them (its source, CommonLib's and SKSE's events searched). Otherwise only when something it depends on happened
+		static std::uint32_t lastGen = ~0u;
+		static bool          anyOff = false;
+		if (const auto gen = SettingsGeneration(); gen != lastGen) {
+			lastGen = gen;
+			anyOff = AllLightsOff() || !EnchantedWeaponsOn();
+			for (std::size_t i = 0; i < opts.size() && !anyOff; ++i) {
+				anyOff = !OptionLit(i);
+			}
+			gOptionsLook = true;
+		}
+		if (!anyOff && !(gOptionsLook.load(std::memory_order_relaxed) && gOptionsLook.exchange(false))) {
+			if (auto* ssn = LightKit::Scene()) {
+				GiveBackDroppedWeaponLights(ssn, true);
+			}
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 5, "option lights" };
 		for (auto& o : opts) {
 			o.lit = 0;
 			o.heldOut = 0;
 		}
-		FindEnchantLights();
+		{
+			const LightKit::Cost::Scope c{ 17, "option lights: enchantment walk" };
+			FindEnchantLights();
+		}
 		// give back whatever belongs to a switch that is on again (what has unloaded is already forgotten: Keep.cpp)
 		std::erase_if(gHeldOut, [](Held& h) {
-			if (!Off(h.option)) {
+			if (!OffFor(h.light, h.option, h.enchant)) {
 				if (MayGiveBack(h)) {
 					h.light->SetAppCulled(false);
 				} else if (std::ranges::find(gSheathedOut, h.light) == gSheathedOut.end()) {
@@ -363,8 +435,9 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
-		GiveBackDroppedWeaponLights(ssn);
+		GiveBackDroppedWeaponLights(ssn, false);
 		gTwinSeen.clear();
+		const LightKit::Cost::Scope c{ 18, "option lights: scene walk" };
 		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {
 			if (!bsLight || !bsLight->light) {
 				continue;
@@ -376,7 +449,7 @@ namespace Plugin
 			if (opt == kNone) {
 				continue;
 			}
-			if (Off(opt)) {
+			if (OffFor(niLight, opt, IsEnchantLight(niLight))) {
 				// RE::Light unculls its enchantment light on each new equip, so one already held can come round again
 				if (!niLight->GetAppCulled()) {
 					niLight->SetAppCulled(true);
@@ -393,7 +466,9 @@ namespace Plugin
 		}
 		// a light not seen for a few seconds has left the scene: what was worked out about it is let go
 		constexpr std::uint32_t kForget = 300;
-		if (gFrame % kForget == 0) {
+		static std::uint32_t    prunedAt = 0;
+		if (gFrame - prunedAt > kForget) {
+			prunedAt = gFrame;
 			std::erase_if(gKnown, [](const auto& a_kv) { return gFrame - a_kv.second.frame > kForget; });
 		}
 	}

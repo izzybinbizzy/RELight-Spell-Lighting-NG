@@ -12,10 +12,6 @@
 // Lighting breathes or crackles here (Oscillate), and a light on an object an art pick recolors (`tint`) takes that
 // color. Runs in the player update after the switches and before the fading module, the sneak dim and the ground twins.
 //
-// Illuminated's light settings, ported (his "add everything from illuminated into relight ... sister mods" -
-// RE::Light lights the objects; what it has no setting for is done here, on the lights this pass already looks after):
-//   Dim in daylight   Brightness x a daylight factor: outdoors by the hour (full by day, none at night, a ramp at dawn and
-//                     dusk), indoors by how bright the room's own light is - looked at every two seconds
 // (Light colors and the Fire / Frost / Shock color picks were here until his order took the color variations out of the
 // menu, 2026-10-09; Light colors came back 2026-10-20 and left again 2026-10-21 - "pale and deep also need to be removed":
 // every light keeps its own color; an art pick's tint still recolors.)
@@ -61,7 +57,10 @@ namespace Plugin
 			return a.red == b.red && a.green == b.green && a.blue == b.blue;
 		}
 
-		float gDaylight = 1.0f, gDaylightClock = 2.0f;  // main thread only (UpdateBrightness)
+		// frames the scene is still walked after what can bring a light of ours: RE::Light may hang one a few frames after its 3D or art
+		constexpr int    kSliderLooks = 30;
+		std::atomic<int> gSliderLooks{ kSliderLooks };
+		bool             gOursInScene = false;  // the last walk met a light of ours to visit again next frame (main thread only)
 
 		// Dynamic Lighting on a hand light, as Let There Be Glow's Light Placer curves look:
 		//   Pulse (a breathe): RE::Light's pulse - one phase advancing perSecond * dt * 5, a smooth swing of `intensity`.
@@ -102,6 +101,7 @@ namespace Plugin
 		std::unordered_map<const RE::NiLight*, Seen> gSeen;
 		std::mutex                                   gSeenLock;  // the fading module reports from the effect updates too
 		std::mutex                                   gNewLock;
+		std::atomic<bool>                            gNewAny{ false };  // a light was made since the last pass
 		struct Made
 		{
 			RE::NiLight*  light{ nullptr };
@@ -161,8 +161,10 @@ namespace Plugin
 			return IsReLightLight(a_light) && (OptionOf(a_base) != kNone || EnchantOptionOf(a_light) != kNone);
 		}
 
-		// a_hue: a flesh spell's light under FleshFX (Options.cpp FleshHueOf) - drawn in that hue at the strength RE::Light gave it
-		void Apply(RE::NiLight* a_light, Seen& a_s, float a_scale, float a_reach, float a_dt, const RE::NiColor* a_hue)
+		// a_hue: a flesh spell's light under FleshFX (Options.cpp FleshHueOf) - drawn in that hue at the strength RE::Light gave it.
+		// True when it must be visited next frame: a pulse, or something rewriting what this changes. A steady light keeps what it was
+		// given; at 100 % a light RE::Light flickers needs nothing of ours
+		[[nodiscard]] bool Apply(RE::NiLight* a_light, Seen& a_s, float a_scale, float a_reach, float a_dt, const RE::NiColor* a_hue)
 		{
 			auto& data = a_light->GetLightRuntimeData();
 			// a hand light of ours has the bases DressHandLight gave it - fade, reach and cutoff - taken once: a later write (another
@@ -170,7 +172,8 @@ namespace Plugin
 			// a frame; and readied at low magicka, the fading's first write would stay its reach for life
 			const bool rebase = a_s.ours && a_s.rebase;
 			a_s.rebase = false;
-			if (a_s.ours ? rebase : data.fade != a_s.written) {
+			const bool fadeRewritten = !a_s.ours && data.fade != a_s.written;
+			if (a_s.ours ? rebase : fadeRewritten) {
 				a_s.base = data.fade;  // written since we last touched it (or ours, just dressed): that is the new base
 			}
 			// the peak follows a rise at once and sinks slowly (kPeakSink a second) toward a lower base, so a lasting change in what
@@ -178,7 +181,8 @@ namespace Plugin
 			// (a fraction of a second) barely move it
 			constexpr float kPeakSink = 0.02f;
 			a_s.peak = a_s.base >= a_s.peak ? a_s.base : (std::max)(a_s.base, a_s.peak * (1.0f - kPeakSink * a_dt));
-			if (a_s.ours ? rebase : data.radius.x != a_s.wroteRadius) {
+			const bool radiusRewritten = !a_s.ours && data.radius.x != a_s.wroteRadius;
+			if (a_s.ours ? rebase : radiusRewritten) {
 				a_s.baseRadius = data.radius.x;  // x and y are the reach, z is the size
 			}
 			// Dynamic Lighting off: an RE::Light light that flickers by its config is held at the most it reached. Only one that
@@ -193,7 +197,8 @@ namespace Plugin
 			}
 			const bool  dynamic = DynamicLightingThisSession();
 			const float held = dynamic || !a_s.flickers ? a_s.base : a_s.peak;
-			const float fade = held * a_scale * (dynamic && (a_s.fx || a_s.kind != Pulse::Kind::kNone) ? Oscillate(a_s, a_dt) : 1.0f);
+			const bool  pulses = dynamic && (a_s.fx || (a_s.kind != Pulse::Kind::kNone && PulseRealistic()));
+			const float fade = held * a_scale * (pulses ? Oscillate(a_s, a_dt) : 1.0f);
 			data.fade = fade;
 			a_s.written = fade;
 			const float radius = a_s.baseRadius * a_reach;
@@ -210,12 +215,15 @@ namespace Plugin
 				LightKit::Isl::Write(point, ambient);
 				a_s.rlPhase = point->constAttenuation;  // our write, never read as RE::Light's flicker
 			}
-			if (!SameColor(data.diffuse, a_s.wroteDiffuse)) {
+			const bool colorRewritten = !SameColor(data.diffuse, a_s.wroteDiffuse);
+			if (colorRewritten) {
 				a_s.baseDiffuse = data.diffuse;  // RE::Light (or the hand light) gave it this color: the new base
 			}
 			const RE::NiColor own = a_s.tint ? *a_s.tint : a_s.baseDiffuse;
 			// every light keeps its own color, on Vanilla stronger (his 384, as Illuminated)
 			const RE::NiColor color = VanillaLook(a_hue ? LightKit::FleshFx::Shown(*a_hue, own) : own);
+			const bool        again = pulses || (fadeRewritten && (a_scale != 1.0f || !dynamic)) || (radiusRewritten && a_reach != 1.0f) ||
+			                          (colorRewritten && !SameColor(color, a_s.baseDiffuse));
 			data.diffuse = color;
 			a_s.wroteDiffuse = color;
 			// the cutoff follows the same rule, so an edit in RE::Light's editor sticks: a cutoff we did not write is the
@@ -224,7 +232,7 @@ namespace Plugin
 			// Without Community Shaders' inverse square lighting these words are the ambient color (Plugin.h), so they are
 			// neither read nor written - as Held.cpp and Streams.cpp
 			if (!InverseSquare() || !Isl::On(a_light)) {
-				return;
+				return again;
 			}
 			const float current = Isl::Cutoff(a_light);
 			if (a_s.ours ? rebase || a_s.baseCutoff < 0.0f : current != a_s.wroteCutoff) {
@@ -239,6 +247,7 @@ namespace Plugin
 				Isl::SetCutoff(a_light, cutoff);
 			}
 			a_s.wroteCutoff = Isl::Cutoff(a_light);
+			return again;
 		}
 	}
 
@@ -248,10 +257,9 @@ namespace Plugin
 			KeepLight(a_light);
 			std::lock_guard l{ gNewLock };
 			gNew.push_back({ a_light, a_fx, a_kind, a_hand, a_dressed });
+			gNewAny.store(true, std::memory_order_relaxed);
 		}
 	}
-
-	float DaylightFactor() { return gDaylight; }
 
 	void ForgetSliderLights(const GoneLights& a_gone)
 	{
@@ -294,16 +302,45 @@ namespace Plugin
 		}
 	}
 
+	std::vector<std::string> SliderWalkLights()
+	{
+		std::vector<std::string> names;
+		auto*                    ssn = LightKit::Scene();
+		if (!ssn) {
+			return names;
+		}
+		const auto      turn = LightKit::Turn();
+		std::lock_guard l{ gSeenLock };
+		const auto      note = [&](RE::BSLight* a_light) {
+			if (a_light && a_light->light && gSeen.contains(a_light->light.get())) {
+				const auto* base = BaseOf(a_light->light.get());
+				names.push_back(std::format("{} on {:08X}", a_light->light->name.c_str(), base ? base->GetFormID() : 0));
+			}
+		};
+		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
+			note(bsLight.get());
+		}
+		for (const auto& bsLight : ssn->GetRuntimeData().activeShadowLights) {
+			note(bsLight.get());
+		}
+		return names;
+	}
+
+	void NoteSliderLook() noexcept
+	{
+		gSliderLooks.store(kSliderLooks, std::memory_order_relaxed);
+	}
+
 	void UpdateBrightness(float a_delta)
 	{
 		static std::vector<Made> made;  // main thread; its storage and gNew's are swapped back and forth, never reallocated
 		made.clear();
-		{
+		if (gNewAny.load(std::memory_order_relaxed)) {
 			std::lock_guard l{ gNewLock };
 			made.swap(gNew);
+			gNewAny.store(false, std::memory_order_relaxed);
 		}
-		++gFrame;
-		{
+		if (!made.empty()) {
 			std::lock_guard l{ gSeenLock };
 			for (const auto& m : made) {
 				auto& s = gSeen[m.light];
@@ -331,25 +368,35 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
-		const float dt = std::clamp(a_delta, 0.0f, 0.25f);
-		gDaylightClock += dt;
-		if (gDaylightClock >= 2.0f) {
-			gDaylightClock = 0.0f;
-			gDaylight = LightKit::Daylight(DimInDaylight());
+		// asleep: the last walk met no light of ours and nothing that can bring one has happened since. RE::Light announces none it hangs,
+		// so what can hang one wakes the walk: a 3D's load, an art's start, a draw, her cell, a load (NoteSweep)
+		if (!made.empty()) {
+			NoteSliderLook();
 		}
-		const float scale = Brightness() * gDaylight * VanillaStrength();
+		int looks = gSliderLooks.load(std::memory_order_relaxed);
+		if (looks <= 0 && !gOursInScene) {
+			return;
+		}
+		const LightKit::Cost::Pass pass{ 11, "brightness" };
+		if (looks > 0) {
+			gSliderLooks.compare_exchange_strong(looks, looks - 1, std::memory_order_relaxed);  // a note in between keeps its count
+		}
+		++gFrame;
+		const float dt = std::clamp(a_delta, 0.0f, 0.25f);
+		bool        ours = false;
+		const float scale = Brightness() * VanillaStrength();
 		const float reach = Reach();
 		const auto  epoch = TintEpoch();
-		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
-			if (!bsLight || !bsLight->light) {
-				continue;
+		const auto  visit = [&](RE::BSLight* a_bsLight) {
+			if (!a_bsLight || !a_bsLight->light) {
+				return;
 			}
-			auto* niLight = bsLight->light.get();
+			auto* niLight = a_bsLight->light.get();
 			// gNotOurs is the main thread's alone (this pass and the Keep sweep), so it is read with no lock
 			// a row light hangs under a spray / bolt (so it would read as ours) but Rows.cpp draws it whole every frame, the
 			// sliders included: scaled here too it would take them twice and lose its cutoff
 			if (KnownNotOurs(niLight) || IsRowLight(niLight)) {
-				continue;
+				return;
 			}
 			// gSeenLock is taken per light, not across the walk: the fading module's NoteFadeWrite (the effect updates)
 			// never waits for the whole pass (the re-score's RELight issue 2); the turn first (LightKit.h's order)
@@ -364,7 +411,7 @@ namespace Plugin
 					if (base && !IsEnchantLight(niLight)) {
 						gNotOurs.insert_or_assign(niLight, NotOurs{ niLight->name.c_str(), niLight->parent, gFrame });
 					}
-					continue;
+					return;
 				}
 				gNotOurs.erase(niLight);
 				// a spray's or bolt's light made where our hook did not dress it moves with its projectile all the same: the
@@ -378,8 +425,19 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
-			Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
+			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
+			// a light left on a body the game has taken away (a disabled caster's hand, no reference above it) keeps no walk awake
+			ours = ours || (again && ReferenceOf(niLight) != nullptr);
+		};
+		const auto& lists = ssn->GetRuntimeData();
+		for (const auto& bsLight : lists.activeLights) {
+			visit(bsLight.get());
 		}
+		// a shadow-casting light (her hand lights with the Bottled shadow download) sits in a list of its own
+		for (const auto& bsLight : lists.activeShadowLights) {
+			visit(bsLight.get());
+		}
+		gOursInScene = ours;
 		// a light not seen for a few seconds has left the scene: let it go from the cache
 		constexpr std::uint32_t kForget = 300;
 		if (gFrame % kForget == 0) {

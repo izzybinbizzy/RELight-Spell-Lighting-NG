@@ -17,6 +17,8 @@
 #include "Fade.h"
 #include "LightKit.h"
 
+#include <limits>
+
 namespace
 {
 	// The player's update, each reference effect's update (0x3B) and the cell's animation call are wrapped ONCE, by the
@@ -25,12 +27,16 @@ namespace
 
 	// ------------------------------------------------------------------ after the game animates an effect shader
 	// ShaderReferenceEffect::Update (0x28) writes this frame's fill and rim alpha; the shader dimming runs after it.
+	// the game's Update calls UpdatePosition (0x3B) before it writes the alpha, so this cannot move there
 	struct ShaderUpdate
 	{
 		static bool thunk(RE::ShaderReferenceEffect* a_this, float a_delta)
 		{
 			const bool result = func(a_this, a_delta);
-			LightKit::Guarded("fading: effect shader update", [a_this]() { Fade::AfterShaderEffect(a_this); });
+			// every effect shader in the loaded world, every frame: this one test before anything else
+			if (Fade::ShaderGlowsWanted()) {
+				LightKit::Guarded("fading: effect shader update", [a_this]() { Fade::AfterShaderEffect(a_this); });
+			}
 			return result;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -46,7 +52,8 @@ namespace
 	// leftHand, show) - the two calls TrueHUD also reads for its own bar (ersh1/TrueHUD, Hooks.h). With HideChargeBar on,
 	// both go out with show = false, which the vanilla HUD, SkyHUD and TrueHUD all take as "hide the bar". Installed at
 	// data load, after TrueHUD hooked the same calls at plugin load, so TrueHUD is handed what we pass on.
-	// SE/AE only: the call sites are known for those two. Called every frame: it reads the two lock-free switches only.
+	// SE/AE only: the call sites are known for those two. Update compares its numbers with the last and makes these calls only on a
+	// change; this reads the two lock-free switches only.
 	template <int N>
 	struct ChargeBar
 	{
@@ -56,7 +63,7 @@ namespace
 			const bool hide = Fade::HideChargeBarOn();
 			if (Fade::DebugLogOn() && a_args && a_count == 4 && a_args[0].IsNumber() && a_args[2].IsBool() && a_args[3].IsBool()) {
 				LightKit::Guarded("charge bar log", [&]() {
-					// the debug log: each change of what the game hands the HUD (it calls this every frame)
+					// the debug log: each change of what the game hands the HUD
 					static std::array<std::tuple<int, bool, bool>, 2> last{ { { -1, false, false }, { -1, false, false } } };
 					const double                                      percent = a_args[0].GetNumber();
 					const int                                         shown = std::isfinite(percent) ? static_cast<int>(std::clamp(percent, -1.0e6, 1.0e6)) : -1;
@@ -87,6 +94,8 @@ namespace
 		}
 	};
 
+	std::atomic<bool> gChargeBarHooked{ false };
+
 	void InstallChargeBar()
 	{
 		if (REL::Module::IsVR()) {
@@ -101,12 +110,45 @@ namespace
 		}
 		ChargeBar<0>::Install(kFirst);
 		ChargeBar<1>::Install(kSecond);
+		gChargeBarHooked.store(true, std::memory_order_relaxed);
 		SKSE::log::info("the charge bar's two updates hooked");
 	}
 }
 
 namespace Fade
 {
+	bool ChargeBarHooked() noexcept
+	{
+		return gChargeBarHooked.load(std::memory_order_relaxed);
+	}
+
+	// the meter sends its numbers only when they differ from its last two (read in the 1.6.1170 exe): a number no charge equals makes its next
+	// update send them through our thunk, with the switch as it is now. The game's force flag reaches only a hand with no charge. On the UI thread
+	void RefreshChargeBar() noexcept
+	{
+		LightKit::Guarded("charge bar refresh", []() {
+			auto* tasks = ChargeBarHooked() ? SKSE::GetTaskInterface() : nullptr;
+			if (!tasks) {
+				return;
+			}
+			tasks->AddUITask([]() {
+				LightKit::Guarded("charge bar refresh task", []() {
+					auto*      ui = RE::UI::GetSingleton();
+					const auto hud = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
+					if (!hud) {
+						return;
+					}
+					for (auto* object : hud->GetRuntimeData().objects) {
+						if (auto* meter = object ? skyrim_cast<RE::HUDChargeMeter*>(object) : nullptr) {
+							meter->unk28 = std::numeric_limits<float>::quiet_NaN();
+							meter->unk2C = std::numeric_limits<float>::quiet_NaN();
+						}
+					}
+				});
+			});
+		});
+	}
+
 	namespace
 	{
 		// Reticle Arcs is loaded: the module's bars are offered to it (FadeArcs.cpp) - since his order of 2026-10-19 the only
@@ -161,6 +203,7 @@ namespace Fade
 		Items::Load();
 		ShaderUpdate::Install();
 		InstallChargeBar();
+		WatchHands();
 		SKSE::log::info("fading: hooked effect shaders; the player update, effect updates and cell animations are the plugin's wrappers");
 		RegisterMenu();
 	}
