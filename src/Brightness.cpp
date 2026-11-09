@@ -41,7 +41,7 @@ namespace Plugin
 			float                     rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
 			bool                      flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
 			bool                      ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
-			bool                      outByUs{ false };    // culled here because its body went: a hand light comes back if its body does
+			bool                      outByUs{ false };    // culled here because its body went: it comes back if its body does
 			bool                      rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
 			float                     written{ -1.0f };    // the fade we last wrote
 			float                     baseRadius{ 0.0f };  // the reach RE::Light last gave it
@@ -453,8 +453,8 @@ namespace Plugin
 				}
 				return;
 			}
-			// its body back (a 3D reset): a hand light we put out shows again; the game culls a casting light again itself if it must
-			if (std::exchange(it->second.outByUs, false) && it->second.ours) {
+			// its body back (a 3D reset): any light we put out shows again; the game re-culls a casting light, the option walk a switched-off one
+			if (std::exchange(it->second.outByUs, false)) {
 				niLight->SetAppCulled(false);
 			}
 			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
