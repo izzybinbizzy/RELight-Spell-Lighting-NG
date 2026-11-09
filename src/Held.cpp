@@ -242,7 +242,12 @@ namespace Plugin
 		void SetPlainReach(RE::NiPointLight* a_light, float a_reach, const RE::NiColor& a_color)
 		{
 			a_light->SetLightAttenuation(a_reach);
-			a_light->GetLightRuntimeData().ambient = LightKit::Tenth(a_color);
+			// a Community Shaders that draws linear still reads these words as its flags: Initialised alone, never a color
+			if (LightLimitFix()) {
+				Isl::SetOwnLinear(a_light);
+			} else {
+				a_light->GetLightRuntimeData().ambient = LightKit::Tenth(a_color);
+			}
 		}
 	}
 

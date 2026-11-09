@@ -319,8 +319,8 @@ namespace Plugin
 
 	void TickGroundLights()
 	{
-		if (InverseSquare()) {
-			return;  // Community Shaders: the casting light lights the ground itself
+		if (LightLimitFix()) {
+			return;  // Community Shaders, inverse square or linear: the casting light lights the ground itself
 		}
 		// no twin, nothing left hidden or refused, nobody's hands listed and hers down: a look would change nothing (Visit)
 		const auto* her = RE::PlayerCharacter::GetSingleton();

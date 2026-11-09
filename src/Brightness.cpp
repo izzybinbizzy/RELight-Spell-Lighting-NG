@@ -41,6 +41,7 @@ namespace Plugin
 			float                     rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
 			bool                      flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
 			bool                      ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
+			bool                      outByUs{ false };    // culled here because its body went: a hand light comes back if its body does
 			bool                      rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
 			float                     written{ -1.0f };    // the fade we last wrote
 			float                     baseRadius{ 0.0f };  // the reach RE::Light last gave it
@@ -145,12 +146,14 @@ namespace Plugin
 		// was taken away, a disabled caster's, and the light still lights the place he stood
 		[[nodiscard]] bool OnGoneBody(RE::NiLight* a_light)
 		{
-			if (ReferenceOf(a_light)) {
-				return false;
-			}
 			const RE::NiAVObject* top = a_light;
-			while (top->parent) {
-				top = top->parent;
+			for (; top->parent; top = top->parent) {
+				if (top->GetUserData()) {
+					return false;
+				}
+			}
+			if (top->GetUserData()) {
+				return false;
 			}
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			return !player || (top != player->Get3D(false) && top != player->Get3D(true));
@@ -442,16 +445,22 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
-			// a hand light of ours left on a body the game has taken away goes out with it: the caster's 3D slot wakes this walk when he goes
-			const bool gone = OnGoneBody(niLight);
-			if (gone && it->second.ours) {
-				niLight->SetAppCulled(true);
+			// a light of ours left on a body the game has taken away goes out with it: the caster's 3D slot wakes this walk when he goes
+			if (OnGoneBody(niLight)) {
+				if (!niLight->GetAppCulled()) {
+					niLight->SetAppCulled(true);
+					it->second.outByUs = true;
+				}
 				return;
 			}
+			// its body back (a 3D reset): a hand light we put out shows again; the game culls a casting light again itself if it must
+			if (std::exchange(it->second.outByUs, false) && it->second.ours) {
+				niLight->SetAppCulled(false);
+			}
 			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
-			// nor does a hidden one keep the walk awake (a casting light the game keeps culled while its spell stays selected):
+			// a hidden light keeps no walk awake (a casting light the game keeps culled while its spell stays selected):
 			// a draw or an art's start wakes the walk when it shows
-			ours = ours || (again && !niLight->GetAppCulled() && !gone);
+			ours = ours || (again && !niLight->GetAppCulled());
 		};
 		const auto& lists = ssn->GetRuntimeData();
 		for (const auto& bsLight : lists.activeLights) {

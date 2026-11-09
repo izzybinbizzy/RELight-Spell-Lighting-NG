@@ -508,7 +508,12 @@ namespace Plugin
 		if (auto* point = netimmerse_cast<RE::NiPointLight*>(a_light)) {
 			point->SetLightAttenuation(plain.radius);
 		}
-		data.ambient = LightKit::Tenth(VanillaLook(a_hand.color));  // after the attenuation's words
+		// after the attenuation's words; a Community Shaders that draws linear reads them as its flags: Initialised alone
+		if (LightLimitFix()) {
+			Isl::SetOwnLinear(a_light);
+		} else {
+			data.ambient = LightKit::Tenth(VanillaLook(a_hand.color));
+		}
 		return { data.fade, data.radius.x };
 	}
 

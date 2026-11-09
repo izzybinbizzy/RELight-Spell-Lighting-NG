@@ -143,6 +143,8 @@ namespace Plugin
 				data.fade = (std::min)(a_fade, IslTop(a_radius));
 				Isl::SetOwn(a_light);
 				Isl::SetCutoff(a_light, kDrawnTimes * LightKit::kK * data.fade / IslRoom(a_radius));
+			} else if (LightLimitFix()) {
+				Isl::SetOwnLinear(a_light);
 			} else {
 				data.ambient = LightKit::Tenth(a_color);
 			}

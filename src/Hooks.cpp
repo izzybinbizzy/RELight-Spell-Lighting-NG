@@ -1026,10 +1026,15 @@ namespace
 
 	// only a reference RE::Light lights for us (its base one of our options) or a weapon (its enchantment light) brings or ends a light of
 	// ours: the scenery streaming in and out at rest must not wake the sliders' walk
-	[[nodiscard]] bool MayCarryOurLight(RE::TESObjectREFR* a_ref)
+	[[nodiscard]] bool MayCarryOurLight(RE::TESObjectREFR* a_ref) noexcept
 	{
-		const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
-		return base && (base->IsWeapon() || Plugin::OptionOf(base) != Plugin::kNone);
+		// a game hook: nothing may leave it, and a lookup that fails wakes the walk as before
+		try {
+			const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+			return base && (base->IsWeapon() || Plugin::OptionOf(base) != Plugin::kNone);
+		} catch (...) {
+			return true;
+		}
 	}
 
 	// a plain reference's 3D in, where RE::Light hangs its light: the game's load event names no reference placed by a script. Flags only, any thread
