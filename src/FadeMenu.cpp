@@ -228,14 +228,14 @@ namespace Fade
 			Toggle("Weapon enchantments", s.weapons, "An enchanted weapon's lights and glow follow its charge.", save);
 			ImGuiMCP::SameLine(column);
 			Toggle("Staves", s.staves, "A staff's lights and glow follow its charge.", save);
-			Toggle("Bound weapons", s.bound,
-				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
-			ImGuiMCP::SameLine(column);
 			Toggle("Spells", s.spells,
 				"A spell in hand: the lights and glow on the casting hand follow your magicka, dimming as it runs low and "
 				"coming back as it refills.",
 				save);
-			ImGuiMCP::SameLine();
+			Toggle("Bound weapons", s.bound,
+				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
+			ImGuiMCP::SameLine(column);
+			ImGuiMCP::SetNextItemWidth(column * 0.6f);
 			ImGuiMCP::BeginDisabled(!s.bound);
 			{
 				int secs = static_cast<int>(s.boundFadeSeconds);

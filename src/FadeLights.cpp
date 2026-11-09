@@ -1011,8 +1011,8 @@ namespace Fade
 		if (gHandsAsleep.load(std::memory_order_relaxed)) {
 			gRestPasses = 0;  // woken: what left a hand gets its passes to be let go
 		}
-		// every weapon hand read BEFORE the lock: ReadHand walks a bound weapon's active effects, which the game locks, and the
-		// effect hooks hold that lock when they ask for gLock - read under gLock it could freeze (the outside review's threads M3)
+		// every weapon hand read BEFORE the lock, on the main thread: ReadHand walks the actor's active effects, and the game's own
+		// walk takes no lock (MagicTarget::VisitEffects, read in the exe), so it stays off the effect threads and out of gLock
 		const auto     settingsStart = std::chrono::steady_clock::now();
 		const Settings s = Config();  // one copy for the frame
 		gWatched.store(s.who, std::memory_order_relaxed);
