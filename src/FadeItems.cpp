@@ -78,6 +78,7 @@ namespace Fade::Items
 		std::unordered_set<RE::FormID>         gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
 		std::mutex                             gLock;        // the choices: the menu (render thread) changes them, the main thread applies
 		std::unordered_map<RE::FormID, Choice> gChoices;
+		std::atomic<bool>                      gAnyChoice{ false };
 		std::atomic<std::uint32_t>             gGeneration{ 0 };  // bumped on every change; the main thread copies on a change
 		std::array<std::atomic<RE::FormID>, 2> gInHands{};        // the player's left / right item now, for "in my hands now"
 		// the file is written by the main thread once the changes settle, never by the menu while it holds gLock (CodeRabbit,
@@ -223,6 +224,7 @@ namespace Fade::Items
 				} else {
 					gChoices[a_id] = a_choice;
 				}
+				gAnyChoice.store(!gChoices.empty(), std::memory_order_relaxed);
 			}
 			MarkChanged();
 		}
@@ -410,6 +412,7 @@ namespace Fade::Items
 			gChoices[id] = *c;
 			++read;
 		}
+		gAnyChoice.store(!gChoices.empty(), std::memory_order_relaxed);
 		gGeneration.fetch_add(1, std::memory_order_relaxed);
 		SKSE::log::info("lights by item: {} choice(s) read from {} ({} name an item not in this load order's list)", read, from, missing);
 	}
@@ -536,6 +539,11 @@ namespace Fade::Items
 		});
 	}
 
+	bool AnyChoice() noexcept
+	{
+		return gAnyChoice.load(std::memory_order_relaxed);
+	}
+
 	bool Holding() noexcept
 	{
 		// a changed choice too: the pass applies it, and saves it once it settles
@@ -592,6 +600,7 @@ namespace Fade::Items
 			{
 				std::lock_guard lock(gLock);
 				gChoices.clear();
+				gAnyChoice.store(false, std::memory_order_relaxed);
 			}
 			MarkChanged();
 		}

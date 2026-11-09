@@ -487,13 +487,14 @@ namespace Fade
 		std::atomic<bool> gNothingToFollow{ false };  // asleep with nothing held: a value write has no hand to wake it for
 		std::uint32_t     gRestPasses = 0;            // passes in a row with every hand at rest (main thread)
 
-		// an actor the pass follows (Whose): only its equip, action or 3D can change a hand the pass reads. Any thread
+		// an actor the pass follows (Whose): only its equip, action or 3D can change a hand the pass reads. A Lights by Item choice reaches any
+		// actor's light, whoever Whose names, and only a wake takes it there. Any thread
 		[[nodiscard]] bool Followed(const RE::TESObjectREFR* a_ref) noexcept
 		{
 			if (!a_ref) {
 				return false;
 			}
-			if (a_ref->IsPlayerRef()) {
+			if (a_ref->IsPlayerRef() || Items::AnyChoice()) {
 				return true;
 			}
 			const auto  who = gWatched.load(std::memory_order_relaxed);
@@ -1210,6 +1211,7 @@ namespace Fade
 				hand.effectRoots.clear();  // the effects' 3D
 			}
 			gItemRoots.clear();
+			gNotedLights.clear();
 		}
 		gNothingToFollow.store(nothing, std::memory_order_relaxed);
 		gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);

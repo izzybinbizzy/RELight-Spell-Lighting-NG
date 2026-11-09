@@ -75,7 +75,11 @@ namespace Plugin
 		std::vector<RE::FormID> gDrawnNoted;       // gDrawnLock
 		std::vector<RE::FormID> gDrawn;            // the main thread's
 		std::atomic<bool>       gLookNow{ true };  // a game loaded or an actor's 3D came in: look at once
-		std::vector<RE::FormID> gFar;              // listed but out of the high process: nothing announces one coming near
+		// the game stores a body a moment after its load is noted, and nothing says so: such an actor is looked at again for about 5 s
+		constexpr int           gWaitLooksMost = 300;
+		int                     gWaitLooks = 0;  // the main thread's
+		bool                    gWaitingBody = false;
+		std::vector<RE::FormID> gFar;  // listed but out of the high process: nothing announces one coming near
 
 		// a far actor came near, or left: read only while one is listed
 		[[nodiscard]] bool FarChanged()
@@ -334,7 +338,11 @@ namespace Plugin
 		const bool looked = gLookNow.exchange(false, std::memory_order_relaxed);
 		if (looked) {
 			LookForDrawn(player);
+			if (!gWaitingBody) {
+				gWaitLooks = gWaitLooksMost;
+			}
 		}
+		gWaitingBody = false;
 		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
 			return;  // no weapon out and nothing lit
 		}
@@ -357,8 +365,12 @@ namespace Plugin
 		std::erase_if(gDrawn, [&](RE::FormID a_id) {
 			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
 			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
-			if (!actor || !actor->Is3DLoaded() || !WeaponOut(actor)) {
+			if (!actor || !WeaponOut(actor)) {
 				return true;
+			}
+			if (!actor->Is3DLoaded()) {
+				gWaitingBody = gWaitLooks > 0;
+				return !gWaitingBody;
 			}
 			if (process && process->InHighProcess()) {
 				WantsOf(actor, actor == player && hidden, want);
@@ -378,6 +390,10 @@ namespace Plugin
 			}
 			return !keep;
 		});
+		if (gWaitingBody) {
+			--gWaitLooks;
+			gLookNow.store(true, std::memory_order_relaxed);
+		}
 		std::erase_if(gFailed, [&](const Failed& f) { return std::ranges::none_of(want, [&f](const Want& w) { return f.Is(w); }); });
 		// the sliders and (🔁 his "re add the enb and cs and vanilla versions ... auto detect") the plain drawing
 		// off Community Shaders; the color is the light's own

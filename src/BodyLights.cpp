@@ -297,7 +297,11 @@ namespace Plugin
 			}
 			const auto ref = art->target.get();
 			auto*      actor = ref ? ref->As<RE::Actor>() : nullptr;
-			if (!actor || !actor->Is3DLoaded() || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
+			if (actor && !actor->Is3DLoaded()) {
+				waiting = true;  // the game stores its body a moment after its load is noted, and nothing says so
+				return;
+			}
+			if (!actor || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
 				return;
 			}
 			auto* node = NodeFor(art, actor);

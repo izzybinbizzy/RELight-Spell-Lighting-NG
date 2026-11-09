@@ -302,7 +302,7 @@ namespace Fade
 			ImGuiMCP::BeginDisabled(!s.enabled || !hooked);
 			Toggle("Hide the charge bar", s.hideChargeBar,
 				hooked ? "The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
-						 "vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows. Takes effect the next time the charge changes." :
+						 "vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows." :
 						 "Not available here: this is Skyrim VR, or another mod changed the charge bar first.",
 				save);
 			ImGuiMCP::EndDisabled();

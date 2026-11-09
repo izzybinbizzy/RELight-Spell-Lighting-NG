@@ -41,6 +41,7 @@ namespace Fade
 	[[nodiscard]] bool     DebugLogOn() noexcept;                              // lock-free
 	[[nodiscard]] bool     HideChargeBarOn() noexcept;                         // lock-free; the switch AND Fading on
 	[[nodiscard]] bool     ChargeBarHooked() noexcept;                         // false on VR, or when another plugin changed the calls first
+	void                   RefreshChargeBar() noexcept;                        // the switch flipped: the bar follows at once
 	void                   LoadSettings();
 	void                   SaveSettings();
 
@@ -247,6 +248,7 @@ namespace Fade
 		void                                     Reapply();                                                // under gLock, after ReapplyAll wrote the lights again: this frame's choices once more
 		void                                     ReapplyUnder(RE::NiAVObject* a_root);                     // under gLock, after Light Placer animated an effect's or a caster's lights: the same under one root
 		[[nodiscard]] bool                       Holding() noexcept;                                       // a choice is on a light now (any thread)
+		[[nodiscard]] bool                       AnyChoice() noexcept;                                     // a choice is saved, whoever's it may reach (any thread)
 		[[nodiscard]] std::optional<RE::NiColor> ChoiceColor(RE::FormID a_id);                             // main thread: an item's own color, black when off, none on Auto
 		bool                                     SetFromText(RE::FormID a_id, std::string_view a_choice);  // "auto", "off" or "r,g,b", as the menu would
 		void                                     Release();                                                // every light back as its owner left it (a load)

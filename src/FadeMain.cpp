@@ -17,6 +17,8 @@
 #include "Fade.h"
 #include "LightKit.h"
 
+#include <limits>
+
 namespace
 {
 	// The player's update, each reference effect's update (0x3B) and the cell's animation call are wrapped ONCE, by the
@@ -115,6 +117,33 @@ namespace Fade
 	bool ChargeBarHooked() noexcept
 	{
 		return gChargeBarHooked.load(std::memory_order_relaxed);
+	}
+
+	// the meter sends its numbers only when they differ from its last two (read in the 1.6.1170 exe): a number no charge equals makes its next
+	// update send them through our thunk, with the switch as it is now. The game's own force flag reaches only a hand with no charge. On the UI thread, where the meter runs
+	void RefreshChargeBar() noexcept
+	{
+		LightKit::Guarded("charge bar refresh", []() {
+			auto* tasks = ChargeBarHooked() ? SKSE::GetTaskInterface() : nullptr;
+			if (!tasks) {
+				return;
+			}
+			tasks->AddUITask([]() {
+				LightKit::Guarded("charge bar refresh task", []() {
+					auto*      ui = RE::UI::GetSingleton();
+					const auto hud = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
+					if (!hud) {
+						return;
+					}
+					for (auto* object : hud->GetRuntimeData().objects) {
+						if (auto* meter = object ? skyrim_cast<RE::HUDChargeMeter*>(object) : nullptr) {
+							meter->unk28 = std::numeric_limits<float>::quiet_NaN();
+							meter->unk2C = std::numeric_limits<float>::quiet_NaN();
+						}
+					}
+				});
+			});
+		});
 	}
 
 	namespace
