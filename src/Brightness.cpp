@@ -141,6 +141,21 @@ namespace Plugin
 			return ref ? ref->GetBaseObject() : nullptr;
 		}
 
+		// no reference anywhere above it and not on her own skeletons (either view, as Illuminated's LeftBehind): the body it hung on
+		// was taken away, a disabled caster's, and the light still lights the place he stood
+		[[nodiscard]] bool OnGoneBody(RE::NiLight* a_light)
+		{
+			if (ReferenceOf(a_light)) {
+				return false;
+			}
+			const RE::NiAVObject* top = a_light;
+			while (top->parent) {
+				top = top->parent;
+			}
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			return !player || (top != player->Get3D(false) && top != player->Get3D(true));
+		}
+
 		// a spray's or (2.3) a bolt's light, however it was made: it hangs on a flame, cone or beam projectile that wears one of
 		// our raised copies (or a spray record, where no copy could be made) - a beam's light is made where our hook does not
 		// see it, so this walk is what brings it to the sliders
@@ -314,7 +329,9 @@ namespace Plugin
 		const auto      note = [&](RE::BSLight* a_light) {
 			if (a_light && a_light->light && gSeen.contains(a_light->light.get())) {
 				const auto* base = BaseOf(a_light->light.get());
-				names.push_back(std::format("{} on {:08X}", a_light->light->name.c_str(), base ? base->GetFormID() : 0));
+				auto*       light = a_light->light.get();
+				names.push_back(std::format("{} on {:08X}{}{} fade {:.2f}", light->name.c_str(), base ? base->GetFormID() : 0, light->GetAppCulled() ? " culled" : "",
+					ReferenceOf(light) ? "" : " no reference", light->GetLightRuntimeData().fade));
 			}
 		};
 		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
@@ -425,9 +442,16 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
+			// a hand light of ours left on a body the game has taken away goes out with it: the caster's 3D slot wakes this walk when he goes
+			const bool gone = OnGoneBody(niLight);
+			if (gone && it->second.ours) {
+				niLight->SetAppCulled(true);
+				return;
+			}
 			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
-			// a light left on a body the game has taken away (a disabled caster's hand, no reference above it) keeps no walk awake
-			ours = ours || (again && ReferenceOf(niLight) != nullptr);
+			// nor does a hidden one keep the walk awake (a casting light the game keeps culled while its spell stays selected):
+			// a draw or an art's start wakes the walk when it shows
+			ours = ours || (again && !niLight->GetAppCulled() && !gone);
 		};
 		const auto& lists = ssn->GetRuntimeData();
 		for (const auto& bsLight : lists.activeLights) {
