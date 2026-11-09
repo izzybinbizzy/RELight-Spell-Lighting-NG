@@ -363,11 +363,13 @@ namespace Fade
 			}
 			if (ImGuiMCP::Button(T("Pulse"))) {
 				preview.pulse = true;
+				WakeHands();
 			}
 			Tip("The flash a spending hit makes, now.");
 			ImGuiMCP::SameLine();
 			if (ImGuiMCP::Button(T("Flare"))) {
 				preview.flare = true;
+				WakeHands();
 			}
 			Tip("The swell a recharge makes, now.");
 
@@ -711,12 +713,13 @@ namespace Fade
 		void __stdcall RenderHud()
 		{
 			using namespace ImGuiMCP;
-			static std::array<float, 2>  shown{ 0.0f, 0.0f };  // each side's fade, 0..1
-			static std::array<float, 2>  fill{ 1.0f, 1.0f };
-			static std::array<ImVec4, 2> tint{ ImVec4{}, ImVec4{} };
-			static std::array<bool, 2>   colored{ false, false };  // a color was read while this gem shows: a frame with no reading keeps it
-			const auto                   hud = Hud();
-			auto*                        io = GetIO();
+			static std::array<float, 2>      shown{ 0.0f, 0.0f };  // each side's fade, 0..1
+			static std::array<float, 2>      fill{ 1.0f, 1.0f };
+			static std::array<ImVec4, 2>     tint{ ImVec4{}, ImVec4{} };
+			static std::array<RE::FormID, 2> weapon{ 0, 0 };
+			static std::array<bool, 2>       colored{ false, false };  // a color was read while this gem shows: a frame with no reading keeps it
+			const auto                       hud = Hud();
+			auto*                            io = GetIO();
 			if (!io) {
 				return;
 			}
@@ -728,6 +731,10 @@ namespace Fade
 						continue;
 					}
 					here[i] = true;
+					if (h.weapon != weapon[i]) {
+						weapon[i] = h.weapon;
+						colored[i] = false;  // another weapon: the last one's color is not this one's
+					}
 					fill[i] = std::isfinite(h.fraction) ? std::clamp(h.fraction, 0.0f, 1.0f) : 0.0f;
 					if (h.bound) {
 						tint[i] = ImVec4{ 0.62f, 0.84f, 1.0f, 1.0f };

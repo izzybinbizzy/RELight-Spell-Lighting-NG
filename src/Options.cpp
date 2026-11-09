@@ -195,7 +195,7 @@ namespace Plugin
 				return actor->GetEquippedObject(left);
 			}();
 			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
-			return !weapon || (!weapon->IsStaff() && !weapon->IsBound());
+			return weapon && !weapon->IsStaff() && !weapon->IsBound();
 		}
 
 		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
@@ -291,14 +291,18 @@ namespace Plugin
 			       std::ranges::any_of(rt.activeShadowLights, [a_light](const auto& b) { return b && b->light.get() == a_light; });
 		}
 
-		void GiveBackDroppedWeaponLights(RE::ShadowSceneNode* a_ssn)
+		void GiveBackDroppedWeaponLights(RE::ShadowSceneNode* a_ssn, bool a_timed)
 		{
 			constexpr std::uint32_t kEvery = 30;
 			auto*                   player = RE::PlayerCharacter::GetSingleton();
 			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
 				return;
 			}
-			const LightKit::Cost::Pass pass{ 5, "option lights" };
+			// a full walk times itself: this check inside it is not counted twice
+			std::optional<LightKit::Cost::Pass> pass;
+			if (a_timed) {
+				pass.emplace(std::size_t{ 5 }, "option lights");
+			}
 			gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
 			static std::vector<RE::NiPointLight*> mine;  // main thread; its storage kept between checks
 			mine.clear();
@@ -318,9 +322,12 @@ namespace Plugin
 			}
 			static std::uint32_t logged = 0;
 			for (auto* light : mine) {
-				if (light->parent && !InScene(a_ssn, light) && LightKit::AddToScene(a_ssn, light, 1.0f, false) && logged < 5) {
-					++logged;
-					SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+				if (light->parent && !InScene(a_ssn, light) && LightKit::AddToScene(a_ssn, light, 1.0f, false)) {
+					gOptionsLook.store(true, std::memory_order_relaxed);  // the sheathed net and the switches see it too
+					if (logged < 5) {
+						++logged;
+						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+					}
 				}
 			}
 		}
@@ -394,7 +401,7 @@ namespace Plugin
 		}
 		if (!anyOff && !(gOptionsLook.load(std::memory_order_relaxed) && gOptionsLook.exchange(false))) {
 			if (auto* ssn = LightKit::Scene()) {
-				GiveBackDroppedWeaponLights(ssn);
+				GiveBackDroppedWeaponLights(ssn, true);
 			}
 			return;
 		}
@@ -428,7 +435,7 @@ namespace Plugin
 		if (!ssn) {
 			return;
 		}
-		GiveBackDroppedWeaponLights(ssn);
+		GiveBackDroppedWeaponLights(ssn, false);
 		gTwinSeen.clear();
 		const LightKit::Cost::Scope c{ 18, "option lights: scene walk" };
 		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {

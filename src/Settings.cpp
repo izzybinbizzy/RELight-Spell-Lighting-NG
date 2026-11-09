@@ -345,7 +345,7 @@ namespace Plugin
 	{
 		a_percent = std::clamp(a_percent, kMin, kMax);
 		if (gBrightness.exchange(a_percent) != a_percent) {
-			NoteSliderLook();
+			BumpSettings();
 			SKSE::log::info("brightness set to {}%", a_percent);
 		}
 	}
@@ -357,7 +357,7 @@ namespace Plugin
 	{
 		a_percent = std::clamp(a_percent, kReachMin, kReachMax);
 		if (gReach.exchange(a_percent) != a_percent) {
-			NoteSliderLook();
+			BumpSettings();
 			SKSE::log::info("reach set to {}%", a_percent);
 		}
 	}
@@ -395,7 +395,12 @@ namespace Plugin
 
 	bool PulseShapes() { return gPulse; }
 
-	void SetPulseShapes(bool a_on) { gPulse = a_on; }
+	void SetPulseShapes(bool a_on)
+	{
+		if (gPulse.exchange(a_on) != a_on) {
+			NoteSliderLook();
+		}
+	}
 
 	bool PulseRealistic() { return gPulse && DynamicLightingThisSession(); }
 
@@ -564,7 +569,12 @@ namespace Plugin
 	void FixDynamicLighting() { gDynamicSession = gDynamic.load(); }
 	void SetDynamicLighting(bool a_on) { gDynamic = a_on; }
 	bool PerformanceMode() { return gPerformance; }
-	void SetPerformanceMode(bool a_on) { gPerformance = a_on; }
+	void SetPerformanceMode(bool a_on)
+	{
+		if (gPerformance.exchange(a_on) != a_on) {
+			BumpSettings();
+		}
+	}
 
 	// his call: a pack the build split across the downloads is ONE switch - its files share a `file` line, so
 	// every option with that id turns together

@@ -535,6 +535,7 @@ namespace Plugin
 	{
 		// the animation event her graph sends as a block begins ("blockStart" is the input event's name and never reaches the graph)
 		constexpr std::string_view kBlockTag = "blockStartOut";
+		constexpr std::string_view kBlockEndTag = "blockStop";
 
 		[[nodiscard]] bool WaitsForBlock(const RE::ActiveEffect* a_effect)
 		{
@@ -588,7 +589,7 @@ namespace Plugin
 			{
 				LightKit::Guarded("block watch", [a_event]() {
 					const std::string_view tag = a_event ? a_event->tag.c_str() : "";
-					if (!LightKit::SameText(tag, kBlockTag)) {
+					if (!LightKit::SameText(tag, kBlockTag) && !LightKit::SameText(tag, kBlockEndTag)) {
 						return;
 					}
 					// the graph's events may come off the main thread: the effects are read on it

@@ -234,6 +234,7 @@ namespace Fade
 			SKSE::log::info("rules: {} rule(s) from {} file(s), {} problem(s)", gRuleCount, gFiles, gProblems.size());
 		}
 		RulesLoaded();  // after the lock: it reads the counts through RuleCount() / RuleProblems(), which take it again
+		WakeHands();    // a sleeping hands' pass reads the weapons under the new rules
 	}
 
 	Verdict Judge(const RE::TESObjectWEAP* a_weapon, const RE::EnchantmentItem* a_ench, const Settings& a_settings)

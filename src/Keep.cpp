@@ -110,6 +110,7 @@ namespace Plugin
 		if (gone.empty()) {
 			return;
 		}
+		NoteOptionsLook();  // the Configs page counts what is lit
 		GoneLights set;
 		set.reserve(gone.size());
 		for (const auto& light : gone) {

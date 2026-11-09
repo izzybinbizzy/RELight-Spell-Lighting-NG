@@ -311,7 +311,12 @@ namespace Plugin
 				noBody = true;  // the game stores its body a moment after its load is noted, and nothing says so
 				return;
 			}
-			if (!actor || (sneak <= 0.0f && actor == player) || LeftOutByBudget(actor)) {
+			if (!actor || (sneak <= 0.0f && actor == player)) {
+				return;
+			}
+			// no event says when a far actor comes near: looked at again while it waits, as a glow past the cap
+			if (LeftOutByBudget(actor)) {
+				gCapWaiting = true;
 				return;
 			}
 			auto* node = NodeFor(art, actor);
@@ -380,6 +385,7 @@ namespace Plugin
 				}
 				TakeOff(*farthest, scene);
 				gLive.erase(farthest);
+				gCapWaiting = true;  // the one it lost to may move away
 			}
 			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FecBodyFade(art);
 			const float       reach = body->radius * reachScale;
@@ -448,6 +454,9 @@ namespace Plugin
 		gLive.clear();
 		gFailed.clear();
 		gLookNow = true;
+		// the door may have left a body or a model still coming: their looks start over
+		gWaitUpdates = kWaitUpdates;
+		NoteBodyComing();
 	}
 
 	void DropBodyLights()

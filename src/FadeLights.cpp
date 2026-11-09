@@ -948,6 +948,7 @@ namespace Fade
 						side.spell = h.spell;
 						side.bound = h.reading.bound;
 						side.fraction = Glow::Clamp01(h.hudFraction);
+						side.weapon = h.reading.weapon ? h.reading.weapon->GetFormID() : 0;
 						const auto color = HandColor(key);
 						side.lit = color.has_value();
 						side.color = color.value_or(Glow::Rgb{});
