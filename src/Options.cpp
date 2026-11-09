@@ -136,7 +136,10 @@ namespace Plugin
 						}
 						if (IsEnchantLight(a_light)) {
 							gEnchant.emplace_back(a_light, opt);
-							gEnchantKind.emplace_back(a_light, kind);
+							// a body shader's own light hangs straight on the body: a weapon's light deeper under that actor is its weapon effect's
+							if (kind != Strength::kGlows || a_light->parent == root) {
+								gEnchantKind.emplace_back(a_light, kind);
+							}
 						}
 						return RE::BSVisit::BSVisitControl::kContinue;
 					});
