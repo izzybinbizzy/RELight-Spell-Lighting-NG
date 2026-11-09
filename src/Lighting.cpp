@@ -32,10 +32,6 @@ namespace Plugin
 {
 	namespace
 	{
-		constexpr const char* kIslShader = "Data/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli";
-		// a Community Shaders that builds inverse square lights into Light Limit Fix (Bottled Shaders 1.0.10 dropped the
-		// separate shader above): its attenuation reads each light's InverseSquare flag
-		constexpr const char* kLlfAttenuation = "Data/Shaders/LightLimitFix/Attenuation.hlsli";
 		constexpr const char* kEnbFiles[] = { "enbseries.ini", "enblocal.ini" };
 
 		std::atomic<Lighting> gFound{ Lighting::kVanilla };  // until ReadLighting (RELight's default before 2.2; Illuminated's is kShaders)
@@ -46,16 +42,6 @@ namespace Plugin
 		{
 			std::error_code ec;
 			return std::ranges::any_of(kEnbFiles, [&](const char* a_file) { return std::filesystem::exists(std::filesystem::current_path() / a_file, ec); });
-		}
-
-		[[nodiscard]] bool IslBuiltIntoLightLimitFix()
-		{
-			std::ifstream in(std::filesystem::current_path() / kLlfAttenuation, std::ios::binary);
-			if (!in) {
-				return false;
-			}
-			const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
-			return text.find("InverseSquare") != std::string::npos;
 		}
 
 		// Community Shaders, or a fork that keeps its DLL name (Bottled Shaders)
@@ -100,27 +86,28 @@ namespace Plugin
 
 	void ReadLighting()
 	{
-		std::error_code ec;
-		const bool      shaderFile = std::filesystem::exists(std::filesystem::current_path() / kIslShader, ec);
-		const bool      inLlf = IslBuiltIntoLightLimitFix();
+		const auto drawn = LightKit::Isl::DrawnByShaders();
+		const bool shaderFile = drawn.addOn;
+		const bool inLlf = drawn.inLightLimitFix;
 		gCsLoaded = CommunityShadersLoaded();
 		// the shader files count only beside the DLL: a hand install can leave them behind, and inverse-square words on a Vanilla /
-		// ENB light land in its ambient color (a short, tinted light) - the same reason leftover ENB files are refused below
-		gIslShader = gCsLoaded.load();
+		// ENB light land in its ambient color (a short, tinted light) - the same reason leftover ENB files are refused below. And
+		// the DLL alone is not inverse square: without either shader Light Limit Fix draws every light linear (its words still read)
+		gIslShader = gCsLoaded && drawn.Any();
 		gEnbFiles = EnbFilesLeft();
 		const auto running = EnbRunning();
 		gEnbRunning = running.value_or(gEnbFiles.load());
 		if (!running) {
 			SKSE::log::warn("lighting: the loaded modules could not be listed - ENB judged by its settings files");
 		}
-		gFound = gIslShader ? Lighting::kShaders : gEnbRunning ? Lighting::kEnb :
-		                                                         Lighting::kVanilla;
+		gFound = gCsLoaded ? Lighting::kShaders : gEnbRunning ? Lighting::kEnb :
+		                                                        Lighting::kVanilla;
 		SKSE::log::info(
 			"lighting: {} (detected - CommunityShaders.dll {}, inverse square shader {}, in Light Limit Fix {}, ENB running {}, ENB "
 			"settings in the game folder {}{}); lights drawn {}",
 			LightingName(gFound), gCsLoaded ? "loaded" : "not loaded", shaderFile ? "installed" : "not installed", inLlf ? "yes" : "no",
 			gEnbRunning ? "yes" : "no", gEnbFiles ? "yes" : "no",
-			(gEnbFiles && !gEnbRunning && !gIslShader) || ((shaderFile || inLlf) && !gCsLoaded) ? " - left over, not used" : "",
+			(gEnbFiles && !gEnbRunning && !gCsLoaded) || ((shaderFile || inLlf) && !gCsLoaded) ? " - left over, not used" : "",
 			InverseSquare() ? "inverse square" : "plain");
 	}
 
@@ -144,6 +131,11 @@ namespace Plugin
 	bool InverseSquare()
 	{
 		return gFound.load() == Lighting::kShaders && gIslShader.load();
+	}
+
+	bool LightLimitFix()
+	{
+		return gCsLoaded.load();
 	}
 
 	float VanillaStrength()

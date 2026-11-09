@@ -1024,13 +1024,28 @@ namespace
 		}
 	};
 
+	// only a reference RE::Light lights for us (its base one of our options) or a weapon (its enchantment light) brings or ends a light of
+	// ours: the scenery streaming in and out at rest must not wake the sliders' walk
+	[[nodiscard]] bool MayCarryOurLight(RE::TESObjectREFR* a_ref) noexcept
+	{
+		// a game hook: nothing may leave it, and a lookup that fails wakes the walk as before
+		try {
+			const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+			return base && (base->IsWeapon() || Plugin::OptionOf(base) != Plugin::kNone);
+		} catch (...) {
+			return true;
+		}
+	}
+
 	// a plain reference's 3D in, where RE::Light hangs its light: the game's load event names no reference placed by a script. Flags only, any thread
 	struct RefLoad3D
 	{
 		static RE::NiAVObject* thunk(RE::TESObjectREFR* a_this, bool a_backgroundLoading)
 		{
 			auto* root = func(a_this, a_backgroundLoading);
-			Plugin::NoteSweep(Plugin::SweepWhy::kRefLoad);
+			if (MayCarryOurLight(a_this)) {
+				Plugin::NoteSweep(Plugin::SweepWhy::kRefLoad);
+			}
 			return root;
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -1046,7 +1061,7 @@ namespace
 		static void thunk(RE::TESObjectREFR* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
 		{
 			func(a_this, a_object, a_queue3DTasks);
-			if (!a_object) {
+			if (!a_object && MayCarryOurLight(a_this)) {
 				Plugin::NoteSweep(Plugin::SweepWhy::kRefDrop);
 			}
 		}

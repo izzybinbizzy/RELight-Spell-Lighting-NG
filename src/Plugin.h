@@ -129,6 +129,7 @@ namespace Plugin
 	// the lights are written in Community Shaders' inverse square words (a flag and the cutoff in two words of a light - LightKit.h
 	// has how); off it they are drawn plain (LightKit::PlainOf) and those words are ambient color
 	[[nodiscard]] bool        InverseSquare();
+	[[nodiscard]] bool        LightLimitFix();   // CommunityShaders.dll is loaded: a light of ours carries Light Limit Fix's words, inverse square or not
 	[[nodiscard]] std::string LightingReport();  // the same as JSON, for DevBench
 	// his 384 (Illuminated's look): on Vanilla every light of ours a third brighter under the slider and its color stronger
 	[[nodiscard]] float       VanillaStrength();

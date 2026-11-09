@@ -41,6 +41,7 @@ namespace Plugin
 			float                     rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
 			bool                      flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
 			bool                      ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
+			bool                      outByUs{ false };    // culled here because its body went: it comes back if its body does
 			bool                      rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
 			float                     written{ -1.0f };    // the fade we last wrote
 			float                     baseRadius{ 0.0f };  // the reach RE::Light last gave it
@@ -139,6 +140,23 @@ namespace Plugin
 		{
 			const auto* ref = ReferenceOf(a_light);
 			return ref ? ref->GetBaseObject() : nullptr;
+		}
+
+		// no reference anywhere above it and not on her own skeletons (either view, as Illuminated's LeftBehind): the body it hung on
+		// was taken away, a disabled caster's, and the light still lights the place he stood
+		[[nodiscard]] bool OnGoneBody(RE::NiLight* a_light)
+		{
+			const RE::NiAVObject* top = a_light;
+			for (; top->parent; top = top->parent) {
+				if (top->GetUserData()) {
+					return false;
+				}
+			}
+			if (top->GetUserData()) {
+				return false;
+			}
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			return !player || (top != player->Get3D(false) && top != player->Get3D(true));
 		}
 
 		// a spray's or (2.3) a bolt's light, however it was made: it hangs on a flame, cone or beam projectile that wears one of
@@ -314,7 +332,9 @@ namespace Plugin
 		const auto      note = [&](RE::BSLight* a_light) {
 			if (a_light && a_light->light && gSeen.contains(a_light->light.get())) {
 				const auto* base = BaseOf(a_light->light.get());
-				names.push_back(std::format("{} on {:08X}", a_light->light->name.c_str(), base ? base->GetFormID() : 0));
+				auto*       light = a_light->light.get();
+				names.push_back(std::format("{} on {:08X}{}{} fade {:.2f}", light->name.c_str(), base ? base->GetFormID() : 0, light->GetAppCulled() ? " culled" : "",
+					ReferenceOf(light) ? "" : " no reference", light->GetLightRuntimeData().fade));
 			}
 		};
 		for (const auto& bsLight : ssn->GetRuntimeData().activeLights) {
@@ -425,9 +445,28 @@ namespace Plugin
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
 			}
+			// a light of ours left on a body the game has taken away goes out with it: the caster's 3D slot wakes this walk when he goes
+			if (OnGoneBody(niLight)) {
+				if (!niLight->GetAppCulled()) {
+					niLight->SetAppCulled(true);
+					it->second.outByUs = true;
+				}
+				return;
+			}
+			// its body back (a 3D reset): a light we put out goes to whoever decides it now - an option's light to its switch (held out while off,
+			// given back when on), a hand light shown only with hand lights on (they show it again when turned on); the game re-culls a casting light
+			if (std::exchange(it->second.outByUs, false)) {
+				const auto option = IsEnchantLight(niLight) ? EnchantOptionOf(niLight) : OptionOf(BaseOf(niLight));
+				if (option != kNone) {
+					AdoptOptionLights(option, { RE::NiPointer<RE::NiLight>(niLight) });
+				} else if (!AllLightsOff() && !WantedDark(niLight) && (!it->second.ours || HandLightsOn())) {
+					niLight->SetAppCulled(false);
+				}
+			}
 			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
-			// a light left on a body the game has taken away (a disabled caster's hand, no reference above it) keeps no walk awake
-			ours = ours || (again && ReferenceOf(niLight) != nullptr);
+			// a hidden light keeps no walk awake (a casting light the game keeps culled while its spell stays selected):
+			// a draw or an art's start wakes the walk when it shows
+			ours = ours || (again && !niLight->GetAppCulled());
 		};
 		const auto& lists = ssn->GetRuntimeData();
 		for (const auto& bsLight : lists.activeLights) {
