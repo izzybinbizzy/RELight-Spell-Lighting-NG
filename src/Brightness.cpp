@@ -459,7 +459,7 @@ namespace Plugin
 				const auto option = IsEnchantLight(niLight) ? EnchantOptionOf(niLight) : OptionOf(BaseOf(niLight));
 				if (option != kNone) {
 					AdoptOptionLights(option, { RE::NiPointer<RE::NiLight>(niLight) });
-				} else if (!AllLightsOff() && (!it->second.ours || HandLightsOn())) {
+				} else if (!AllLightsOff() && !WantedDark(niLight) && (!it->second.ours || HandLightsOn())) {
 					niLight->SetAppCulled(false);
 				}
 			}
