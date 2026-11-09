@@ -439,7 +439,7 @@ namespace Plugin
 		}
 	}
 
-	void DropBodyLights()
+	void RenewBodyLights()
 	{
 		auto* scene = LightKit::Scene();
 		for (auto& v : gLive) {
@@ -448,6 +448,11 @@ namespace Plugin
 		gLive.clear();
 		gFailed.clear();
 		gLookNow = true;
+	}
+
+	void DropBodyLights()
+	{
+		RenewBodyLights();
 		ForgetBodyArt();  // a save may bring other casting art (RefindHandLights)
 	}
 

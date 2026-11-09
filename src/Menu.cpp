@@ -206,7 +206,7 @@ namespace Plugin
 
 		// the switches of one page: every option with a switch that belongs there, once per id (a pack split across the downloads is
 		// several options with one id: one row, one switch), under the headings above; Praedy's staves in the data's own order
-		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen)
+		void DrawSwitches(Page a_page, std::unordered_set<std::string>& a_seen, const char* a_open = "")
 		{
 			auto& opts = Options();
 			struct Row
@@ -244,7 +244,7 @@ namespace Plugin
 					c.second += m.heldOut;
 				}
 			}
-			std::string shown;
+			std::string shown{ a_open };  // a heading the page already drew
 			bool        wardShown = false;
 			for (const auto& row : rows) {
 				auto& o = opts[row.index];
@@ -820,9 +820,16 @@ namespace Plugin
 			if (!WeaponLightsOn()) {
 				MenuStyle::Status(false, T("Weapon lights is off on the Lights page, so weapon lights here are out."));
 			}
+			GlowHeading("Weapon Enchantments");
+			bool enchanted = EnchantedWeaponsOn();
+			if (ImGuiMCP::Checkbox(T("Enchanted weapons"), &enchanted)) {
+				SetEnchantedWeaponsOn(enchanted);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("The light of enchanted weapons. Off puts only these out: bound weapons, staves and artifacts stay lit."));
 			// one row per id across both draws
 			std::unordered_set<std::string> seen;
-			DrawSwitches(Page::kEnchantments, seen);
+			DrawSwitches(Page::kEnchantments, seen, T("Weapon Enchantments"));
 			DrawSwitches(Page::kConfigs, seen);
 		}
 

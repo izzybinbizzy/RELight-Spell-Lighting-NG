@@ -155,6 +155,7 @@ namespace
 			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
 				ForgetOldGame();
 			}
+			Plugin::WatchBlocking();              // her animation graph is new after a load: the shield's ward watch goes on it again
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
 			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers

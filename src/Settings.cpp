@@ -16,6 +16,7 @@
 //   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
 //   WeaponLights=1              every weapon light, the enchantment lights included (Options.cpp)
+//   EnchantedWeapons=1          enchanted weapons' lights; bound weapons, staves and artifacts stay lit (Options.cpp)
 //   WardColor=0                 0 vanilla blue, 1 white - the ward's art and light (Wards.cpp); an older file's WardColour is read too
 //   HandLightsFor=0             0 everyone, 1 everyone nearby, 2 player and followers, 3 player only (Hooks.cpp)
 //   AutoLights=1                spells from mods with no patch get a hand light too (HandLights.cpp)
@@ -60,6 +61,7 @@ namespace Plugin
 		std::atomic<bool>               gFecBurningFades{ true };
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
+		std::atomic<bool>               gEnchantedWeapons{ true };
 		std::atomic<int>                gWard{ 0 };
 		std::atomic<int>                gHandsFor{ 0 };
 		std::atomic<bool>               gAuto{ true };
@@ -118,6 +120,7 @@ namespace Plugin
 			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
+			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
@@ -454,6 +457,16 @@ namespace Plugin
 		if (gWeapons.exchange(a_on) != a_on) {
 			BumpSettings();
 			SKSE::log::info("weapon lights turned {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool EnchantedWeaponsOn() { return gEnchantedWeapons; }
+
+	void SetEnchantedWeaponsOn(bool a_on)
+	{
+		if (gEnchantedWeapons.exchange(a_on) != a_on) {
+			BumpSettings();
+			SKSE::log::info("enchanted weapons' lights turned {}", a_on ? "on" : "off");
 		}
 	}
 

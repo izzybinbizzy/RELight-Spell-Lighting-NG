@@ -37,7 +37,10 @@ namespace Plugin
 	{
 		gSweepNotes[static_cast<std::size_t>(a_why)].fetch_add(1, std::memory_order_relaxed);
 		gSweepFrames.store(kSweepFrames, std::memory_order_relaxed);
-		NoteSliderLook();
+		// what can only end a light brings none for the walk to find
+		if (a_why != SweepWhy::kRefDrop && a_why != SweepWhy::kDeath && a_why != SweepWhy::kArtDetach) {
+			NoteSliderLook();
+		}
 	}
 
 	bool SweepWindowOpen() noexcept { return gSweepFrames.load(std::memory_order_relaxed) > 0; }

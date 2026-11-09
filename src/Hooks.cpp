@@ -688,8 +688,8 @@ namespace
 		if (!on || !player || !strings || (gMagicLights.empty() && gPromotedBetween.empty())) {
 			return;
 		}
-		if (gPromotedBetween.empty() && !player->AsActorState()->IsWeaponDrawn()) {
-			return;  // her hands down: nothing to place and nothing to put back
+		if (gPromotedBetween.empty() && player->AsActorState()->GetWeaponState() == RE::WEAPON_STATE::kSheathed) {
+			return;  // her hands down: nothing to place and nothing to put back (a draw's first frames already light her hands)
 		}
 		const LightKit::Cost::Pass            pass{ 10, "her shadow, promoted hands" };
 		static std::vector<RE::NiPointLight*> between;

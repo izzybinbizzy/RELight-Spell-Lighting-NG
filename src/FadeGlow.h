@@ -155,6 +155,15 @@ namespace Glow
 		bool  flared{ false };     // this frame started a flare
 	};
 
+	// a hand at full whose numbers cannot move until the game says so: the fading pass may sleep on it. A staff out spends its charge with the cast, a
+	// bound weapon's time runs on
+	[[nodiscard]] inline bool RestsAtFull(bool a_spell, bool a_bound, bool a_staffOut, float a_fraction, const Output& a_out) noexcept
+	{
+		constexpr float kSlack = 0.002f;
+		return (a_spell || (!a_bound && !a_staffOut)) && a_fraction >= 0.999f && std::fabs(a_out.brightness - 1.0f) < kSlack &&
+		       std::fabs(a_out.reach - 1.0f) < kSlack && a_out.cool <= 0.0f;
+	}
+
 	// charge that fell by more than this counts as spent on a hit; rose by more, as a recharge
 	inline constexpr float kSpendStep = 0.0005f;
 	inline constexpr float kRefillStep = 0.01f;

@@ -233,6 +233,8 @@ namespace Plugin
 	void                      SetHandLightsOn(bool a_on);
 	[[nodiscard]] bool        WeaponLightsOn();
 	void                      SetWeaponLightsOn(bool a_on);
+	[[nodiscard]] bool        EnchantedWeaponsOn();
+	void                      SetEnchantedWeaponsOn(bool a_on);
 	[[nodiscard]] int         WardColor();  // 0 vanilla blue, 1 white (Wards.cpp)
 	void                      SetWardColor(int a_color);
 	void                      SetOptionOn(std::size_t a_index, bool a_on);
@@ -381,6 +383,7 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ BodyLights.cpp: the body glow while casting
 	void                        UpdateBodyLights();    // every frame, after UpdateHeldLights
+	void                        RenewBodyLights();     // a loading screen ended: every body light let go, made again
 	void                        DropBodyLights();      // a game loads, or a new one starts: the art they hang on is the old game's
 	void                        ForgetBodyArt();       // casting art changed (Dynamic Wards' ranked hand art): its list is learned again
 	void                        NoteArtStarted();      // an art started somewhere (any thread): the body lights look for new art
@@ -392,6 +395,7 @@ namespace Plugin
 	[[nodiscard]] std::size_t   BodyLightsMade();
 
 	// ------------------------------------------------------------------ Wards.cpp: one ward, one dome, and its color
+	void                                     WatchBlocking();                // Wards.cpp: a shield's ward comes up at once
 	void                                     ApplyWards(const char* a_why);  // one dome per ward and the color pick; nothing while Dynamic Wards is loaded
 	[[nodiscard]] bool                       WardsSteppedDown();             // Dynamic Wards is loaded: the wards are its
 	[[nodiscard]] bool                       StrangeWardsHandShows();        // Strange Wards installed and 360 Ward not: the game's ward hand shows

@@ -471,13 +471,13 @@ namespace Fade
 			});
 		}
 
-		// a hand whose numbers cannot move, at full: a spell until the game writes magicka, a weapon while it is sheathed, until the draw that
-		// wakes the pass. Not a drawn weapon: a hit takes its charge with no write the slots below hear. Not a bound one: its time runs sheathed too
+		// a hand whose numbers cannot move, at full: a spell until the game writes magicka, a weapon until its holder's hit (TESHitEvent; a real hit
+		// takes the charge with no write the slots below hear) or a write of its charge. Not a staff while out: its charge goes with the cast, with no
+		// hit. Not a bound weapon: its time runs sheathed too
 		[[nodiscard]] bool AtRest(const HandTrack& a_hand) noexcept
 		{
-			constexpr float kSlack = 0.002f;
-			return (a_hand.spell || (a_hand.sheathed && !a_hand.reading.bound)) && a_hand.fraction >= 0.999f && std::fabs(a_hand.out.brightness - 1.0f) < kSlack && std::fabs(a_hand.out.reach - 1.0f) < kSlack &&
-			       a_hand.out.cool <= 0.0f;
+			const auto* weapon = a_hand.reading.weapon;
+			return Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
 		}
 
 		// what can put something of ours in a hand: an equip, a draw, sheathe or cast (SKSE's action events), an actor loading, her cell
@@ -487,7 +487,7 @@ namespace Fade
 		std::atomic<bool> gNothingToFollow{ false };  // asleep with nothing held: a value write has no hand to wake it for
 		std::uint32_t     gRestPasses = 0;            // passes in a row with every hand at rest (main thread)
 
-		// an actor the pass follows (Whose): only its equip, action or 3D can change a hand the pass reads. A Lights by Item choice reaches any
+		// an actor the pass follows (Whose): only its equip, action, hit or 3D can change a hand the pass reads. A Lights by Item choice reaches any
 		// actor's light, whoever Whose names, and only a wake takes it there. Any thread
 		[[nodiscard]] bool Followed(const RE::TESObjectREFR* a_ref) noexcept
 		{
@@ -505,12 +505,21 @@ namespace Fade
 		class HandWatch final :
 			public RE::BSTEventSink<RE::TESEquipEvent>,
 			public RE::BSTEventSink<RE::BGSActorCellEvent>,
-			public RE::BSTEventSink<SKSE::ActionEvent>
+			public RE::BSTEventSink<SKSE::ActionEvent>,
+			public RE::BSTEventSink<RE::TESHitEvent>
 		{
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
 				if (a_event && Followed(a_event->actor.get())) {
+					WakeHands();
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*) override
+			{
+				if (a_event && Followed(a_event->cause.get())) {
 					WakeHands();
 				}
 				return RE::BSEventNotifyControl::kContinue;
@@ -531,14 +540,15 @@ namespace Fade
 			}
 		};
 
-		// a spell hand at rest has nothing to follow until its magicka is written, and the game writes a value through
+		// a spell hand at rest has nothing to follow until its magicka is written (a weapon's: its item charge), and the game writes a value through
 		// these four slots of its ActorValueOwner (Actor Value Generator and Valhalla Combat hook the same). Any thread: one flag
 		template <class Owner>
 		struct ValueWrites
 		{
 			static void Noted(RE::ActorValueOwner* a_this, RE::ActorValue a_value)
 			{
-				if (a_value != RE::ActorValue::kMagicka || gNothingToFollow.load(std::memory_order_relaxed)) {
+				if ((a_value != RE::ActorValue::kMagicka && a_value != RE::ActorValue::kRightItemCharge && a_value != RE::ActorValue::kLeftItemCharge) ||
+					gNothingToFollow.load(std::memory_order_relaxed)) {
 					return;
 				}
 				if constexpr (!std::is_same_v<Owner, RE::PlayerCharacter>) {
@@ -996,6 +1006,7 @@ namespace Fade
 		static HandWatch watch;
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESEquipEvent>(&watch);
+			events->AddEventSink<RE::TESHitEvent>(&watch);
 		}
 		if (auto* actions = SKSE::GetActionEventSource()) {
 			actions->AddEventSink(&watch);

@@ -25,6 +25,7 @@
 // the same address (its name or parent changed) - the walk up to the reference and the data lookup are not done for every
 // light every frame.
 
+#include "DataText.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -172,6 +173,29 @@ namespace Plugin
 		// discovery reads at load (CodeRabbit, #24: a game started with the switch on found no automatic hand light)
 		bool Off(std::size_t a_option) { return a_option != kNone && (AllLightsOff() || !OptionLit(a_option)); }
 
+		// the Enchanted weapons switch (Configs): an enchantment light of ours goes out, unless its option is the artifacts' or a bound weapons', or
+		// the weapon in that hand is a staff or a bound weapon. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
+		bool EnchantedOut(RE::NiLight* a_light, std::size_t a_option)
+		{
+			const auto& opts = Options();
+			if (EnchantedWeaponsOn() || a_option >= opts.size() || !DataText::EnchantedOption(opts[a_option].name)) {
+				return false;
+			}
+			auto*       ref = ReferenceOf(a_light);
+			auto*       actor = ref ? ref->As<RE::Actor>() : nullptr;
+			const auto* equipped = [&]() -> RE::TESForm* {
+				bool left = false;
+				for (const RE::NiAVObject* up = a_light; up && !left; up = up->parent) {
+					left = std::string_view(up->name.c_str()) == "SHIELD";
+				}
+				return actor ? actor->GetEquippedObject(left) : nullptr;
+			}();
+			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
+			return !weapon || (!weapon->IsStaff() && !weapon->IsBound());
+		}
+
+		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
+
 		void HoldOut(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
 		{
 			if (gHeldSet.insert(a_light).second) {
@@ -211,7 +235,7 @@ namespace Plugin
 					return false;
 				}
 				// a switched-off option keeps it out: it moves to that option's list, which gives it back with the switch
-				if (const auto opt = OptionOfLight(a_light); Off(opt)) {
+				if (const auto opt = OptionOfLight(a_light); OffFor(a_light, opt, true)) {
 					HoldOut(a_light, opt, true);
 				} else if (!HeldOutForOption(a_light)) {
 					a_light->SetAppCulled(false);
@@ -358,7 +382,7 @@ namespace Plugin
 		static bool          anyOff = false;
 		if (const auto gen = SettingsGeneration(); gen != lastGen) {
 			lastGen = gen;
-			anyOff = AllLightsOff();
+			anyOff = AllLightsOff() || !EnchantedWeaponsOn();
 			for (std::size_t i = 0; i < opts.size() && !anyOff; ++i) {
 				anyOff = !OptionLit(i);
 			}
@@ -381,7 +405,7 @@ namespace Plugin
 		}
 		// give back whatever belongs to a switch that is on again (what has unloaded is already forgotten: Keep.cpp)
 		std::erase_if(gHeldOut, [](Held& h) {
-			if (!Off(h.option)) {
+			if (!OffFor(h.light, h.option, h.enchant)) {
 				if (MayGiveBack(h)) {
 					h.light->SetAppCulled(false);
 				} else if (std::ranges::find(gSheathedOut, h.light) == gSheathedOut.end()) {
@@ -414,7 +438,7 @@ namespace Plugin
 			if (opt == kNone) {
 				continue;
 			}
-			if (Off(opt)) {
+			if (OffFor(niLight, opt, IsEnchantLight(niLight))) {
 				// RE::Light unculls its enchantment light on each new equip, so one already held can come round again
 				if (!niLight->GetAppCulled()) {
 					niLight->SetAppCulled(true);
