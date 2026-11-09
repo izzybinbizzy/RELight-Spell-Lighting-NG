@@ -1024,6 +1024,22 @@ namespace
 		}
 	};
 
+	// a shader effect taken off the game's list by this call is never marked finished (a temporary-effects clear): the body lights look again. Flags only
+	struct ArtDetach
+	{
+		static void thunk(RE::ShaderReferenceEffect* a_this)
+		{
+			Plugin::NoteSweep();
+			Plugin::NoteArtStarted();
+			func(a_this);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+		static void                                    Install()
+		{
+			func = REL::Relocation<std::uintptr_t>(RE::ShaderReferenceEffect::VTABLE[0]).write_vfunc(0x27, thunk);  // BSTempEffect::Detach
+		}
+	};
+
 	// a plain reference's 3D in, where RE::Light hangs its light: the game's load event names no reference placed by a script. Flags only, any thread
 	struct RefLoad3D
 	{
@@ -1184,6 +1200,7 @@ namespace
 		EffectUpdate<RE::ModelReferenceEffect>::Install();
 		ArtInit<RE::ShaderReferenceEffect>::Install();
 		ArtInit<RE::ModelReferenceEffect>::Install();
+		ArtDetach::Install();
 		CellAnimations::Install();
 		SKSE::log::info(
 			"projectile, explosion and hazard loads, the player update, effect updates and cell animations hooked after every "

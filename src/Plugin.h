@@ -137,7 +137,8 @@ namespace Plugin
 
 	// GroundLights.cpp: a twin of each hand's casting light that lights the ground, off Community Shaders (Illuminated's)
 	void                      TickGroundLights();
-	void                      DropGroundLights();  // a game loads, or a new one starts: the twins and the hands they follow are the old game's
+	void                      DropGroundLights();   // a game loads, or a new one starts: the twins and the hands they follow are the old game's
+	void                      RenewGroundLights();  // a loading screen ended: every twin let go, the next visit hangs a new one
 	[[nodiscard]] std::size_t GroundLightCount();
 	[[nodiscard]] std::size_t GroundLightsMade();
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too

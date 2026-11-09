@@ -355,6 +355,9 @@ namespace DataText
 
 	[[nodiscard]] inline Result ReadText(std::string_view a_text)
 	{
+		if (a_text.starts_with("\xEF\xBB\xBF")) {
+			a_text.remove_prefix(3);
+		}
 		Result      r;
 		std::size_t n = 0;
 		for (std::size_t start = 0; start <= a_text.size();) {

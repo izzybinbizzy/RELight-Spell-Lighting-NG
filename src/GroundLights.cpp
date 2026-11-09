@@ -377,6 +377,22 @@ namespace Plugin
 		gLive.store(gTwins.size(), std::memory_order_relaxed);
 	}
 
+	void RenewGroundLights()
+	{
+		auto* scene = LightKit::Scene();
+		for (auto& [key, twin] : gTwins) {
+			// the hand's light stays hidden: the next visit hangs a new twin for it, and with the hands down it is left as the game keeps it
+			if (twin.source && !ActorGone(key)) {
+				gLeftHidden.insert_or_assign(key, twin.source);
+			}
+			twin.handsDown = true;
+			Drop(twin, scene);
+		}
+		gTwins.clear();
+		gRefused.clear();
+		gLive.store(0, std::memory_order_relaxed);
+	}
+
 	void DropGroundLights()
 	{
 		for (auto& entry : gTwins) {

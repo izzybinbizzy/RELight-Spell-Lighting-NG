@@ -486,6 +486,9 @@ namespace Plugin
 				files.push_back(it->path());
 			}
 		}
+		if (ec) {
+			SKSE::log::warn("data: the folder could not be read to its end ({}); the files after that point were not read", ec.message());
+		}
 		std::ranges::sort(files);
 		const fs::path  oldDynamicWards{ kOldDynamicWards };
 		std::error_code oldEc;  // its own: the folder scan's ec above stays that scan's

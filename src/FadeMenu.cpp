@@ -298,10 +298,12 @@ namespace Fade
 			GlowHeading(Icon::kGauge, "Charge bar");
 			// his answer 2026-10-13: with Fading off nothing else shows a weapon's charge, so the bar comes back and this
 			// switch greys out (FadeSettings.cpp hides the bar only while both are on)
-			ImGuiMCP::BeginDisabled(!s.enabled);
+			const bool hooked = ChargeBarHooked();
+			ImGuiMCP::BeginDisabled(!s.enabled || !hooked);
 			Toggle("Hide the charge bar", s.hideChargeBar,
-				"The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
-				"vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows.",
+				hooked ? "The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
+						 "vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows. Takes effect the next time the charge changes." :
+						 "Not available here: this is Skyrim VR, or another mod changed the charge bar first.",
 				save);
 			ImGuiMCP::EndDisabled();
 

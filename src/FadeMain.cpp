@@ -25,6 +25,7 @@ namespace
 
 	// ------------------------------------------------------------------ after the game animates an effect shader
 	// ShaderReferenceEffect::Update (0x28) writes this frame's fill and rim alpha; the shader dimming runs after it.
+	// the game's Update calls UpdatePosition (0x3B) before it writes the alpha, so this cannot move there
 	struct ShaderUpdate
 	{
 		static bool thunk(RE::ShaderReferenceEffect* a_this, float a_delta)
@@ -88,6 +89,8 @@ namespace
 		}
 	};
 
+	std::atomic<bool> gChargeBarHooked{ false };
+
 	void InstallChargeBar()
 	{
 		if (REL::Module::IsVR()) {
@@ -102,12 +105,18 @@ namespace
 		}
 		ChargeBar<0>::Install(kFirst);
 		ChargeBar<1>::Install(kSecond);
+		gChargeBarHooked.store(true, std::memory_order_relaxed);
 		SKSE::log::info("the charge bar's two updates hooked");
 	}
 }
 
 namespace Fade
 {
+	bool ChargeBarHooked() noexcept
+	{
+		return gChargeBarHooked.load(std::memory_order_relaxed);
+	}
+
 	namespace
 	{
 		// Reticle Arcs is loaded: the module's bars are offered to it (FadeArcs.cpp) - since his order of 2026-10-19 the only

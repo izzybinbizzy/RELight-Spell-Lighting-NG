@@ -187,6 +187,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 	// the spell-light hooks are installed at SKSE's post-load (OnMessage), after every plugin has loaded
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
-	SKSE::log::info("RELight - Spell Lighting NG plugin loaded; waiting for the game's data");
+	SKSE::log::info("RELight - Spell Lighting NG {} loaded on Skyrim {} ({}); waiting for the game's data", SKSE::GetPluginVersion().string("."), REL::Module::get().version().string("."),
+		REL::Module::IsVR() ? "VR build" : "SE / AE build");
 	return true;
 }

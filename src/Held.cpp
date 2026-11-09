@@ -331,7 +331,8 @@ namespace Plugin
 			}
 			gDrawnNoted.clear();
 		}
-		if (gLookNow.exchange(false, std::memory_order_relaxed)) {
+		const bool looked = gLookNow.exchange(false, std::memory_order_relaxed);
+		if (looked) {
 			LookForDrawn(player);
 		}
 		if (gDrawn.empty() && gLive.empty() && gFailed.empty()) {
@@ -345,7 +346,7 @@ namespace Plugin
 		const bool           changed = gen != genWas || sneak != sneakWas;
 		genWas = gen;
 		sneakWas = sneak;
-		if (!changed && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
+		if (!changed && !looked && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
 			return;
 		}
 		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one

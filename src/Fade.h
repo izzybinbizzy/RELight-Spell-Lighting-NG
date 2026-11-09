@@ -40,6 +40,7 @@ namespace Fade
 	bool                   ApplySetting(std::string_view a_key, int a_value);  // one Fading.ini line; false if unknown
 	[[nodiscard]] bool     DebugLogOn() noexcept;                              // lock-free
 	[[nodiscard]] bool     HideChargeBarOn() noexcept;                         // lock-free; the switch AND Fading on
+	[[nodiscard]] bool     ChargeBarHooked() noexcept;                         // false on VR, or when another plugin changed the calls first
 	void                   LoadSettings();
 	void                   SaveSettings();
 

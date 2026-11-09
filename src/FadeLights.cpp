@@ -722,8 +722,8 @@ namespace Fade
 			SKSE::log::info("  {} light(s) on {} in all", n, a_actor->GetName());
 		}
 
-		// every light, shader and art mesh back as we found it, and every hand forgotten (switched off, a load)
-		void RestoreAll()
+		// every light, shader and art mesh back as we found it, and let go
+		void PutBack()
 		{
 			for (auto& [light, seen] : gLights) {
 				RestoreLight(seen);
@@ -737,6 +737,12 @@ namespace Fade
 			gLights.clear();
 			gShaders.clear();
 			gArt.clear();
+		}
+
+		// and every hand forgotten (switched off, a load)
+		void RestoreAll()
+		{
+			PutBack();
 			gHands.clear();
 			gActiveList.clear();
 			gActiveHands = 0;
@@ -1194,8 +1200,17 @@ namespace Fade
 			gActiveHands = 0;
 			gActiveSpellHands = 0;
 			gActors.clear();
+			// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
+			// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
+			PutBack();
 		}
 		const bool nothing = NothingHeld();
+		if ((rested || nothing) && !Items::Holding()) {
+			for (auto& [key, hand] : gHands) {
+				hand.effectRoots.clear();  // the effects' 3D
+			}
+			gItemRoots.clear();
+		}
 		gNothingToFollow.store(nothing, std::memory_order_relaxed);
 		gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
 	}

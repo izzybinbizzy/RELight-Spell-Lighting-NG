@@ -13,6 +13,29 @@ namespace Plugin
 {
 	namespace
 	{
+		// a loading screen takes every light out of the scene's lists and a light of ours is not put back: kept, it lights nothing, and what it
+		// lit keeps drawing it. So each is let go on the main thread and the passes make it again (Dynamic Wards' way). A sink only queues this
+		void AfterLoadingScreen()
+		{
+			DropHeldLights();
+			DropBodyLights();
+			RenewGroundLights();
+		}
+
+		class LoadingWatch final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+			{
+				if (a_event && !a_event->opening && std::string_view(a_event->menuName.c_str()) == RE::LoadingMenu::MENU_NAME) {
+					if (auto* tasks = SKSE::GetTaskInterface()) {
+						tasks->AddTask([]() { LightKit::Guarded("loading screen ended", []() { AfterLoadingScreen(); }); });
+					}
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
 		// may come from an animation thread: only a form id and a counter are handed on
 		class Draws final : public RE::BSTEventSink<SKSE::ActionEvent>
 		{
@@ -173,8 +196,12 @@ namespace Plugin
 
 	void WatchEvents()
 	{
-		static Draws draws;
-		static Cells cells;
+		static Draws        draws;
+		static Cells        cells;
+		static LoadingWatch loading;
+		if (auto* ui = RE::UI::GetSingleton()) {
+			ui->AddEventSink<RE::MenuOpenCloseEvent>(&loading);
+		}
 		Actor3D<RE::Character>::Install();
 		Actor3D<RE::PlayerCharacter>::Install();
 		static Changes changes;

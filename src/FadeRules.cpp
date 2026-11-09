@@ -199,6 +199,9 @@ namespace Fade
 					files.push_back(it->path());
 				}
 			}
+			if (ec) {
+				SKSE::log::warn("rules: the folder could not be read to its end ({}); the files after that point were not read", ec.message());
+			}
 			std::ranges::sort(files, {}, [](const auto& a_p) { return Lower(PathText(a_p.filename())); });
 			for (const auto& path : files) {
 				const auto    file = PathText(path.filename());
