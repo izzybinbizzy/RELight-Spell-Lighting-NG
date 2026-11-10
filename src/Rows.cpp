@@ -346,7 +346,8 @@ namespace Plugin
 			}
 			const auto& rec = *a_c.recipe;
 			const bool  isl = InverseSquare();
-			const float brightNow = Brightness() * VanillaStrength();
+			// a cone's cloud is a stream's light too: the streams' strength reaches it
+			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
 			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
