@@ -36,15 +36,16 @@ namespace Plugin
 			const RE::NiColor*        tint{ nullptr };
 			const RE::TESBoundObject* from{ nullptr };  // the object its tint was read for: an art pick changed in the menu reads it again
 			std::uint32_t             tintEpoch{ 0 };
-			float                     base{ 0.0f };        // the fade RE::Light last gave it
-			float                     peak{ 0.0f };        // the most it gave: held while Dynamic Lighting is off, if it flickers
-			float                     rlPhase{ -1.0f };    // RE::Light's flicker phase (the point light's constAttenuation) last frame
-			bool                      flickers{ false };   // RE::Light moved that phase: a flickering config, not a one-shot fade
-			bool                      ours{ false };       // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
-			bool                      outByUs{ false };    // culled here because its body went: it comes back if its body does
-			bool                      rebase{ true };      // ours: take the base from the light once - it was just made or re-dressed
-			float                     written{ -1.0f };    // the fade we last wrote
-			float                     baseRadius{ 0.0f };  // the reach RE::Light last gave it
+			Strength                  strength{ Strength::kNone };  // by its object; an enchantment light's is asked each frame
+			float                     base{ 0.0f };                 // the fade RE::Light last gave it
+			float                     peak{ 0.0f };                 // the most it gave: held while Dynamic Lighting is off, if it flickers
+			float                     rlPhase{ -1.0f };             // RE::Light's flicker phase (the point light's constAttenuation) last frame
+			bool                      flickers{ false };            // RE::Light moved that phase: a flickering config, not a one-shot fade
+			bool                      ours{ false };                // a hand light this plugin made: our re-dress moves its phase, RE::Light never flickers it
+			bool                      outByUs{ false };             // culled here because its body went: it comes back if its body does
+			bool                      rebase{ true };               // ours: take the base from the light once - it was just made or re-dressed
+			float                     written{ -1.0f };             // the fade we last wrote
+			float                     baseRadius{ 0.0f };           // the reach RE::Light last gave it
 			float                     wroteRadius{ -1.0f };
 			float                     baseCutoff{ -1.0f };  // the cutoff RE::Light (or its editor) last gave it
 			float                     wroteCutoff{ -2.0f };
@@ -166,6 +167,14 @@ namespace Plugin
 		{
 			const auto* proj = a_base ? a_base->As<RE::BGSProjectile>() : nullptr;
 			return proj && (proj->IsFlamethrower() || proj->IsCone() || proj->IsBeam()) && IsSprayLight(proj->data.light);
+		}
+
+		[[nodiscard]] Strength StrengthOfBase(const RE::TESBoundObject* a_base)
+		{
+			if (a_base && a_base->Is(RE::FormType::Explosion)) {
+				return Strength::kExplosions;
+			}
+			return IsSprayProjectileLight(a_base) ? Strength::kStreams : Strength::kNone;
 		}
 
 		// RE::Light names every light it makes from a config "RL" + the node it hung it on. An enchantment light hangs on
@@ -440,7 +449,7 @@ namespace Plugin
 					niLight->fadeAmount = kMovingLightMark;
 				}
 				KeepLight(niLight);
-				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base), .from = base, .tintEpoch = epoch }).first;
+				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base), .from = base, .tintEpoch = epoch, .strength = StrengthOfBase(base) }).first;
 			} else if (it->second.tintEpoch != epoch && it->second.from) {
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
@@ -463,7 +472,9 @@ namespace Plugin
 					niLight->SetAppCulled(false);
 				}
 			}
-			const bool again = Apply(niLight, it->second, scale, reach, dt, IsEnchantLight(niLight) ? FleshHueOf(niLight) : nullptr);
+			const bool enchant = IsEnchantLight(niLight);
+			const auto kind = enchant ? EnchantStrengthOf(niLight) : it->second.strength;
+			const bool again = Apply(niLight, it->second, scale * StrengthOf(kind), reach, dt, enchant ? FleshHueOf(niLight) : nullptr);
 			// a hidden light keeps no walk awake (a casting light the game keeps culled while its spell stays selected):
 			// a draw or an art's start wakes the walk when it shows
 			ours = ours || (again && !niLight->GetAppCulled());

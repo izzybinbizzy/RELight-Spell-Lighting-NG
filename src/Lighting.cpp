@@ -109,6 +109,10 @@ namespace Plugin
 			gEnbRunning ? "yes" : "no", gEnbFiles ? "yes" : "no",
 			(gEnbFiles && !gEnbRunning && !gCsLoaded) || ((shaderFile || inLlf) && !gCsLoaded) ? " - left over, not used" : "",
 			InverseSquare() ? "inverse square" : "plain");
+		// no test can see a shader that renames its inverse-square word, so the one case it would show as is said once
+		if (gCsLoaded && !drawn.Any()) {
+			SKSE::log::warn("lighting: CommunityShaders.dll is loaded but no shader names inverse square - every light of ours is drawn plain (linear)");
+		}
 	}
 
 	Lighting LightingFound()

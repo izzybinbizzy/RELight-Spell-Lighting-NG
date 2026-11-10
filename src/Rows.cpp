@@ -346,7 +346,8 @@ namespace Plugin
 			}
 			const auto& rec = *a_c.recipe;
 			const bool  isl = InverseSquare();
-			const float brightNow = Brightness() * VanillaStrength();
+			// a cone's cloud is a stream's light too: the streams' strength reaches it
+			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
 			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
@@ -467,7 +468,7 @@ namespace Plugin
 			const bool isl = InverseSquare();
 			// the two sliders, then the per-lighting strength the rows were tuned with (no plain-drawing step:
 			// RowStrengthFor already holds the Vanilla / ENB difference)
-			const float brightNow = Brightness() * VanillaStrength();
+			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			const float bright = brightNow * RowStrengthFor(LightingFound()), reachPct = Reach();
 			const auto  epoch = TintEpoch();
 			// Dynamic Lighting (this session's, as the data was read with) makes the row flicker: a spray's own light is steady
