@@ -1259,7 +1259,12 @@ namespace Fade
 			auto& roots = gItemRoots[ItemKey(actor, left)];
 			for (auto* node : nodes) {
 				if (node) {
+					const auto count = roots.size();
 					NoteRoot(roots, node);
+					// a new root: the pass takes its lights and puts the saved choice on them, Fading off too (CodeRabbit on #65)
+					if (roots.size() != count) {
+						WakeHands();
+					}
 				}
 			}
 		}
