@@ -201,8 +201,11 @@ namespace Plugin
 		// discovery reads at load (CodeRabbit, #24: a game started with the switch on found no automatic hand light)
 		bool Off(std::size_t a_option) { return a_option != kNone && (AllLightsOff() || !OptionLit(a_option)); }
 
+		// Skyrim.esm's DaedricArtifact keyword: Dawnbreaker and the other artifacts wear RE::Light's own enchantment light, under an enchanted option
+		constexpr RE::FormID kDaedricArtifact{ 0x000A8668 };
+
 		// the Enchanted weapons switch (Configs): an enchantment light of ours goes out, unless its option is the artifacts' or a bound weapons', or
-		// the weapon in that hand is a staff or a bound weapon. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
+		// the weapon in that hand is a staff, a bound weapon or an artifact. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
 		bool EnchantedOut(RE::NiLight* a_light, std::size_t a_option)
 		{
 			const auto& opts = Options();
@@ -227,7 +230,7 @@ namespace Plugin
 				return actor->GetEquippedObject(left);
 			}();
 			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
-			return weapon && !weapon->IsStaff() && !weapon->IsBound();
+			return weapon && !weapon->IsStaff() && !weapon->IsBound() && !weapon->HasKeywordID(kDaedricArtifact);
 		}
 
 		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
