@@ -138,8 +138,12 @@ namespace Plugin
 			}
 			static void SetThunk(T* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
 			{
+				// a save load sets "no body" thousands of times on actors that had none: only a body arriving or leaving is noted
+				const bool had = a_this->Is3DLoaded();
 				set(a_this, a_object, a_queue3DTasks);
-				LightKit::Guarded("actor 3D set", [a_this, a_object]() { Note3D(a_this, a_object != nullptr); });
+				if (a_object || had) {
+					LightKit::Guarded("actor 3D set", [a_this, a_object]() { Note3D(a_this, a_object != nullptr); });
+				}
 			}
 			static inline REL::Relocation<decltype(LoadThunk)> load;
 			static inline REL::Relocation<decltype(SetThunk)>  set;

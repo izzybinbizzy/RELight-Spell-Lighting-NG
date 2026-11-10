@@ -1060,8 +1060,10 @@ namespace
 	{
 		static void thunk(RE::TESObjectREFR* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
 		{
+			// most "no body" sets land on a reference that had none: the one cheap read comes before the base lookup
+			const bool had = a_this->Is3DLoaded();
 			func(a_this, a_object, a_queue3DTasks);
-			if (!a_object && MayCarryOurLight(a_this)) {
+			if (!a_object && had && MayCarryOurLight(a_this)) {
 				Plugin::NoteSweep(Plugin::SweepWhy::kRefDrop);
 			}
 		}
