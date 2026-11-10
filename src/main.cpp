@@ -46,7 +46,7 @@
 //                   settings, rules, pages
 //   Menu.cpp        the settings page, in SKSE Menu Framework's Mod Control Panel
 //   DevBench.cpp    inspect kind=relight and the tool relight.control, when DevBench is loaded (optional; Illuminated's way);
-//                   DevBenchGlue.h and DevBenchAPI.* are the shared copies (master: Dynamic Wards' src\)
+//                   DevBenchGlue.h and DevBenchAPI.* are the shared copies (master: Tools\Shared Plugin Code)
 
 #include "Fade.h"
 #include "FloorLightFix.h"

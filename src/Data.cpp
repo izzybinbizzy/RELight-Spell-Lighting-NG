@@ -657,7 +657,7 @@ namespace Plugin
 		[[nodiscard]] const RE::NiColor* ElementHandColor(const RE::TESForm* a_base, const std::string& a_key)
 		{
 			if (!a_base || !(a_base->Is(RE::FormType::Projectile) || a_base->Is(RE::FormType::Explosion) || a_base->Is(RE::FormType::Hazard)) ||
-				a_key.empty() || !GameArtPath(PathKeyOf(a_base)) || (a_base->Is(RE::FormType::Hazard) && !SpellHazard(a_base))) {
+				a_key.empty() || (a_base->Is(RE::FormType::Hazard) && !SpellHazard(a_base)) || !GameArtPath(PathKeyOf(a_base))) {
 				return nullptr;
 			}
 			const auto has = [&](std::string_view a_word) { return a_key.find(a_word) != std::string::npos; };
