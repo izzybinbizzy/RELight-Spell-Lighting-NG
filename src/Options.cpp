@@ -542,10 +542,18 @@ namespace Plugin
 			if (light->GetRefCount() <= 1) {
 				continue;  // already gone from the game
 			}
-			if (Off(a_option)) {
-				HoldOut(light.get(), a_option, false);
-			} else if (!KeptOutByBudget(light.get())) {
-				light->SetAppCulled(false);  // the switch went back on before the main thread came round
+			auto*      niLight = light.get();
+			const bool enchant = IsEnchantLight(niLight);
+			if (OffFor(niLight, a_option, enchant)) {
+				HoldOut(niLight, a_option, enchant);
+			} else if (enchant && FullySheathed(niLight)) {
+				// the option walk may sleep, so a light handed back onto a put-away weapon waits in the sheathed net for the draw
+				if (std::ranges::find(gSheathedOut, niLight) == gSheathedOut.end()) {
+					KeepLight(niLight);
+					gSheathedOut.push_back(niLight);
+				}
+			} else if (!KeptOutByBudget(niLight)) {
+				niLight->SetAppCulled(false);  // the switch went back on before the main thread came round
 			}
 		}
 	}
