@@ -1166,6 +1166,7 @@ namespace
 					i + 1, sites.size(), target.address() - REL::Module::get().base());
 				continue;
 			}
+			// trampoline sites: 4 (the spell-light call sites; the fourth exists on AE only)
 			const auto old = trampoline.write_call<5>(target.address(), thunks[i]);
 			*nexts[i] = old;
 			++hooked;
