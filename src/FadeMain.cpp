@@ -90,6 +90,7 @@ namespace
 		static void Install(std::ptrdiff_t a_offset)
 		{
 			const REL::Relocation<std::uintptr_t> target{ RELOCATION_ID(50771, 51666), a_offset };
+			// trampoline sites: 2 (ChargeBar<0> and ChargeBar<1>, the charge meter's two calls)
 			func = SKSE::GetTrampoline().write_call<5>(target.address(), thunk);
 		}
 	};

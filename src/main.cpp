@@ -179,10 +179,9 @@ namespace
 
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
-	// ONE trampoline for every call this DLL wraps (the spell-light call sites, up to 4, + the cell animations + the fading
-	// module's two charge-bar calls, 14 bytes each, room to spare): a second SKSE::AllocTrampoline would replace the buffer
-	// under live hooks. The Floor Light Fix's two calls take their own room beside them
-	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 160 + FloorLightFix::kTrampolineBytes });
+	// ONE trampoline for every call this DLL wraps, 14 bytes a 5-byte call: up to 4 spell-light sites, the cell animations,
+	// the two charge-bar calls (trampoline check.py counts them); the Floor Light Fix's two calls take their own room
+	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 7 * 14 + FloorLightFix::kTrampolineBytes });
 	// the wrong game: loaded but idle - a false here makes SKSE add its own "exit game?" box over the guard's
 	if (!RuntimeGuard::RightGame("RELight - Spell Lighting NG", "RELight - Spell Lighting NG", "RELight - Spell Lighting NG - VR")) {
 		return true;
