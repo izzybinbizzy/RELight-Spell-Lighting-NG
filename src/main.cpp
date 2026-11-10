@@ -46,9 +46,10 @@
 //                   settings, rules, pages
 //   Menu.cpp        the settings page, in SKSE Menu Framework's Mod Control Panel
 //   DevBench.cpp    inspect kind=relight and the tool relight.control, when DevBench is loaded (optional; Illuminated's way);
-//                   DevBenchGlue.h and DevBenchAPI.* are the shared copies (master: Dynamic Wards' src\)
+//                   DevBenchGlue.h and DevBenchAPI.* are the shared copies (master: Tools\Shared Plugin Code)
 
 #include "Fade.h"
+#include "FloorLightFix.h"
 #include "Plugin.h"
 #include "RuntimeGuard.h"
 
@@ -180,12 +181,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	// ONE trampoline for every call this DLL wraps (the spell-light call sites, up to 4, + the cell animations + the fading
 	// module's two charge-bar calls, 14 bytes each, room to spare): a second SKSE::AllocTrampoline would replace the buffer
-	// under live hooks
-	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 160 });
+	// under live hooks. The Floor Light Fix's two calls take their own room beside them
+	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 160 + FloorLightFix::kTrampolineBytes });
 	// the wrong game: loaded but idle - a false here makes SKSE add its own "exit game?" box over the guard's
 	if (!RuntimeGuard::RightGame("RELight - Spell Lighting NG", "RELight - Spell Lighting NG", "RELight - Spell Lighting NG - VR")) {
 		return true;
 	}
+	// the shared Floor Light Fix (until Ivy publishes theirs): the first of our mods to load hooks it, the rest stand down
+	FloorLightFix::Install();
 	// the spell-light hooks are installed at SKSE's post-load (OnMessage), after every plugin has loaded
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	SKSE::log::info("RELight - Spell Lighting NG {} loaded on Skyrim {} ({}); waiting for the game's data", SKSE::GetPluginVersion().string("."), REL::Module::get().version().string("."),

@@ -329,6 +329,13 @@ namespace Plugin
 			return (path && *path) ? MeshKey(path) : std::string{};
 		}
 
+		[[nodiscard]] std::string PathKeyOf(const RE::TESForm* a_base)
+		{
+			const auto* model = a_base ? a_base->As<RE::TESModel>() : nullptr;
+			const char* path = model ? model->GetModel() : nullptr;
+			return (path && *path) ? PathKey(path) : std::string{};
+		}
+
 		// RE::Light's rule: the exact key, else the longest of ours the object's key contains
 		template <class Map>
 		[[nodiscard]] auto Find(const Map& a_map, const std::vector<std::string>& a_longestFirst, std::string_view a_key)
@@ -582,8 +589,9 @@ namespace Plugin
 
 	namespace
 	{
-		// the model keys of the game's own projectiles and explosions: the art the picks recolor, whoever's form wears it
-		[[nodiscard]] bool GameArtKey(const std::string& a_key)
+		// the model paths of the game's own projectiles and explosions: the art the picks recolor, whoever's form wears it.
+		// The full path: a mod's own model that only shares the file name (Flames of Coldharbour's) keeps its own color
+		[[nodiscard]] bool GameArtPath(const std::string& a_path)
 		{
 			static const auto keys = [] {
 				std::unordered_set<std::string>           out;
@@ -591,7 +599,7 @@ namespace Plugin
 				const auto                                add = [&](const RE::TESForm* a_form) {
 					const auto* file = a_form ? a_form->GetFile(0) : nullptr;
 					if (file && std::ranges::find(kGame, Lower(file->GetFilename())) != kGame.end()) {
-						if (auto key = KeyOf(a_form); !key.empty()) {
+						if (auto key = PathKeyOf(a_form); !key.empty()) {
 							out.insert(std::move(key));
 						}
 					}
@@ -607,7 +615,7 @@ namespace Plugin
 				}
 				return out;
 			}();
-			return keys.contains(a_key);
+			return keys.contains(a_path);
 		}
 
 		// the hazards a spell leaves: a Spawn Hazard effect's, the wall pieces an effect's impact data places (Wall of Flames ...),
@@ -649,7 +657,7 @@ namespace Plugin
 		[[nodiscard]] const RE::NiColor* ElementHandColor(const RE::TESForm* a_base, const std::string& a_key)
 		{
 			if (!a_base || !(a_base->Is(RE::FormType::Projectile) || a_base->Is(RE::FormType::Explosion) || a_base->Is(RE::FormType::Hazard)) ||
-				a_key.empty() || !GameArtKey(a_key) || (a_base->Is(RE::FormType::Hazard) && !SpellHazard(a_base))) {
+				a_key.empty() || (a_base->Is(RE::FormType::Hazard) && !SpellHazard(a_base)) || !GameArtPath(PathKeyOf(a_base))) {
 				return nullptr;
 			}
 			const auto has = [&](std::string_view a_word) { return a_key.find(a_word) != std::string::npos; };

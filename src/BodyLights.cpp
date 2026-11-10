@@ -180,7 +180,7 @@ namespace Plugin
 		// first-person skeleton lights nothing on ENB). Her own art in first person hangs in the first-person skeleton, its model
 		// its own root - a name the third-person body lacks - so there the nearest node above it the body has is used, the body
 		// node for one on an arm. An unnamed root is used as it is - a search for "" finds any unnamed node
-		[[nodiscard]] RE::NiNode* NodeFor(RE::ReferenceEffect* a_art, RE::TESObjectREFR* a_ref)
+		[[nodiscard]] RE::NiNode* PickNode(RE::ReferenceEffect* a_art, RE::TESObjectREFR* a_ref)
 		{
 			auto* root = a_art->GetAttachRoot();
 			if (!root) {
@@ -212,6 +212,25 @@ namespace Plugin
 				}
 			}
 			return BodyNode(third);
+		}
+
+		// An art whose model carries attach techniques ("AttachT" strings, as MuffleHitFX does) has the game move its pieces between
+		// the skeleton's nodes and track them; a light of ours put in that art is swept into the tracking and later read freed.
+		// Such art lights from the body node, which the game never moves
+		[[nodiscard]] RE::NiNode* NodeFor(RE::ReferenceEffect* a_art, RE::TESObjectREFR* a_ref)
+		{
+			auto* const node = PickNode(a_art, a_ref);
+			auto* const third = node ? a_ref->Get3D(false) : nullptr;
+			if (!third) {
+				return node;
+			}
+			static const RE::BSFixedString kAttachTechniques{ "AttachT" };
+			const auto*                    model = netimmerse_cast<RE::ModelReferenceEffect*>(a_art);
+			bool                           moved = model && model->artObject3D && model->artObject3D->HasExtraData(kAttachTechniques);
+			for (const RE::NiAVObject* up = node; up && up != third && !moved; up = up->parent) {
+				moved = up->HasExtraData(kAttachTechniques);
+			}
+			return moved ? BodyNode(third) : node;
 		}
 
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)

@@ -201,8 +201,11 @@ namespace Plugin
 		// discovery reads at load (CodeRabbit, #24: a game started with the switch on found no automatic hand light)
 		bool Off(std::size_t a_option) { return a_option != kNone && (AllLightsOff() || !OptionLit(a_option)); }
 
+		// Skyrim.esm's DaedricArtifact keyword: Dawnbreaker and the other artifacts wear RE::Light's own enchantment light, under an enchanted option
+		constexpr RE::FormID kDaedricArtifact{ 0x000A8668 };
+
 		// the Enchanted weapons switch (Configs): an enchantment light of ours goes out, unless its option is the artifacts' or a bound weapons', or
-		// the weapon in that hand is a staff or a bound weapon. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
+		// the weapon in that hand is a staff, a bound weapon or an artifact. A staff's held light steps aside for RE::Light's (Held.cpp), so it must stay lit
 		bool EnchantedOut(RE::NiLight* a_light, std::size_t a_option)
 		{
 			const auto& opts = Options();
@@ -227,7 +230,7 @@ namespace Plugin
 				return actor->GetEquippedObject(left);
 			}();
 			const auto* weapon = equipped ? equipped->As<RE::TESObjectWEAP>() : nullptr;
-			return weapon && !weapon->IsStaff() && !weapon->IsBound();
+			return weapon && !weapon->IsStaff() && !weapon->IsBound() && !weapon->HasKeywordID(kDaedricArtifact);
 		}
 
 		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
@@ -252,16 +255,22 @@ namespace Plugin
 			return actor && actor->AsActorState()->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
 		}
 
+		// a culled enchantment light on a put-away weapon joins the net, which lights it the moment the weapon is drawn
+		void SheathOut(RE::NiLight* a_light)
+		{
+			if (std::ranges::find(gSheathedOut, a_light) == gSheathedOut.end()) {
+				KeepLight(a_light);
+				gSheathedOut.push_back(a_light);
+			}
+		}
+
 		void SheathedNet(RE::NiLight* a_light)
 		{
 			if (!IsEnchantLight(a_light) || a_light->GetAppCulled() || !FullySheathed(a_light)) {
 				return;
 			}
 			a_light->SetAppCulled(true);
-			if (std::ranges::find(gSheathedOut, a_light) == gSheathedOut.end()) {
-				KeepLight(a_light);
-				gSheathedOut.push_back(a_light);
-			}
+			SheathOut(a_light);
 		}
 
 		void GiveBackDrawn()
@@ -273,7 +282,7 @@ namespace Plugin
 				// a switched-off option keeps it out: it moves to that option's list, which gives it back with the switch
 				if (const auto opt = OptionOfLight(a_light); OffFor(a_light, opt, true)) {
 					HoldOut(a_light, opt, true);
-				} else if (!HeldOutForOption(a_light)) {
+				} else if (!HeldOutForOption(a_light) && !KeptOutByBudget(a_light)) {
 					a_light->SetAppCulled(false);
 				}
 				return true;
@@ -457,11 +466,10 @@ namespace Plugin
 			if (!OffFor(h.light, h.option, h.enchant)) {
 				if (MayGiveBack(h)) {
 					h.light->SetAppCulled(false);
-				} else if (std::ranges::find(gSheathedOut, h.light) == gSheathedOut.end()) {
-					// the switch came back on while the weapon is put away: the light joins the sheathed net, which lights it
-					// the moment the weapon is drawn (the audit, 2026-10-14: it fell out of every list and stayed dark until
-					// the weapon was equipped again). Keep.cpp already holds it (HoldOut)
-					gSheathedOut.push_back(h.light);
+				} else {
+					// the switch came back on while the weapon is put away: without the net it fell out of every list and stayed
+					// dark until the weapon was equipped again
+					SheathOut(h.light);
 				}
 				gHeldSet.erase(h.light);
 				return true;
@@ -542,10 +550,16 @@ namespace Plugin
 			if (light->GetRefCount() <= 1) {
 				continue;  // already gone from the game
 			}
-			if (Off(a_option)) {
-				HoldOut(light.get(), a_option, false);
-			} else if (!KeptOutByBudget(light.get())) {
-				light->SetAppCulled(false);  // the switch went back on before the main thread came round
+			auto*      niLight = light.get();
+			const bool enchant = IsEnchantLight(niLight);
+			if (OffFor(niLight, a_option, enchant)) {
+				HoldOut(niLight, a_option, enchant);
+			} else if (KeptOutByBudget(niLight)) {
+				continue;  // a far caster's light: the budget gives it back when he comes near
+			} else if (enchant && FullySheathed(niLight)) {
+				SheathOut(niLight);  // the option walk may sleep: the net lights it on the draw
+			} else {
+				niLight->SetAppCulled(false);  // the switch went back on before the main thread came round
 			}
 		}
 	}
