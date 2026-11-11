@@ -14,7 +14,19 @@
 
 #include "KeptLights.h"
 
+#include <algorithm>
+#include <array>
 #include <format>
+#include <string_view>
+#include <utility>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#	define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#	define NOMINMAX
+#endif
+#include <Windows.h>  // VirtualQuery, ReadProcessMemory: the holder search reads the game's memory
 
 namespace Plugin
 {
@@ -134,6 +146,182 @@ namespace Plugin
 	{
 		RE::BSSpinLockGuard lock(gLock);
 		return gKept.size();
+	}
+
+	namespace
+	{
+		struct Image
+		{
+			std::uintptr_t base{ 0 };
+			std::string    name;
+		};
+
+		// the module an address lies in (its base and file name); base 0 off every module
+		[[nodiscard]] Image ImageOf(std::uintptr_t a_address)
+		{
+			HMODULE module = nullptr;
+			if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(a_address), &module) || !module) {
+				return {};
+			}
+			std::array<wchar_t, 260> path{};
+			const auto               length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+			std::wstring_view        file(path.data(), length);
+			if (const auto slash = file.find_last_of(L"\\/"); slash != std::wstring_view::npos) {
+				file.remove_prefix(slash + 1);
+			}
+			Image image{ reinterpret_cast<std::uintptr_t>(module), {} };
+			for (const wchar_t c : file) {
+				image.name.push_back(c < 128 ? static_cast<char>(c) : '?');
+			}
+			return image;
+		}
+
+		// a read that cannot fault: the memory may change under a search that runs beside the game
+		template <class T>
+		[[nodiscard]] bool Peek(std::uintptr_t a_address, T& a_out)
+		{
+			SIZE_T read = 0;
+			return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(a_address), &a_out, sizeof(T), &read) && read == sizeof(T);
+		}
+
+		// the class whose vtable sits at a_vtable, from the module's own type data (the compiler's object locator); empty when it is none
+		[[nodiscard]] std::string ClassAt(std::uintptr_t a_vtable)
+		{
+			const auto     image = ImageOf(a_vtable);
+			std::uintptr_t locator = 0;
+			if (!image.base || !Peek(a_vtable - sizeof(std::uintptr_t), locator) || ImageOf(locator).base != image.base) {
+				return {};
+			}
+			struct Locator
+			{
+				std::uint32_t signature{ 0 };
+				std::uint32_t offset{ 0 };
+				std::uint32_t cdOffset{ 0 };
+				std::int32_t  type{ 0 };
+				std::int32_t  hierarchy{ 0 };
+				std::int32_t  self{ 0 };
+			};
+			Locator col{};
+			if (!Peek(locator, col) || col.signature != 1 || col.self <= 0 || image.base + static_cast<std::uintptr_t>(col.self) != locator) {
+				return {};
+			}
+			std::array<char, 96> name{};
+			if (col.type <= 0 || !Peek(image.base + static_cast<std::uintptr_t>(col.type) + 16, name)) {
+				return {};
+			}
+			name.back() = '\0';
+			return name.data();
+		}
+
+		// the nearest vtable at or before a_address: the object the reference most likely sits in, and the reference's place in it
+		[[nodiscard]] std::pair<std::string, std::int64_t> HolderOf(std::uintptr_t a_address)
+		{
+			constexpr std::uintptr_t kBack = 0x600;
+			const std::uintptr_t     first = a_address & ~std::uintptr_t{ 7 };
+			for (std::uintptr_t at = first; at + kBack >= first && at >= 8; at -= 8) {
+				std::uintptr_t word = 0;
+				if (!Peek(at, word)) {
+					break;
+				}
+				if (auto name = word ? ClassAt(word) : std::string{}; !name.empty()) {
+					return { std::move(name), static_cast<std::int64_t>(a_address - at) };
+				}
+			}
+			return { std::string{}, -1 };
+		}
+	}
+
+	std::vector<KeptHolder> KeptLightHolders(std::size_t a_most)
+	{
+		// read under our lock and searched by address only: no reference of ours may be the last one let go on this thread
+		struct Target
+		{
+			std::uintptr_t address{ 0 };
+			std::string    name;
+			std::uint32_t  refs{ 0 };
+		};
+		std::vector<Target>         targets;
+		std::vector<std::uintptr_t> ours;
+		{
+			RE::BSSpinLockGuard lock(gLock);
+			for (const auto& [light, held] : gKept) {
+				ours.push_back(reinterpret_cast<std::uintptr_t>(&light));
+				ours.push_back(reinterpret_cast<std::uintptr_t>(&held));
+				if (!held->parent && targets.size() < a_most) {
+					targets.push_back({ reinterpret_cast<std::uintptr_t>(held.get()), held->name.c_str(), held->GetRefCount() });
+				}
+			}
+		}
+		std::vector<std::pair<std::size_t, std::uintptr_t>> hits;
+		if (!targets.empty()) {
+			constexpr std::size_t       kChunk = std::size_t{ 1 } << 20;
+			constexpr std::size_t       kMostHits = 48;
+			constexpr DWORD             kWritable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+			constexpr std::uintptr_t    kStackReach = 0x40000;
+			std::vector<std::uintptr_t> buffer(kChunk / sizeof(std::uintptr_t));
+			const auto                  low = std::ranges::min(targets, {}, &Target::address).address;
+			const auto                  high = std::ranges::max(targets, {}, &Target::address).address;
+			const auto                  mineFrom = reinterpret_cast<std::uintptr_t>(buffer.data());
+			const auto                  mineTo = mineFrom + kChunk;
+			// this thread's own stack holds copies too
+			const auto               stack = reinterpret_cast<std::uintptr_t>(&hits);
+			MEMORY_BASIC_INFORMATION mem{};
+			for (std::uintptr_t at = 0x10000; hits.size() < kMostHits && VirtualQuery(reinterpret_cast<LPCVOID>(at), &mem, sizeof(mem)) == sizeof(mem);
+				at = reinterpret_cast<std::uintptr_t>(mem.BaseAddress) + mem.RegionSize) {
+				if (mem.State != MEM_COMMIT || (mem.Protect & kWritable) == 0 || (mem.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+					continue;
+				}
+				const auto begin = reinterpret_cast<std::uintptr_t>(mem.BaseAddress);
+				const auto end = begin + mem.RegionSize;
+				for (auto from = begin; from < end && hits.size() < kMostHits; from += kChunk) {
+					SIZE_T read = 0;
+					if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(from), buffer.data(), (std::min)(kChunk, static_cast<std::size_t>(end - from)), &read)) {
+						continue;
+					}
+					for (std::size_t i = 0; i < read / sizeof(std::uintptr_t); ++i) {
+						const auto word = buffer[i];
+						if (word < low || word > high) {
+							continue;
+						}
+						const auto where = from + i * sizeof(std::uintptr_t);
+						const bool mine = (where >= mineFrom && where < mineTo) || (where + kStackReach > stack && where < stack + kStackReach) ||
+						                  std::ranges::find(ours, where) != ours.end();
+						for (std::size_t t = 0; !mine && t < targets.size(); ++t) {
+							if (word == targets[t].address) {
+								hits.emplace_back(t, where);
+							}
+						}
+					}
+				}
+			}
+		}
+		std::vector<KeptHolder> out;
+		for (std::size_t t = 0; t < targets.size(); ++t) {
+			KeptHolder none{};
+			none.light = targets[t].name;
+			none.refs = targets[t].refs;
+			bool any = false;
+			for (const auto& [which, where] : hits) {
+				if (which != t) {
+					continue;
+				}
+				any = true;
+				KeptHolder h = none;
+				h.address = where;
+				if (const auto image = ImageOf(where); image.base) {
+					h.where = std::format("{}+{:X}", image.name, where - image.base);
+				}
+				auto [holder, offset] = HolderOf(where);
+				h.holder = std::move(holder);
+				h.offset = offset;
+				out.push_back(std::move(h));
+			}
+			if (!any) {
+				none.where = "no other place holds it";
+				out.push_back(std::move(none));
+			}
+		}
+		return out;
 	}
 
 	std::vector<KeptLight> KeptLightList(std::size_t a_most)
