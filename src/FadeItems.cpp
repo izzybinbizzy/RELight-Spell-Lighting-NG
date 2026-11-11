@@ -23,6 +23,7 @@
 
 #include "Fade.h"
 #include "FadeFormText.h"
+#include "FadePickerAPI.h"
 #include "LightKit.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -61,6 +62,11 @@ namespace Fade::Items
 			RE::NiColor color{ 1.0f, 1.0f, 1.0f };
 
 			[[nodiscard]] bool Auto() const noexcept { return !off && !colored; }
+
+			[[nodiscard]] bool operator==(const Choice& a_other) const noexcept
+			{
+				return off == a_other.off && colored == a_other.colored && color.red == a_other.color.red && color.green == a_other.color.green && color.blue == a_other.color.blue;
+			}
 		};
 
 		// one item in the menu's list (built once at data load, main thread; read-only after)
@@ -72,11 +78,20 @@ namespace Fade::Items
 			std::string lower;  // for the search
 			std::string group;  // the school, or the weapon's kind
 			bool        spell{ false };
+			bool        external{ false };  // another DLL's (FadePickerAPI.h)
 		};
 
-		std::vector<Item>                      gCatalog;
-		std::unordered_set<RE::FormID>         gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
-		std::mutex                             gLock;        // the choices: the menu (render thread) changes them, the main thread applies
+		std::vector<Item>              gCatalog;
+		std::unordered_set<RE::FormID> gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
+		bool                           gCatalogBuilt{ false };
+		// another DLL's items: ids of their own, far above any form the catalog holds, so a lookup needs no table
+		constexpr RE::FormID                        kExternalFirst = 0xFFFE0000;
+		std::vector<Item>                           gExternalItems;
+		std::unordered_map<std::string, RE::FormID> gExternalIds;  // by key
+		void (*gExternalListener)(){ nullptr };
+
+		[[nodiscard]] constexpr bool           IsExternal(RE::FormID a_id) noexcept { return a_id >= kExternalFirst; }
+		std::mutex                             gLock;  // the choices: the menu (render thread) changes them, the main thread applies
 		std::unordered_map<RE::FormID, Choice> gChoices;
 		std::atomic<bool>                      gAnyChoice{ false };
 		std::atomic<std::uint32_t>             gGeneration{ 0 };  // bumped on every change; the main thread copies on a change
@@ -94,8 +109,15 @@ namespace Fade::Items
 			return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 		}
 
+		// an added item's choice is read by the DLL that added it and never reaches the actors' per-frame visit
+		[[nodiscard]] bool AnyOwnChoice()
+		{
+			return std::ranges::any_of(gChoices, [](const auto& a_entry) { return !IsExternal(a_entry.first); });
+		}
+
 		// main thread only: this frame's copy of the choices, and every light a choice is on now
 		std::unordered_map<RE::FormID, Choice> gApplied;
+		std::unordered_map<RE::FormID, Choice> gExternalApplied;
 		std::uint32_t                          gAppliedGen = static_cast<std::uint32_t>(-1);
 		struct Held
 		{
@@ -122,6 +144,9 @@ namespace Fade::Items
 
 		[[nodiscard]] RE::FormID FormOfKey(std::string_view a_key)
 		{
+			if (const auto it = gExternalIds.find(std::string(a_key)); it != gExternalIds.end()) {
+				return it->second;
+			}
 			// FormText::Parse: the plugin and the id both trimmed, an empty plugin refused, the whole id text the number
 			// ("0x12junk" names nothing) - the rule files' own reader
 			const auto spec = FormText::Parse(a_key);
@@ -224,7 +249,7 @@ namespace Fade::Items
 				} else {
 					gChoices[a_id] = a_choice;
 				}
-				gAnyChoice.store(!gChoices.empty(), std::memory_order_relaxed);
+				gAnyChoice.store(AnyOwnChoice(), std::memory_order_relaxed);
 			}
 			MarkChanged();
 		}
@@ -383,6 +408,18 @@ namespace Fade::Items
 		}
 	}
 
+	namespace
+	{
+		void SortCatalog()
+		{
+			std::ranges::sort(gCatalog, [](const Item& a, const Item& b) { return std::make_tuple(a.external, !a.spell, a.group, a.lower) < std::make_tuple(b.external, !b.spell, b.group, b.lower); });
+			gCatalogIds.clear();
+			for (const auto& item : gCatalog) {
+				gCatalogIds.insert(item.id);
+			}
+		}
+	}
+
 	void Load()
 	{
 		std::lock_guard lock(gLock);
@@ -412,7 +449,7 @@ namespace Fade::Items
 			gChoices[id] = *c;
 			++read;
 		}
-		gAnyChoice.store(!gChoices.empty(), std::memory_order_relaxed);
+		gAnyChoice.store(AnyOwnChoice(), std::memory_order_relaxed);
 		gGeneration.fetch_add(1, std::memory_order_relaxed);
 		SKSE::log::info("lights by item: {} choice(s) read from {} ({} name an item not in this load order's list)", read, from, missing);
 	}
@@ -438,7 +475,7 @@ namespace Fade::Items
 			if (key.empty()) {
 				continue;
 			}
-			gCatalog.push_back({ spell->GetFormID(), key, name, Lower(name), kind.school >= 0 ? kSchools[kind.school] : "Other spells", true });
+			gCatalog.push_back({ spell->GetFormID(), key, name, Lower(name), kind.school >= 0 ? kSchools[kind.school] : "Other spells", true, false });
 		}
 		for (auto* weapon : dh->GetFormArray<RE::TESObjectWEAP>()) {
 			if (!weapon || !weapon->GetPlayable()) {
@@ -456,14 +493,12 @@ namespace Fade::Items
 			}
 			gCatalog.push_back({ weapon->GetFormID(), key, name, Lower(name), staff ? "Staves" : bound ? "Bound weapons" :
 																										 "Enchanted weapons",
-				false });
+				false, false });
 		}
-		std::ranges::sort(gCatalog, [](const Item& a, const Item& b) { return std::make_tuple(!a.spell, a.group, a.lower) < std::make_tuple(!b.spell, b.group, b.lower); });
-		gCatalogIds.clear();
-		for (const auto& item : gCatalog) {
-			gCatalogIds.insert(item.id);
-		}
-		SKSE::log::info("lights by item: {} spells and weapons in the list", gCatalog.size());
+		gCatalog.insert(gCatalog.end(), gExternalItems.begin(), gExternalItems.end());
+		SortCatalog();
+		gCatalogBuilt = true;
+		SKSE::log::info("lights by item: {} spells and weapons in the list, {} added by another mod", gCatalog.size() - gExternalItems.size(), gExternalItems.size());
 	}
 
 	void Apply()
@@ -471,9 +506,25 @@ namespace Fade::Items
 		++gFrame;
 		SaveIfSettled(false);
 		if (const auto gen = gGeneration.load(std::memory_order_relaxed); gen != gAppliedGen) {
-			std::lock_guard lock(gLock);
-			gApplied = gChoices;
+			{
+				std::lock_guard lock(gLock);
+				gApplied = gChoices;
+			}
 			gAppliedGen = gen;
+			std::unordered_map<RE::FormID, Choice> external;
+			std::erase_if(gApplied, [&](const auto& a_entry) {
+				if (!IsExternal(a_entry.first)) {
+					return false;
+				}
+				external.insert(a_entry);
+				return true;
+			});
+			if (external != gExternalApplied) {
+				gExternalApplied = std::move(external);
+				if (gExternalListener) {
+					gExternalListener();
+				}
+			}
 		}
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		if (!gApplied.empty()) {
@@ -672,4 +723,66 @@ namespace Fade::Items
 												T("Nothing by that name."));
 		}
 	}
+
+	namespace
+	{
+		void AddExternalItems(const FadePicker::Item* a_items, std::uint32_t a_count, const char* a_group) noexcept
+		{
+			LightKit::Guarded("lights by item: added items", [&]() {
+				const std::string group = a_group ? a_group : "";
+				const auto        before = gExternalItems.size();
+				for (std::uint32_t i = 0; a_items && i < a_count; ++i) {
+					const auto& item = a_items[i];
+					if (!item.key || !*item.key || !item.name || !*item.name || gExternalIds.contains(item.key)) {
+						continue;
+					}
+					const auto id = kExternalFirst + static_cast<RE::FormID>(gExternalItems.size());
+					gExternalItems.push_back({ id, item.key, item.name, Lower(item.name), group, false, true });
+					gExternalIds.emplace(item.key, id);
+				}
+				// the file's lines for these were dropped as unknown if it has been read already
+				if (gCatalogBuilt && gExternalItems.size() != before) {
+					gCatalog.insert(gCatalog.end(), gExternalItems.begin() + static_cast<std::ptrdiff_t>(before), gExternalItems.end());
+					SortCatalog();
+					Load();
+				}
+			});
+		}
+
+		bool ExternalChoice(const char* a_key, float* a_rgb, bool* a_off, bool* a_colored) noexcept
+		{
+			bool found = false;
+			LightKit::Guarded("lights by item: a choice read", [&]() {
+				const auto id = a_key ? gExternalIds.find(a_key) : gExternalIds.end();
+				if (id == gExternalIds.end()) {
+					return;
+				}
+				std::lock_guard lock(gLock);
+				const auto      it = gChoices.find(id->second);
+				if (it == gChoices.end() || it->second.Auto()) {
+					return;
+				}
+				found = true;
+				*a_off = it->second.off;
+				*a_colored = it->second.colored;
+				a_rgb[0] = it->second.color.red;
+				a_rgb[1] = it->second.color.green;
+				a_rgb[2] = it->second.color.blue;
+			});
+			return found;
+		}
+
+		void ListenExternal(void (*a_changed)()) noexcept { gExternalListener = a_changed; }
+	}
+
+	const FadePicker::API* PickerApi(std::uint32_t a_version) noexcept
+	{
+		static const FadePicker::API api{ AddExternalItems, ExternalChoice, ListenExternal };
+		return a_version == FadePicker::kVersion ? &api : nullptr;
+	}
+}
+
+extern "C" __declspec(dllexport) const FadePicker::API* RequestFadePickerAPI(std::uint32_t a_version) noexcept
+{
+	return Fade::Items::PickerApi(a_version);
 }

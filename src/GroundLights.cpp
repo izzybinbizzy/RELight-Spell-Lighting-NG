@@ -89,7 +89,7 @@ namespace Plugin
 		// as the game keeps it hidden then (Visit's "light that's not going away")
 		void ShowLeftHidden()
 		{
-			std::erase_if(gLeftHidden, [](const auto& a_entry) {
+			const auto letGo = std::erase_if(gLeftHidden, [](const auto& a_entry) {
 				auto* actor = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(a_entry.first >> 1));
 				if (!actor || !actor->Is3DLoaded()) {
 					return true;
@@ -108,6 +108,10 @@ namespace Plugin
 				}
 				return true;
 			});
+			// this hold may have outlasted the moment that ended the light: without a look now, Keep.cpp holds it until the next one
+			if (letGo > 0) {
+				NoteSweep(SweepWhy::kMagicDrop);
+			}
 		}
 
 		// the twin made and hung on the hand node; it joins the scene in Visit, once Follow has given it its numbers and its place
