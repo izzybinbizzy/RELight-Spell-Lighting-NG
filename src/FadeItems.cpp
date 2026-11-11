@@ -142,17 +142,22 @@ namespace Fade::Items
 			return std::format("{}|0x{:06X}", file->GetFilename(), local);
 		}
 
+		// FormText::Parse: the plugin and the id both trimmed, an empty plugin refused, the whole id text the number
+		// ("0x12junk" names nothing) - the rule files' own reader. A key of this shape names a form of the game
+		[[nodiscard]] bool FormShaped(std::string_view a_key)
+		{
+			return a_key.find('|') != std::string_view::npos && FormText::Parse(a_key).kind == FormText::Spec::Kind::kPluginAndID;
+		}
+
 		[[nodiscard]] RE::FormID FormOfKey(std::string_view a_key)
 		{
 			if (const auto it = gExternalIds.find(std::string(a_key)); it != gExternalIds.end()) {
 				return it->second;
 			}
-			// FormText::Parse: the plugin and the id both trimmed, an empty plugin refused, the whole id text the number
-			// ("0x12junk" names nothing) - the rule files' own reader
-			const auto spec = FormText::Parse(a_key);
-			if (spec.kind != FormText::Spec::Kind::kPluginAndID || a_key.find('|') == std::string_view::npos) {
+			if (!FormShaped(a_key)) {
 				return 0;
 			}
+			const auto  spec = FormText::Parse(a_key);
 			auto*       dh = RE::TESDataHandler::GetSingleton();
 			const auto* file = dh ? dh->LookupModByName(spec.plugin) : nullptr;
 			// the plugin's own part of the id: a load-order prefix copied from a record editor named another form (L11)
@@ -734,6 +739,11 @@ namespace Fade::Items
 				for (std::uint32_t i = 0; a_items && i < a_count; ++i) {
 					const auto& item = a_items[i];
 					if (!item.key || !*item.key || !item.name || !*item.name || gExternalIds.contains(item.key)) {
+						continue;
+					}
+					// the page's own items are saved under their form's key: an added item shaped like one would share its saved line
+					if (FormShaped(item.key)) {
+						SKSE::log::warn("Choose Your Own Color: an added item's key '{}' is shaped like a game form's - left out", item.key);
 						continue;
 					}
 					const auto id = kExternalFirst + static_cast<RE::FormID>(gExternalItems.size());

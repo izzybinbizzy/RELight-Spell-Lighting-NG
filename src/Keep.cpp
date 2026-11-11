@@ -253,27 +253,30 @@ namespace Plugin
 			}
 		}
 		std::vector<std::pair<std::size_t, std::uintptr_t>> hits;
-		if (!targets.empty()) {
+		const auto                                          search = [&ours](const std::vector<std::uintptr_t>& a_targets, auto& a_hits) {
+			if (a_targets.empty()) {
+				return;
+			}
 			constexpr std::size_t       kChunk = std::size_t{ 1 } << 20;
 			constexpr std::size_t       kMostHits = 48;
 			constexpr DWORD             kWritable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
 			constexpr std::uintptr_t    kStackReach = 0x40000;
 			std::vector<std::uintptr_t> buffer(kChunk / sizeof(std::uintptr_t));
-			const auto                  low = std::ranges::min(targets, {}, &Target::address).address;
-			const auto                  high = std::ranges::max(targets, {}, &Target::address).address;
+			const auto                  low = std::ranges::min(a_targets);
+			const auto                  high = std::ranges::max(a_targets);
 			const auto                  mineFrom = reinterpret_cast<std::uintptr_t>(buffer.data());
 			const auto                  mineTo = mineFrom + kChunk;
 			// this thread's own stack holds copies too
-			const auto               stack = reinterpret_cast<std::uintptr_t>(&hits);
+			const auto               stack = reinterpret_cast<std::uintptr_t>(&a_hits);
 			MEMORY_BASIC_INFORMATION mem{};
-			for (std::uintptr_t at = 0x10000; hits.size() < kMostHits && VirtualQuery(reinterpret_cast<LPCVOID>(at), &mem, sizeof(mem)) == sizeof(mem);
+			for (std::uintptr_t at = 0x10000; a_hits.size() < kMostHits && VirtualQuery(reinterpret_cast<LPCVOID>(at), &mem, sizeof(mem)) == sizeof(mem);
 				at = reinterpret_cast<std::uintptr_t>(mem.BaseAddress) + mem.RegionSize) {
 				if (mem.State != MEM_COMMIT || (mem.Protect & kWritable) == 0 || (mem.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
 					continue;
 				}
 				const auto begin = reinterpret_cast<std::uintptr_t>(mem.BaseAddress);
 				const auto end = begin + mem.RegionSize;
-				for (auto from = begin; from < end && hits.size() < kMostHits; from += kChunk) {
+				for (auto from = begin; from < end && a_hits.size() < kMostHits; from += kChunk) {
 					SIZE_T read = 0;
 					if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(from), buffer.data(), (std::min)(kChunk, static_cast<std::size_t>(end - from)), &read)) {
 						continue;
@@ -286,15 +289,20 @@ namespace Plugin
 						const auto where = from + i * sizeof(std::uintptr_t);
 						const bool mine = (where >= mineFrom && where < mineTo) || (where + kStackReach > stack && where < stack + kStackReach) ||
 						                  std::ranges::find(ours, where) != ours.end();
-						for (std::size_t t = 0; !mine && t < targets.size(); ++t) {
-							if (word == targets[t].address) {
-								hits.emplace_back(t, where);
+						for (std::size_t t = 0; !mine && t < a_targets.size(); ++t) {
+							if (word == a_targets[t]) {
+								a_hits.emplace_back(t, where);
 							}
 						}
 					}
 				}
 			}
+		};
+		std::vector<std::uintptr_t> addresses;
+		for (const auto& target : targets) {
+			addresses.push_back(target.address);
 		}
+		search(addresses, hits);
 		std::vector<KeptHolder> out;
 		for (std::size_t t = 0; t < targets.size(); ++t) {
 			KeptHolder none{};
@@ -312,9 +320,39 @@ namespace Plugin
 					h.where = std::format("{}+{:X}", image.name, where - image.base);
 				}
 				auto [holder, offset] = HolderOf(where);
+				const bool scene = holder.find("BSLight") != std::string::npos || holder.find("BSShadowLight") != std::string::npos;
 				h.holder = std::move(holder);
 				h.offset = offset;
 				out.push_back(std::move(h));
+				// the scene light that holds it: its own count (NiRefObject, +8) and every place that holds the scene light
+				if (scene && offset > 0) {
+					const auto    light = where - static_cast<std::uintptr_t>(offset);
+					std::uint32_t count = 0;
+					static_cast<void>(Peek(light + 8, count));
+					std::vector<std::pair<std::size_t, std::uintptr_t>> up;
+					search({ light }, up);
+					for (const auto& found : up) {
+						const auto at = found.second;
+						KeptHolder s = none;
+						s.light = std::format("{} - its scene light {:X}", none.light, light);
+						s.refs = count;
+						s.address = at;
+						if (const auto image = ImageOf(at); image.base) {
+							s.where = std::format("{}+{:X}", image.name, at - image.base);
+						}
+						auto [upHolder, upOffset] = HolderOf(at);
+						s.holder = std::move(upHolder);
+						s.offset = upOffset;
+						out.push_back(std::move(s));
+					}
+					if (up.empty()) {
+						KeptHolder s = none;
+						s.light = std::format("{} - its scene light {:X}", none.light, light);
+						s.refs = count;
+						s.where = "no place holds the scene light";
+						out.push_back(std::move(s));
+					}
+				}
 			}
 			if (!any) {
 				none.where = "no other place holds it";
