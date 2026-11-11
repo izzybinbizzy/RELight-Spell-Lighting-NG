@@ -58,7 +58,8 @@ namespace Plugin
 			out["kept"] = json::array();
 			for (const auto& k : KeptLightList(24)) {
 				out["kept"].push_back({ { "name", k.name }, { "refs", k.refs }, { "parent", k.parent }, { "root", k.root }, { "caster", k.caster }, { "culled", k.culled },
-					{ "ground", k.ground }, { "weapon", k.weapon }, { "body", k.body } });
+					{ "ground", k.ground }, { "weapon", k.weapon }, { "body", k.body },
+					{ "lists", json::array({ k.active, k.shadow, k.queuedAdd, k.queuedRemove, k.unnamed }) }, { "bsRefs", k.bsRefs } });
 			}
 			out["sweepNotes"] = json::object();
 			for (std::size_t i = 0; i < kSweepWhyNames.size(); ++i) {

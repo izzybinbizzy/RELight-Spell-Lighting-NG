@@ -195,6 +195,13 @@ namespace Plugin
 		int           ground{ 0 };  // GroundLightRole
 		bool          weapon{ false };
 		bool          body{ false };
+		// its entries in the scene node's lists: active, shadow, queued to add, queued to remove, the unnamed one
+		int           active{ 0 };
+		int           shadow{ 0 };
+		int           queuedAdd{ 0 };
+		int           queuedRemove{ 0 };
+		int           unnamed{ 0 };
+		std::uint32_t bsRefs{ 0 };  // the holders of the scene light found there
 	};
 	// main thread (devbench report): what Keep.cpp holds, its first a_most
 	[[nodiscard]] std::vector<KeptLight> KeptLightList(std::size_t a_most);

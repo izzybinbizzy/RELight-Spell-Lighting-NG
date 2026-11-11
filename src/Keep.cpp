@@ -79,19 +79,26 @@ namespace Plugin
 				}
 			}
 		}
-		// its entry there holds it too, and the scene's own pass takes it out only when that is the last: we let go and that pass sees it
+		// its entry there holds it too, and the scene's own pass takes it out only when that is the last: we let go and that pass sees it.
+		// One queued for removal holds it from the scene's queue, and may sit in an active list as well: each scene light counts once
 		if (auto* scene = lost.empty() ? nullptr : LightKit::Scene()) {
+			static std::vector<const void*> counted;  // main thread; its storage kept between looks
+			counted.clear();
 			const auto count = [](const auto& a_list) {
 				for (const auto& bsLight : a_list) {
 					const auto* light = bsLight ? bsLight->light.get() : nullptr;
-					if (const auto it = light ? std::ranges::find(lost, static_cast<const void*>(light), &KeptLights::Seen::key) : lost.end(); it != lost.end()) {
+					const auto  it = light ? std::ranges::find(lost, static_cast<const void*>(light), &KeptLights::Seen::key) : lost.end();
+					if (it != lost.end() && std::ranges::find(counted, static_cast<const void*>(bsLight.get())) == counted.end()) {
+						counted.push_back(bsLight.get());
 						++it->entries;
 					}
 				}
 			};
-			const auto& lists = scene->GetRuntimeData();
+			auto& lists = scene->GetRuntimeData();
 			count(lists.activeLights);
 			count(lists.activeShadowLights);
+			RE::BSSpinLockGuard queue(lists.lightQueueLock);
+			count(lists.lightQueueRemove);
 		}
 		if (const auto unowned = gUnowned.Look(lost); !unowned.empty()) {
 			RE::BSSpinLockGuard lock(gLock);
@@ -129,13 +136,21 @@ namespace Plugin
 
 	std::vector<KeptLight> KeptLightList(std::size_t a_most)
 	{
+		// copied out first: the scene's queue lock is never taken inside ours
+		std::vector<RE::NiPointer<RE::NiLight>> kept;
+		{
+			RE::BSSpinLockGuard lock(gLock);
+			for (const auto& entry : gKept) {
+				if (kept.size() >= a_most) {
+					break;
+				}
+				kept.push_back(entry.second);
+			}
+		}
 		std::vector<KeptLight> out;
 		auto*                  player = RE::PlayerCharacter::GetSingleton();
-		RE::BSSpinLockGuard    lock(gLock);
-		for (const auto& [light, held] : gKept) {
-			if (out.size() >= a_most) {
-				break;
-			}
+		auto*                  scene = LightKit::Scene();
+		for (const auto& held : kept) {
 			const auto* parent = held->parent;
 			const auto* root = parent;
 			while (root && root->parent) {
@@ -151,8 +166,35 @@ namespace Plugin
 					}
 				}
 			}
-			out.push_back({ held->name.c_str(), held->GetRefCount(), parent ? parent->name.c_str() : "", root ? root->name.c_str() : "", caster, held->GetAppCulled(),
-				GroundLightRole(held.get()), HeldLightHolds(held.get()), BodyLightHolds(held.get()) });
+			KeptLight k{};
+			k.name = held->name.c_str();
+			// the copy above holds one more
+			k.refs = held->GetRefCount() - 1;
+			k.parent = parent ? parent->name.c_str() : "";
+			k.root = root ? root->name.c_str() : "";
+			k.caster = caster;
+			k.culled = held->GetAppCulled();
+			k.ground = GroundLightRole(held.get());
+			k.weapon = HeldLightHolds(held.get());
+			k.body = BodyLightHolds(held.get());
+			if (scene) {
+				auto&      lists = scene->GetRuntimeData();
+				const auto look = [&k, &held](const auto& a_list, int& a_count) {
+					for (const auto& bsLight : a_list) {
+						if (bsLight && bsLight->light.get() == held.get()) {
+							++a_count;
+							k.bsRefs = bsLight->GetRefCount();
+						}
+					}
+				};
+				look(lists.activeLights, k.active);
+				look(lists.activeShadowLights, k.shadow);
+				RE::BSSpinLockGuard queue(lists.lightQueueLock);
+				look(lists.lightQueueAdd, k.queuedAdd);
+				look(lists.lightQueueRemove, k.queuedRemove);
+				look(lists.unk190, k.unnamed);
+			}
+			out.push_back(std::move(k));
 		}
 		return out;
 	}
