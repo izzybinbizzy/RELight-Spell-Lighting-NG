@@ -236,9 +236,7 @@ namespace Plugin
 				if (!bs) {
 					continue;
 				}
-				if (a_scene) {
-					a_scene->RemoveLight(bs);
-				}
+				TakeOffOwnLight(a_scene, bs);
 				if (auto* light = bs->light.get(); light && light->parent) {
 					light->parent->DetachChild(light);  // no light node left on a projectile that lives on
 				}
@@ -283,9 +281,7 @@ namespace Plugin
 			if (!a_cloud.light) {
 				return;
 			}
-			if (a_scene) {
-				a_scene->RemoveLight(a_cloud.light);
-			}
+			TakeOffOwnLight(a_scene, a_cloud.light);
 			if (auto* light = a_cloud.light->light.get(); light && light->parent) {
 				light->parent->DetachChild(light);
 			}

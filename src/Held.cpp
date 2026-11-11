@@ -18,6 +18,8 @@
 
 #include "Plugin.h"
 
+#include <algorithm>
+
 namespace Plugin
 {
 	namespace
@@ -117,9 +119,7 @@ namespace Plugin
 
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)
 		{
-			if (a_scene && a_v.bs) {
-				a_scene->RemoveLight(a_v.bs);
-			}
+			TakeOffOwnLight(a_scene, a_v.bs);
 			if (a_v.node && a_v.light && a_v.light->parent == a_v.node.get()) {
 				a_v.node->DetachChild(a_v.light.get());
 			}
@@ -298,6 +298,27 @@ namespace Plugin
 		}
 		a_made = light;
 		return bs;
+	}
+
+	// off the scene by its NiLight, the engine's own removal: a light Open Shaders' Promote made a shadow caster stays in the
+	// scene when removed by its BSLight. One hung since the scene's last light pass still waits in the add queue, where the
+	// lookup by NiLight does not search, so it goes by its BSLight. Main thread
+	void TakeOffOwnLight(RE::ShadowSceneNode* a_scene, const RE::NiPointer<RE::BSLight>& a_bs)
+	{
+		if (!a_scene || !a_bs) {
+			return;
+		}
+		bool queued = false;
+		{
+			auto&                     data = a_scene->GetRuntimeData();
+			const RE::BSSpinLockGuard guard(data.lightQueueLock);
+			queued = std::ranges::any_of(data.lightQueueAdd, [&](const RE::NiPointer<RE::BSLight>& a_one) { return a_one.get() == a_bs.get(); });
+		}
+		if (auto* light = a_bs->light.get(); light && !queued) {
+			a_scene->RemoveLight(light);
+		} else {
+			a_scene->RemoveLight(a_bs);
+		}
 	}
 
 	// the sliders onto a light MakeOwnLight made: fade and reach as the caller worked them out

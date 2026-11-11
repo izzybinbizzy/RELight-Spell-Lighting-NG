@@ -61,9 +61,7 @@ namespace Plugin
 
 		void Drop(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
-			if (a_scene && a_twin.bs) {
-				a_scene->RemoveLight(a_twin.bs);
-			}
+			TakeOffOwnLight(a_scene, a_twin.bs);
 			if (a_twin.light && a_twin.light->parent) {
 				a_twin.light->parent->DetachChild(a_twin.light.get());
 			}
