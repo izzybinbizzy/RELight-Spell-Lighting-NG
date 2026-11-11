@@ -126,4 +126,22 @@ namespace Plugin
 		RE::BSSpinLockGuard lock(gLock);
 		return gKept.size();
 	}
+
+	std::vector<KeptLight> KeptLightList(std::size_t a_most)
+	{
+		std::vector<KeptLight> out;
+		RE::BSSpinLockGuard    lock(gLock);
+		for (const auto& [light, held] : gKept) {
+			if (out.size() >= a_most) {
+				break;
+			}
+			const auto* parent = held->parent;
+			const auto* root = parent;
+			while (root && root->parent) {
+				root = root->parent;
+			}
+			out.push_back({ held->name.c_str(), held->GetRefCount(), parent ? parent->name.c_str() : "", root ? root->name.c_str() : "" });
+		}
+		return out;
+	}
 }

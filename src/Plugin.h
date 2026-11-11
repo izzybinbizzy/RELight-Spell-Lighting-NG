@@ -183,10 +183,19 @@ namespace Plugin
 	void                      KeepLight(RE::NiLight* a_light);  // any thread: alive for our lists while the game has it
 	void                      SweepKeptLights();                // main thread, first each frame: what left the game is forgotten, then freed
 	[[nodiscard]] std::size_t KeptLights();
-	void                      ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
-	void                      ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
-	void                      ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
-	void                      ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
+	struct KeptLight
+	{
+		std::string   name;
+		std::uint32_t refs{ 0 };
+		std::string   parent;
+		std::string   root;
+	};
+	// main thread (devbench report): what Keep.cpp holds, its first a_most
+	[[nodiscard]] std::vector<KeptLight> KeptLightList(std::size_t a_most);
+	void                                 ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
+	void                                 ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
+	void                                 ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
+	void                                 ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
 
 	// ------------------------------------------------------------------ HandLights.cpp: lights on the caster's hands
 	// what a hand light's dress wrote: Brightness's bases for it, so a pass that scaled it first is never baked in
