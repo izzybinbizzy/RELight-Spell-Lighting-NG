@@ -51,7 +51,7 @@ namespace Plugin
 			out["settings"] = SettingsNow();
 			out["lighting"] = json::parse(LightingReport());  // Lighting.cpp, as Illuminated's
 			out["handLights"] = { { "made", HandLightsMade() }, { "effects", HandEffects() }, { "automatic", AutoHandEffects() } };
-			out["groundLights"] = { { "now", GroundLightCount() }, { "made", GroundLightsMade() } };  // GroundLights.cpp
+			out["groundLights"] = { { "now", GroundLightCount() }, { "made", GroundLightsMade() }, { "leftHidden", GroundLightsLeftHidden() } };  // GroundLights.cpp
 			out["heldLights"] = LiveHeldLights();
 			out["bodyLights"] = { { "now", LiveBodyLights() }, { "made", BodyLightsMade() } };  // BodyLights.cpp
 			out["keptLights"] = KeptLights();

@@ -142,6 +142,7 @@ namespace Plugin
 	void                      RenewGroundLights();  // a loading screen ended: every twin let go, the next visit hangs a new one
 	[[nodiscard]] std::size_t GroundLightCount();
 	[[nodiscard]] std::size_t GroundLightsMade();
+	[[nodiscard]] std::size_t GroundLightsLeftHidden();  // GroundLights.cpp: casting lights the game holds hidden on a caster whose hands are down
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: a caster's light "Hand lights for - Everyone nearby" keeps out while the caster is far (main thread)
