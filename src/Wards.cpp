@@ -616,13 +616,15 @@ namespace Plugin
 		void NoteGraphLook()
 		{
 			static std::atomic<bool> queued{ false };
-			auto*                    tasks = SKSE::GetTaskInterface();
-			if (tasks && !queued.exchange(true)) {
-				tasks->AddTask([]() {
-					queued = false;
-					LightKit::Guarded("block watch", []() { CheckBlockGraph(); });
-				});
-			}
+			LightKit::Guarded("block watch note", []() {
+				auto* tasks = SKSE::GetTaskInterface();
+				if (tasks && !queued.exchange(true)) {
+					tasks->AddTask([]() {
+						queued = false;
+						LightKit::Guarded("block watch", []() { CheckBlockGraph(); });
+					});
+				}
+			});
 		}
 
 		// her graph is built with her 3D: SKSE's 3D-update event, her load event, a race change. She cannot block before she draws, so her own draw looks too

@@ -364,6 +364,7 @@ namespace Plugin
 		kNiNode,
 		kActor3D,
 		kMagicObject,
+		kMagicDrop,
 		kArtInit,
 		kArtDetach,
 		kRefLoad,
@@ -372,7 +373,7 @@ namespace Plugin
 		kCount,
 	};
 	inline constexpr std::array<const char*, static_cast<std::size_t>(SweepWhy::kCount)> kSweepWhyNames{ "draw", "cell", "equip", "death", "camera", "ni node update",
-		"actor 3d", "magic object", "art init", "art detach", "reference load", "reference drop", "game load" };
+		"actor 3d", "magic object", "magic object drop", "art init", "art detach", "reference load", "reference drop", "game load" };
 	[[nodiscard]] std::uint32_t                                                          SweepNotes(std::size_t a_why) noexcept;  // how many times each kind of moment was heard: devbench's instrument
 	void                                                                                 NoteSweep(SweepWhy a_why) noexcept;      // any thread: something that can end or bring a light happened (Keep.cpp)
 	[[nodiscard]] bool                                                                   SweepWindowOpen() noexcept;              // the few frames after such a moment
@@ -381,12 +382,12 @@ namespace Plugin
 	void                                                                                 NoteSliderLook() noexcept;               // any thread: the sliders' walk looks for a few frames (Brightness.cpp)
 	[[nodiscard]] const std::vector<RE::FormID>&                                         DrawnActorIds();                         // main thread: the actors with their hands out (Held.cpp)
 	void                                                                                 NoteActorLoaded() noexcept;              // any thread: an actor's 3D came in, it may arrive with its weapon out (Held.cpp)
-	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
 	// the optional Bottled Shaders shadow download is installed (its marker file): her hand lights and Candlelight cast shadows
 	[[nodiscard]] bool ShadowPatch();
 	// a hand light record's twin that casts a shadow (her own lights, with ShadowPatch), else the record itself; any thread
 	[[nodiscard]] RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light);
-	[[nodiscard]] RE::BSLight*       MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
+	// one light of our own made and registered the ReLight way (main thread; nullptr when it could not be) - held and body lights
+	[[nodiscard]] RE::BSLight* MakeOwnLight(const Stream& a_s, float a_fade, float a_reach, RE::NiNode* a_parent,
 		RE::ShadowSceneNode* a_scene, const char* a_name, RE::NiPointLight*& a_made, bool a_shadow = false);
 	// the sliders onto such a light (fade and reach as the caller worked them out)
 	void RetuneOwnLight(RE::NiPointLight* a_light, const Stream& a_s, float a_fade, float a_reach, bool a_reachMoved);

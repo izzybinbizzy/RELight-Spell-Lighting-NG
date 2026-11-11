@@ -133,14 +133,16 @@ namespace
 			if (Plugin::WardsSteppedDown()) {
 				SKSE::GetMessagingInterface()->RegisterListener("DynamicWards", [](SKSE::MessagingInterface::Message* a_m) {
 					// handled on the main thread, whichever thread Dynamic Wards sends from
-					if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
-						tasks->AddTask([]() {
-							LightKit::Guarded("Dynamic Wards message", []() {
-								Plugin::RefindHandLights();
-								Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+					LightKit::Guarded("Dynamic Wards note", [a_m]() {
+						if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
+							tasks->AddTask([]() {
+								LightKit::Guarded("Dynamic Wards message", []() {
+									Plugin::RefindHandLights();
+									Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+								});
 							});
-						});
-					}
+						}
+					});
 				});
 			}
 			break;
