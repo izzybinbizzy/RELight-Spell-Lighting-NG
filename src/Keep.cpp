@@ -5,8 +5,9 @@
 // The one place a light the GAME made is held. The spell lights, the lights put out while sneaking, the hand lights,
 // the lights the sliders scale and the lights a switch holds out are lists of plain pointers; the one reference that
 // keeps such a light alive for them is here (the fading module, Lights by Item and the ground twins hold some too, so a light
-// can stay a few frames past its last use). A light has left the game when this reference is its last, or when the only other
-// holder is its entry in the scene's lists (KeptLights.h), and then every list forgets it before it goes, on the main thread.
+// can stay a few frames past its last use). A light has left the game when this reference is its last, when the only other
+// holder is its entry in the scene's lists, or when it has no node and no entry in any of those lists, though a scene light the
+// scene let go of still holds it (KeptLights.h); then every list forgets it before it goes, on the main thread.
 // (Each list used to hold a reference of its own and call a light gone at "one reference left". A hand light sat in three
 // of them, so that was never true: it was never let go.)
 
@@ -17,16 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
-#include <string_view>
 #include <utility>
-
-#ifndef WIN32_LEAN_AND_MEAN
-#	define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#	define NOMINMAX
-#endif
-#include <Windows.h>  // VirtualQuery, ReadProcessMemory: the holder search reads the game's memory
 
 namespace Plugin
 {
@@ -40,6 +32,30 @@ namespace Plugin
 		std::atomic<int>                                                                   gSweepFrames{ kSweepFrames };
 		std::array<std::atomic<std::uint32_t>, static_cast<std::size_t>(SweepWhy::kCount)> gSweepNotes{};
 		KeptLights::Watch                                                                  gUnowned;  // main thread
+
+		// main thread: the lights every loaded actor's magic casters hold through their scene lights
+		[[nodiscard]] std::vector<const void*> CastingLights()
+		{
+			std::vector<const void*> out;
+			const auto               add = [&out](RE::Actor* a_actor) {
+				for (const auto* caster : a_actor->GetActorRuntimeData().magicCasters) {
+					if (const auto* bs = caster ? caster->light.get() : nullptr; bs && bs->light) {
+						out.push_back(bs->light.get());
+					}
+				}
+			};
+			if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+				add(player);
+			}
+			if (auto* lists = RE::ProcessLists::GetSingleton()) {
+				for (auto& handle : lists->highActorHandles) {
+					if (auto actor = handle.get()) {
+						add(actor.get());
+					}
+				}
+			}
+			return out;
+		}
 	}
 
 	std::uint32_t SweepNotes(std::size_t a_why) noexcept
@@ -87,32 +103,45 @@ namespace Plugin
 					it = gKept.erase(it);
 				} else {
 					if (!it->second->parent) {
-						lost.push_back({ it->first, refs, 0 });
+						lost.push_back({ it->first, refs, 0, 0 });
 					}
 					++it;
 				}
 			}
 		}
 		// its entry there holds it too, and the scene's own pass takes it out only when that is the last: we let go and that pass sees it.
-		// One queued for removal holds it from the scene's queue, and may sit in an active list as well: each scene light counts once
-		if (auto* scene = lost.empty() ? nullptr : LightKit::Scene()) {
+		// One queued for removal holds it from the scene's queue, and may sit in an active list as well: each scene light counts once.
+		// One in no list at all is drawn by nothing, though a scene light the scene let go of may still hold it
+		auto* scene = lost.empty() ? nullptr : LightKit::Scene();
+		if (!scene) {
+			lost.clear();  // no scene to read: nothing is judged
+		} else {
 			static std::vector<const void*> counted;  // main thread; its storage kept between looks
 			counted.clear();
-			const auto count = [](const auto& a_list) {
+			const auto count = [](const auto& a_list, std::uint32_t KeptLights::Seen::* a_field) {
 				for (const auto& bsLight : a_list) {
 					const auto* light = bsLight ? bsLight->light.get() : nullptr;
 					const auto  it = light ? std::ranges::find(lost, static_cast<const void*>(light), &KeptLights::Seen::key) : lost.end();
 					if (it != lost.end() && std::ranges::find(counted, static_cast<const void*>(bsLight.get())) == counted.end()) {
 						counted.push_back(bsLight.get());
-						++it->entries;
+						++((*it).*a_field);
 					}
 				}
 			};
 			auto& lists = scene->GetRuntimeData();
-			count(lists.activeLights);
-			count(lists.activeShadowLights);
+			count(lists.activeLights, &KeptLights::Seen::entries);
+			count(lists.activeShadowLights, &KeptLights::Seen::entries);
 			RE::BSSpinLockGuard queue(lists.lightQueueLock);
-			count(lists.lightQueueRemove);
+			count(lists.lightQueueRemove, &KeptLights::Seen::entries);
+			count(lists.lightQueueAdd, &KeptLights::Seen::elsewhere);
+			count(lists.unk190, &KeptLights::Seen::elsewhere);
+		}
+		// a casting light the scene let go of is still its caster's, who hangs it again: never ours to let go of that way
+		if (std::ranges::any_of(lost, KeptLights::OffScene)) {
+			const auto casting = CastingLights();
+			std::erase_if(lost, [&casting](const KeptLights::Seen& a_seen) {
+				return KeptLights::OffScene(a_seen) && std::ranges::find(casting, a_seen.key) != casting.end();
+			});
 		}
 		if (const auto unowned = gUnowned.Look(lost); !unowned.empty()) {
 			RE::BSSpinLockGuard lock(gLock);
@@ -126,7 +155,7 @@ namespace Plugin
 			}
 		}
 		if (gUnowned.Waiting() && gSweepFrames.load(std::memory_order_relaxed) <= 0) {
-			gSweepFrames.store(1, std::memory_order_relaxed);  // its second look; it ends with that look
+			gSweepFrames.store(1, std::memory_order_relaxed);  // its next look; it ends once the watch has decided
 		}
 		if (gone.empty()) {
 			return;
@@ -146,220 +175,6 @@ namespace Plugin
 	{
 		RE::BSSpinLockGuard lock(gLock);
 		return gKept.size();
-	}
-
-	namespace
-	{
-		struct Image
-		{
-			std::uintptr_t base{ 0 };
-			std::string    name;
-		};
-
-		// the module an address lies in (its base and file name); base 0 off every module
-		[[nodiscard]] Image ImageOf(std::uintptr_t a_address)
-		{
-			HMODULE module = nullptr;
-			if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(a_address), &module) || !module) {
-				return {};
-			}
-			std::array<wchar_t, 260> path{};
-			const auto               length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-			std::wstring_view        file(path.data(), length);
-			if (const auto slash = file.find_last_of(L"\\/"); slash != std::wstring_view::npos) {
-				file.remove_prefix(slash + 1);
-			}
-			Image image{ reinterpret_cast<std::uintptr_t>(module), {} };
-			for (const wchar_t c : file) {
-				image.name.push_back(c < 128 ? static_cast<char>(c) : '?');
-			}
-			return image;
-		}
-
-		// a read that cannot fault: the memory may change under a search that runs beside the game
-		template <class T>
-		[[nodiscard]] bool Peek(std::uintptr_t a_address, T& a_out)
-		{
-			SIZE_T read = 0;
-			return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(a_address), &a_out, sizeof(T), &read) && read == sizeof(T);
-		}
-
-		// the class whose vtable sits at a_vtable, from the module's own type data (the compiler's object locator); empty when it is none
-		[[nodiscard]] std::string ClassAt(std::uintptr_t a_vtable)
-		{
-			const auto     image = ImageOf(a_vtable);
-			std::uintptr_t locator = 0;
-			if (!image.base || !Peek(a_vtable - sizeof(std::uintptr_t), locator) || ImageOf(locator).base != image.base) {
-				return {};
-			}
-			struct Locator
-			{
-				std::uint32_t signature{ 0 };
-				std::uint32_t offset{ 0 };
-				std::uint32_t cdOffset{ 0 };
-				std::int32_t  type{ 0 };
-				std::int32_t  hierarchy{ 0 };
-				std::int32_t  self{ 0 };
-			};
-			Locator col{};
-			if (!Peek(locator, col) || col.signature != 1 || col.self <= 0 || image.base + static_cast<std::uintptr_t>(col.self) != locator) {
-				return {};
-			}
-			std::array<char, 96> name{};
-			if (col.type <= 0 || !Peek(image.base + static_cast<std::uintptr_t>(col.type) + 16, name)) {
-				return {};
-			}
-			name.back() = '\0';
-			return name.data();
-		}
-
-		// the nearest vtable at or before a_address: the object the reference most likely sits in, and the reference's place in it
-		[[nodiscard]] std::pair<std::string, std::int64_t> HolderOf(std::uintptr_t a_address)
-		{
-			constexpr std::uintptr_t kBack = 0x600;
-			const std::uintptr_t     first = a_address & ~std::uintptr_t{ 7 };
-			for (std::uintptr_t at = first; at + kBack >= first && at >= 8; at -= 8) {
-				std::uintptr_t word = 0;
-				if (!Peek(at, word)) {
-					break;
-				}
-				if (auto name = word ? ClassAt(word) : std::string{}; !name.empty()) {
-					return { std::move(name), static_cast<std::int64_t>(a_address - at) };
-				}
-			}
-			return { std::string{}, -1 };
-		}
-	}
-
-	std::vector<KeptHolder> KeptLightHolders(std::size_t a_most)
-	{
-		// read under our lock and searched by address only: no reference of ours may be the last one let go on this thread
-		struct Target
-		{
-			std::uintptr_t address{ 0 };
-			std::string    name;
-			std::uint32_t  refs{ 0 };
-		};
-		std::vector<Target>         targets;
-		std::vector<std::uintptr_t> ours;
-		{
-			RE::BSSpinLockGuard lock(gLock);
-			for (const auto& [light, held] : gKept) {
-				ours.push_back(reinterpret_cast<std::uintptr_t>(&light));
-				ours.push_back(reinterpret_cast<std::uintptr_t>(&held));
-				if (!held->parent && targets.size() < a_most) {
-					targets.push_back({ reinterpret_cast<std::uintptr_t>(held.get()), held->name.c_str(), held->GetRefCount() });
-				}
-			}
-		}
-		std::vector<std::pair<std::size_t, std::uintptr_t>> hits;
-		const auto                                          search = [&ours](const std::vector<std::uintptr_t>& a_targets, auto& a_hits) {
-			if (a_targets.empty()) {
-				return;
-			}
-			constexpr std::size_t       kChunk = std::size_t{ 1 } << 20;
-			constexpr std::size_t       kMostHits = 48;
-			constexpr DWORD             kWritable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-			constexpr std::uintptr_t    kStackReach = 0x40000;
-			std::vector<std::uintptr_t> buffer(kChunk / sizeof(std::uintptr_t));
-			const auto                  low = std::ranges::min(a_targets);
-			const auto                  high = std::ranges::max(a_targets);
-			const auto                  mineFrom = reinterpret_cast<std::uintptr_t>(buffer.data());
-			const auto                  mineTo = mineFrom + kChunk;
-			// this thread's own stack holds copies too
-			const auto               stack = reinterpret_cast<std::uintptr_t>(&a_hits);
-			MEMORY_BASIC_INFORMATION mem{};
-			for (std::uintptr_t at = 0x10000; a_hits.size() < kMostHits && VirtualQuery(reinterpret_cast<LPCVOID>(at), &mem, sizeof(mem)) == sizeof(mem);
-				at = reinterpret_cast<std::uintptr_t>(mem.BaseAddress) + mem.RegionSize) {
-				if (mem.State != MEM_COMMIT || (mem.Protect & kWritable) == 0 || (mem.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-					continue;
-				}
-				const auto begin = reinterpret_cast<std::uintptr_t>(mem.BaseAddress);
-				const auto end = begin + mem.RegionSize;
-				for (auto from = begin; from < end && a_hits.size() < kMostHits; from += kChunk) {
-					SIZE_T read = 0;
-					if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(from), buffer.data(), (std::min)(kChunk, static_cast<std::size_t>(end - from)), &read)) {
-						continue;
-					}
-					for (std::size_t i = 0; i < read / sizeof(std::uintptr_t); ++i) {
-						const auto word = buffer[i];
-						if (word < low || word > high) {
-							continue;
-						}
-						const auto where = from + i * sizeof(std::uintptr_t);
-						const bool mine = (where >= mineFrom && where < mineTo) || (where + kStackReach > stack && where < stack + kStackReach) ||
-						                  std::ranges::find(ours, where) != ours.end();
-						for (std::size_t t = 0; !mine && t < a_targets.size(); ++t) {
-							if (word == a_targets[t]) {
-								a_hits.emplace_back(t, where);
-							}
-						}
-					}
-				}
-			}
-		};
-		std::vector<std::uintptr_t> addresses;
-		for (const auto& target : targets) {
-			addresses.push_back(target.address);
-		}
-		search(addresses, hits);
-		std::vector<KeptHolder> out;
-		for (std::size_t t = 0; t < targets.size(); ++t) {
-			KeptHolder none{};
-			none.light = targets[t].name;
-			none.refs = targets[t].refs;
-			bool any = false;
-			for (const auto& [which, where] : hits) {
-				if (which != t) {
-					continue;
-				}
-				any = true;
-				KeptHolder h = none;
-				h.address = where;
-				if (const auto image = ImageOf(where); image.base) {
-					h.where = std::format("{}+{:X}", image.name, where - image.base);
-				}
-				auto [holder, offset] = HolderOf(where);
-				const bool scene = holder.find("BSLight") != std::string::npos || holder.find("BSShadowLight") != std::string::npos;
-				h.holder = std::move(holder);
-				h.offset = offset;
-				out.push_back(std::move(h));
-				// the scene light that holds it: its own count (NiRefObject, +8) and every place that holds the scene light
-				if (scene && offset > 0) {
-					const auto    light = where - static_cast<std::uintptr_t>(offset);
-					std::uint32_t count = 0;
-					static_cast<void>(Peek(light + 8, count));
-					std::vector<std::pair<std::size_t, std::uintptr_t>> up;
-					search({ light }, up);
-					for (const auto& found : up) {
-						const auto at = found.second;
-						KeptHolder s = none;
-						s.light = std::format("{} - its scene light {:X}", none.light, light);
-						s.refs = count;
-						s.address = at;
-						if (const auto image = ImageOf(at); image.base) {
-							s.where = std::format("{}+{:X}", image.name, at - image.base);
-						}
-						auto [upHolder, upOffset] = HolderOf(at);
-						s.holder = std::move(upHolder);
-						s.offset = upOffset;
-						out.push_back(std::move(s));
-					}
-					if (up.empty()) {
-						KeptHolder s = none;
-						s.light = std::format("{} - its scene light {:X}", none.light, light);
-						s.refs = count;
-						s.where = "no place holds the scene light";
-						out.push_back(std::move(s));
-					}
-				}
-			}
-			if (!any) {
-				none.where = "no other place holds it";
-				out.push_back(std::move(none));
-			}
-		}
-		return out;
 	}
 
 	std::vector<KeptLight> KeptLightList(std::size_t a_most)

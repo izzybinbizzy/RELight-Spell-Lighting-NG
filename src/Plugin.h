@@ -206,22 +206,10 @@ namespace Plugin
 	};
 	// main thread (devbench report): what Keep.cpp holds, its first a_most
 	[[nodiscard]] std::vector<KeptLight> KeptLightList(std::size_t a_most);
-	// a place in the game's memory that still holds a kept light with no node (devbench, testing): where it is and what it sits in
-	struct KeptHolder
-	{
-		std::string    light;
-		std::uint32_t  refs{ 0 };
-		std::uintptr_t address{ 0 };
-		std::string    where;         // module+offset for a module's own data, empty on the heap
-		std::string    holder;        // the class of the object it most likely sits in; empty when no vtable was found near it
-		std::int64_t   offset{ -1 };  // its place in that object
-	};
-	// any thread (DevBench's own): it reads the whole process's memory, so it runs off the main thread and only when asked
-	[[nodiscard]] std::vector<KeptHolder> KeptLightHolders(std::size_t a_most);
-	void                                  ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
-	void                                  ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
-	void                                  ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
-	void                                  ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
+	void                                 ForgetSpellLights(const GoneLights& a_gone);   // Hooks.cpp (it calls Options.cpp's too)
+	void                                 ForgetOptionLights(const GoneLights& a_gone);  // Options.cpp: called by ForgetSpellLights only
+	void                                 ForgetHandLights(const GoneLights& a_gone);    // HandLights.cpp
+	void                                 ForgetSliderLights(const GoneLights& a_gone);  // Brightness.cpp
 
 	// ------------------------------------------------------------------ HandLights.cpp: lights on the caster's hands
 	// what a hand light's dress wrote: Brightness's bases for it, so a pass that scaled it first is never baked in
