@@ -413,7 +413,6 @@ namespace Plugin
 	[[nodiscard]] std::size_t   BodyLightsMade();
 
 	// ------------------------------------------------------------------ Wards.cpp: one ward, one dome, and its color
-	void                                     WatchBlocking();                // Wards.cpp: a shield's ward comes up at once
 	void                                     ApplyWards(const char* a_why);  // one dome per ward and the color pick; nothing while Dynamic Wards is loaded
 	[[nodiscard]] bool                       WardsSteppedDown();             // Dynamic Wards is loaded: the wards are its
 	[[nodiscard]] bool                       StrangeWardsHandShows();        // Strange Wards installed and 360 Ward not: the game's ward hand shows

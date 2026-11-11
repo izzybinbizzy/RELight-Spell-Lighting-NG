@@ -52,6 +52,7 @@
 #include "FloorLightFix.h"
 #include "Plugin.h"
 #include "RuntimeGuard.h"
+#include "ShieldWardWatch.h"
 
 namespace
 {
@@ -85,6 +86,9 @@ namespace
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
+		if (!REL::Module::IsVR()) {      // kept SE / AE only, untested on VR
+			ShieldWardWatch::Install();  // a worn ward comes up as her block starts
+		}
 		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
@@ -158,7 +162,6 @@ namespace
 			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
 				ForgetOldGame();
 			}
-			Plugin::WatchBlocking();              // her animation graph is new after a load: the shield's ward watch goes on it again
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
 			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers
