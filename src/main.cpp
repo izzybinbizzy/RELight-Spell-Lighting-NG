@@ -86,9 +86,6 @@ namespace
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
-		if (!REL::Module::IsVR()) {      // kept SE / AE only, untested on VR
-			ShieldWardWatch::Install();  // a worn ward comes up as her block starts
-		}
 		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
@@ -151,6 +148,9 @@ namespace
 			}
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
+			if (!REL::Module::IsVR()) {      // kept SE / AE only, untested on VR
+				ShieldWardWatch::Install();  // ahead of the load work: a stop there does not cost it
+			}
 			OnDataLoaded();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
