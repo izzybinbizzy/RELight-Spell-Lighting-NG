@@ -130,6 +130,7 @@ namespace Plugin
 	std::vector<KeptLight> KeptLightList(std::size_t a_most)
 	{
 		std::vector<KeptLight> out;
+		auto*                  player = RE::PlayerCharacter::GetSingleton();
 		RE::BSSpinLockGuard    lock(gLock);
 		for (const auto& [light, held] : gKept) {
 			if (out.size() >= a_most) {
@@ -140,7 +141,18 @@ namespace Plugin
 			while (root && root->parent) {
 				root = root->parent;
 			}
-			out.push_back({ held->name.c_str(), held->GetRefCount(), parent ? parent->name.c_str() : "", root ? root->name.c_str() : "" });
+			int caster = -1;
+			if (player) {
+				const auto& casters = player->GetActorRuntimeData().magicCasters;
+				for (std::size_t i = 0; i < std::size(casters); ++i) {
+					const auto* bs = casters[i] ? casters[i]->light.get() : nullptr;
+					if (bs && bs->light.get() == held.get()) {
+						caster = static_cast<int>(i);
+					}
+				}
+			}
+			out.push_back({ held->name.c_str(), held->GetRefCount(), parent ? parent->name.c_str() : "", root ? root->name.c_str() : "", caster, held->GetAppCulled(),
+				GroundLightRole(held.get()), HeldLightHolds(held.get()), BodyLightHolds(held.get()) });
 		}
 		return out;
 	}

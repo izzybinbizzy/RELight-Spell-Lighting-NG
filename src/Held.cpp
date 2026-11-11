@@ -501,4 +501,9 @@ namespace Plugin
 	}
 
 	std::size_t LiveHeldLights() { return gLiveCount.load(); }
+
+	bool HeldLightHolds(const RE::NiLight* a_light)
+	{
+		return std::ranges::any_of(gLive, [a_light](const Live& v) { return v.light.get() == a_light || (v.bs && v.bs->light.get() == a_light); });
+	}
 }

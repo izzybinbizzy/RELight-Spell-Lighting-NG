@@ -497,4 +497,9 @@ namespace Plugin
 
 	std::size_t LiveBodyLights() { return gLive.size(); }
 	std::size_t BodyLightsMade() { return gMade; }
+
+	bool BodyLightHolds(const RE::NiLight* a_light)
+	{
+		return std::ranges::any_of(gLive, [a_light](const Live& v) { return v.light.get() == a_light || (v.bs && v.bs->light.get() == a_light); });
+	}
 }

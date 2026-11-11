@@ -142,7 +142,8 @@ namespace Plugin
 	void                      RenewGroundLights();  // a loading screen ended: every twin let go, the next visit hangs a new one
 	[[nodiscard]] std::size_t GroundLightCount();
 	[[nodiscard]] std::size_t GroundLightsMade();
-	[[nodiscard]] std::size_t GroundLightsLeftHidden();  // GroundLights.cpp: casting lights the game holds hidden on a caster whose hands are down
+	[[nodiscard]] std::size_t GroundLightsLeftHidden();                     // GroundLights.cpp: casting lights the game holds hidden on a caster whose hands are down
+	[[nodiscard]] int         GroundLightRole(const RE::NiLight* a_light);  // main thread: 1 a twin's source, 2 a twin, 3 left hidden, 0 none
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: a caster's light "Hand lights for - Everyone nearby" keeps out while the caster is far (main thread)
@@ -189,6 +190,11 @@ namespace Plugin
 		std::uint32_t refs{ 0 };
 		std::string   parent;
 		std::string   root;
+		int           caster{ -1 };  // the player's magic caster slot whose light it is
+		bool          culled{ false };
+		int           ground{ 0 };  // GroundLightRole
+		bool          weapon{ false };
+		bool          body{ false };
 	};
 	// main thread (devbench report): what Keep.cpp holds, its first a_most
 	[[nodiscard]] std::vector<KeptLight> KeptLightList(std::size_t a_most);
@@ -361,9 +367,10 @@ namespace Plugin
 	void                      DropHeldLights();    // a game loads, or a new one starts: the old game's weapons
 	void                      RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
 	[[nodiscard]] std::size_t LiveHeldLights();
-	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
-	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
-	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
+	[[nodiscard]] bool        HeldLightHolds(const RE::NiLight* a_light);  // main thread
+	void                      NoteDrawing(RE::FormID a_actor);             // a weapon draw began or ended (any thread; Events.cpp)
+	void                      WatchWeaponLights();                         // her cell changed or she drew: her weapon lights checked a while (any thread)
+	void                      WatchEvents();                               // at data load: the event sinks (Events.cpp)
 	enum class SweepWhy : std::uint8_t
 	{
 		kDraw,
@@ -420,6 +427,7 @@ namespace Plugin
 	void                        BumpSettings();        // a setting or switch changed (Settings.cpp)
 	[[nodiscard]] std::uint32_t SettingsGeneration();  // bumped by every setting / switch change: a pass waiting on events looks again
 	[[nodiscard]] std::size_t   LiveBodyLights();
+	[[nodiscard]] bool          BodyLightHolds(const RE::NiLight* a_light);  // main thread
 	[[nodiscard]] std::size_t   BodyLightsMade();
 
 	// ------------------------------------------------------------------ Wards.cpp: one ward, one dome, and its color
