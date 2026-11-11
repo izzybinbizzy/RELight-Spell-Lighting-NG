@@ -202,6 +202,7 @@ namespace Plugin
 		int           queuedRemove{ 0 };
 		int           unnamed{ 0 };
 		std::uint32_t bsRefs{ 0 };  // the holders of the scene light found there
+		std::string   owner;        // a game object still holding it (explosion, hazard, projectile): its kind, form id and state
 	};
 	// main thread (devbench report): what Keep.cpp holds, its first a_most
 	[[nodiscard]] std::vector<KeptLight> KeptLightList(std::size_t a_most);
