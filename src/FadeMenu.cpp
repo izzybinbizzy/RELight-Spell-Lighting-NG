@@ -738,7 +738,15 @@ namespace Fade
 				return hud;
 			}
 
-			[[nodiscard]] bool Found() const noexcept { return api != nullptr; }
+			// true once HUD NG answered; while its export is there but has not answered yet it is asked again (one call a frame,
+			// only then) - absent, without the export or of another version it is never asked again
+			[[nodiscard]] bool Found()
+			{
+				if (!api && getApi) {
+					Ask();
+				}
+				return api != nullptr;
+			}
 
 			// a_frame: the gem's own place, in physical pixels of the whole game view; a_px: pixels per HUD unit on each axis
 			[[nodiscard]] Place Query(std::size_t a_hand, const HudNGNativeFrame& a_frame, ImGuiMCP::ImVec2 a_px)
@@ -806,16 +814,34 @@ namespace Fade
 
 			void Bind()
 			{
-				using GetApi = const HudNGNativeAPI*(HUDNG_NATIVE_CALL*)(std::uint32_t);
-				const auto  module = REX::W32::GetModuleHandleW(L"HudNG.dll");
-				const auto  get = module ? reinterpret_cast<GetApi>(REX::W32::GetProcAddress(module, "HudNG_GetNativeAPI")) : nullptr;
-				const auto* found = get ? get(HUDNG_NATIVE_API_VERSION) : nullptr;
-				if (!found || found->structSize < sizeof(HudNGNativeAPI) || found->version != HUDNG_NATIVE_API_VERSION || !found->Register || !found->Query) {
-					SKSE::log::info("HUD NG: {} - the charge gems stay where this mod draws them", module ? "no native API of this version" : "not loaded");
+				const auto module = REX::W32::GetModuleHandleW(L"HudNG.dll");
+				getApi = module ? reinterpret_cast<GetApi>(REX::W32::GetProcAddress(module, "HudNG_GetNativeAPI")) : nullptr;
+				if (!getApi) {
+					SKSE::log::info("HUD NG: {} - the charge gems stay where this mod draws them", module ? "no native API in it" : "not loaded");
+					return;
+				}
+				Ask();
+			}
+
+			void Ask()
+			{
+				const auto* found = getApi(HUDNG_NATIVE_API_VERSION);
+				if (!found) {
+					if (!toldWaiting) {
+						toldWaiting = true;
+						SKSE::log::info("HUD NG: its native API has not answered yet - asked again on the next frames");
+					}
+					return;
+				}
+				if (found->structSize < sizeof(HudNGNativeAPI) || found->version != HUDNG_NATIVE_API_VERSION || !found->Register || !found->Query) {
+					getApi = nullptr;  // another version: it will not change while the game runs
+					SKSE::log::info("HUD NG: native API version {}, not {} - the charge gems stay where this mod draws them", found->version,
+						HUDNG_NATIVE_API_VERSION);
 					return;
 				}
 				const auto provider = ProviderId();
 				if (provider.empty()) {
+					getApi = nullptr;
 					SKSE::log::warn("HUD NG: no usable provider id in the mod's folder name - the charge gems stay where this mod draws them");
 					return;
 				}
@@ -832,6 +858,9 @@ namespace Fade
 					kWidgets[1]);
 			}
 
+			using GetApi = const HudNGNativeAPI*(HUDNG_NATIVE_CALL*)(std::uint32_t);
+			GetApi                               getApi{ nullptr };
+			bool                                 toldWaiting{ false };
 			const HudNGNativeAPI*                api{ nullptr };
 			std::array<HudNGNativeDescriptor, 2> descriptors{};
 			std::array<HudNGNativeHandle, 2>     handles{};
