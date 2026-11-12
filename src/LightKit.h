@@ -1,15 +1,15 @@
-// LightKit - small helpers Illuminated and RELight - Spell Lighting NG both use
+// LightKit - small helpers Illuminated, RELight - Spell Lighting NG and Illuminated - Creature Lighting NG use
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see the LICENSE file and the notice at the top of main.cpp.
 //
-// The two mods never run together, so each carries its own copy of this file - kept byte for byte the same as the other
-// by PC Runner\fade copies check.py (in preflight), as the fading module is. A change is made in one copy and copied to the
-// other in the same pass. Nothing here knows which mod it is in.
+// Each plugin carries its own copy of this file, kept byte for byte the master's in Tools\Shared Plugin Code\ by
+// PC Runner\shared code sync.py. A change is made in the master and synced to every copy. Nothing here knows which mod it is in.
 //
 //   Relaxed      a value one thread writes and another reads, with nothing else depending on it
 //   NewForm      a form made in memory by the game's own factory; IsCallAt, a call site's check before it is hooked
 //   Isl          the two words Community Shaders' inverse-square lighting reads off a light
 //   CloneLight   a new light for the scene, and AddToScene to register it (ReLight's method, Truman's permission)
+//   TakeOff      a light of ours out of the scene again, the way that leaves no promoted shadow caster behind
 //   FleshFx      which flesh spells wear FleshFX's look, and the color their lights then take
 //   ArtColor     an art model's color off its effect shaders (an automatic hand light's third source)
 //   Guarded      runs a hook's or a frame's own work and lets no exception out into the game
@@ -22,6 +22,7 @@
 #include "LightMath.h"
 #include "Pulse.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -362,6 +363,26 @@ namespace LightKit
 			a_parent->DetachChild(a_light);
 		}
 		return bs;
+	}
+
+	// Off the scene by its NiLight, the engine's own removal: a light Open Shaders' Promote made a shadow caster stays when removed
+	// by its BSLight. One still in the add queue, which the lookup by NiLight does not search, goes by its BSLight. Main thread.
+	inline void TakeOff(RE::ShadowSceneNode* a_scene, const RE::NiPointer<RE::BSLight>& a_bs)
+	{
+		if (!a_scene || !a_bs) {
+			return;
+		}
+		bool queued = false;
+		{
+			auto&                     data = a_scene->GetRuntimeData();
+			const RE::BSSpinLockGuard guard(data.lightQueueLock);
+			queued = std::ranges::any_of(data.lightQueueAdd, [&](const RE::NiPointer<RE::BSLight>& a_one) { return a_one.get() == a_bs.get(); });
+		}
+		if (auto* light = a_bs->light.get(); light && !queued) {
+			a_scene->RemoveLight(light);
+		} else {
+			a_scene->RemoveLight(a_bs);
+		}
 	}
 
 	// the ambient a light of ours wears off Community Shaders: a tenth of its color (RE::Light's rule, Truman)

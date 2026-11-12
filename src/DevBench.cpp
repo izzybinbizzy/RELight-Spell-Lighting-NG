@@ -19,6 +19,8 @@
 
 #include "DevBenchGlue.h"
 
+#include <utility>
+
 namespace Plugin
 {
 	namespace
@@ -51,10 +53,15 @@ namespace Plugin
 			out["settings"] = SettingsNow();
 			out["lighting"] = json::parse(LightingReport());  // Lighting.cpp, as Illuminated's
 			out["handLights"] = { { "made", HandLightsMade() }, { "effects", HandEffects() }, { "automatic", AutoHandEffects() } };
-			out["groundLights"] = { { "now", GroundLightCount() }, { "made", GroundLightsMade() } };  // GroundLights.cpp
+			out["groundLights"] = { { "now", GroundLightCount() }, { "made", GroundLightsMade() }, { "leftHidden", GroundLightsLeftHidden() } };  // GroundLights.cpp
 			out["heldLights"] = LiveHeldLights();
 			out["bodyLights"] = { { "now", LiveBodyLights() }, { "made", BodyLightsMade() } };  // BodyLights.cpp
 			out["keptLights"] = KeptLights();
+			out["kept"] = json::array();
+			for (const auto& k : KeptLightList(24)) {
+				out["kept"].push_back({ { "name", k.name }, { "refs", k.refs }, { "parent", k.parent }, { "root", k.root }, { "culled", k.culled },
+					{ "lists", json::array({ k.active, k.shadow, k.queuedAdd, k.queuedRemove, k.unnamed }) } });
+			}
 			out["sweepNotes"] = json::object();
 			for (std::size_t i = 0; i < kSweepWhyNames.size(); ++i) {
 				out["sweepNotes"][kSweepWhyNames[i]] = SweepNotes(i);
@@ -179,8 +186,9 @@ namespace Plugin
 		void Control(void*, const char* a_args, void* a_sink, DevBenchAPI::WriteFn a_write) noexcept
 		{
 			try {
+				auto args = DevBenchGlue::Args(a_args);
 				// a change is made on the main thread, as the game's forms and the lit scene are its
-				const auto now = DevBenchGlue::OnMainThread([args = DevBenchGlue::Args(a_args)]() { return Act(args); });
+				const auto now = DevBenchGlue::OnMainThread([args = std::move(args)]() { return Act(args); });
 				DevBenchGlue::Reply(a_sink, a_write, now ? *now : DevBenchGlue::NotRunYet());
 			} catch (...) {
 				Refuse(a_sink, a_write, "RELight - Spell Lighting NG could not handle that");

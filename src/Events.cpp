@@ -27,11 +27,13 @@ namespace Plugin
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 			{
-				if (a_event && !a_event->opening && std::string_view(a_event->menuName.c_str()) == RE::LoadingMenu::MENU_NAME) {
-					if (auto* tasks = SKSE::GetTaskInterface()) {
-						tasks->AddTask([]() { LightKit::Guarded("loading screen ended", []() { AfterLoadingScreen(); }); });
+				LightKit::Guarded("loading screen event", [a_event]() {
+					if (a_event && !a_event->opening && std::string_view(a_event->menuName.c_str()) == RE::LoadingMenu::MENU_NAME) {
+						if (auto* tasks = SKSE::GetTaskInterface()) {
+							tasks->AddTask([]() { LightKit::Guarded("loading screen ended", []() { AfterLoadingScreen(); }); });
+						}
 					}
-				}
+				});
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};

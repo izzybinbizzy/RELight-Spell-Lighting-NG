@@ -235,9 +235,7 @@ namespace Plugin
 
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)
 		{
-			if (a_scene && a_v.bs) {
-				a_scene->RemoveLight(a_v.bs);
-			}
+			LightKit::TakeOff(a_scene, a_v.bs);
 			if (a_v.node && a_v.light && a_v.light->parent == a_v.node.get()) {
 				a_v.node->DetachChild(a_v.light.get());
 			}

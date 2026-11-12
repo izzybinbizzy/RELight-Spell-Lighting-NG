@@ -425,6 +425,7 @@ namespace Plugin
 		std::erase_if(gKnown, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 		// kept between walks now: a freed light's address must not keep its option or hue for a new light
 		std::erase_if(gEnchant, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
+		std::erase_if(gEnchantKind, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 		std::erase_if(gFlesh, [&](const auto& a_kv) { return a_gone.contains(a_kv.first); });
 	}
 

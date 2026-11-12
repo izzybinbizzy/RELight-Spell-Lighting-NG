@@ -561,9 +561,8 @@ namespace
 	std::unordered_set<RE::NiLight*> gHerShadows;
 	std::unordered_set<RE::NiLight*> gShadowsBetween;  // the casters moved between her hands; main thread only
 
-	// a spell light of ours hangs in that hand and shows: a dimmed one counts (sneaking dims both hands alike), one faded to
-	// nothing (the off choice) leaves its hand unlit
-	// a hand light that shows: faded to nothing (the off choice) or put out by a switch, its hand counts as unlit
+	// a hand light that shows: a dimmed one counts (sneaking dims both hands alike); faded to nothing (the off choice) or put out by a
+	// switch, its hand counts as unlit
 	[[nodiscard]] bool Shows(RE::NiLight* a_light) { return a_light->GetLightRuntimeData().fade > 0.0f && !Plugin::WantedDark(a_light); }
 
 	[[nodiscard]] bool HasHandLight(const RE::NiAVObject* a_magic)
@@ -742,9 +741,11 @@ namespace
 			auto*      use = hers ? Plugin::ShadowTwinOf(a_light) : a_light;
 			made = netimmerse_cast<RE::NiPointLight*>(use->GenDynamic(a_ref, a_node, a_forceDynamic, a_useLightRadius, a_affectRequesterOnly));
 			if (hers && use != a_light && made) {
-				std::lock_guard lock(gHerShadowLock);
-				gHerShadows.insert(made);
-				gHerShadowsAny.store(true, std::memory_order_relaxed);
+				LightKit::Guarded("her shadow light", [made]() {
+					std::lock_guard lock(gHerShadowLock);
+					gHerShadows.insert(made);
+					gHerShadowsAny.store(true, std::memory_order_relaxed);
+				});
 			}
 			dressed = Plugin::DressHandLight(made, *hand);  // only writes the fresh light's own fields
 			OutOfThePalm(made, a_node);
@@ -902,10 +903,23 @@ namespace
 			});
 			return root;
 		}
-		static inline REL::Relocation<decltype(thunk)> func;
-		static void                                    Install()
+		// and out: a light kept for it stays in the scene until the sweep lets go, and no other moment announces its end. Its own vtable's
+		// slot, which RefSet3D's write on the plain reference's never reaches. Flags only, any thread
+		static void SetThunk(T* a_this, RE::NiAVObject* a_object, bool a_queue3DTasks)
 		{
-			func = REL::Relocation<std::uintptr_t>(T::VTABLE[0]).write_vfunc(0x6A, thunk);
+			const bool had = a_this->Is3DLoaded();
+			set(a_this, a_object, a_queue3DTasks);
+			if (!a_object && had) {
+				Plugin::NoteSweep(Plugin::SweepWhy::kMagicDrop);
+			}
+		}
+		static inline REL::Relocation<decltype(thunk)>    func;
+		static inline REL::Relocation<decltype(SetThunk)> set;
+		static void                                       Install()
+		{
+			REL::Relocation<std::uintptr_t> vtbl{ T::VTABLE[0] };
+			func = vtbl.write_vfunc(0x6A, thunk);
+			set = vtbl.write_vfunc(0x6C, SetThunk);
 		}
 	};
 

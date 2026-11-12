@@ -52,6 +52,7 @@
 #include "FloorLightFix.h"
 #include "Plugin.h"
 #include "RuntimeGuard.h"
+#include "ShieldWardWatch.h"
 
 namespace
 {
@@ -133,18 +134,23 @@ namespace
 			if (Plugin::WardsSteppedDown()) {
 				SKSE::GetMessagingInterface()->RegisterListener("DynamicWards", [](SKSE::MessagingInterface::Message* a_m) {
 					// handled on the main thread, whichever thread Dynamic Wards sends from
-					if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
-						tasks->AddTask([]() {
-							LightKit::Guarded("Dynamic Wards message", []() {
-								Plugin::RefindHandLights();
-								Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+					LightKit::Guarded("Dynamic Wards note", [a_m]() {
+						if (auto* tasks = a_m && a_m->type == 'DWAC' ? SKSE::GetTaskInterface() : nullptr) {
+							tasks->AddTask([]() {
+								LightKit::Guarded("Dynamic Wards message", []() {
+									Plugin::RefindHandLights();
+									Plugin::ForgetBodyArt();  // the casting art the body lights leave out moved too
+								});
 							});
-						});
-					}
+						}
+					});
 				});
 			}
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
+			if (!REL::Module::IsVR()) {      // kept SE / AE only, untested on VR
+				ShieldWardWatch::Install();  // ahead of the load work: a stop there does not cost it
+			}
 			OnDataLoaded();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
@@ -156,7 +162,6 @@ namespace
 			if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
 				ForgetOldGame();
 			}
-			Plugin::WatchBlocking();              // her animation graph is new after a load: the shield's ward watch goes on it again
 			Plugin::ApplyWards("a save loaded");  // a ward mod that resets art at load may have put it back
 			Plugin::RefindHandLights();           // Dynamic Wards 2.0's ranked hand art, set at data load in whichever order
 			Plugin::WatchWeaponLights();          // a loaded game is a cell change of hers

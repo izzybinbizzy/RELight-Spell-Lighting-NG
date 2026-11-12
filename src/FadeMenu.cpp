@@ -12,7 +12,8 @@
 // their problems - what a bug report needs.
 // The look is the shared MenuStyle.h with these pages' warm glowing headings; an optional HUD element shows one charge gem
 // per hand of the player beside the health bar (HudGems), drawn from Hud() (FadeLights.cpp), a small copy the main thread
-// publishes once a frame, so the render thread never waits on the per-frame pass. There is no reticle of ours (his order
+// publishes once a frame, so the render thread never waits on the per-frame pass; HUD NG's editor can move, size, fade or hide
+// each gem when HUD NG is installed (HudNg, below). There is no reticle of ours (his order
 // 2026-10-19: "only have reticle available through reticle arcs mod. no settings in our mod") - FadeArcs.cpp offers the
 // module's bars to Reticle Arcs.
 
@@ -39,6 +40,17 @@
 #pragma warning(pop)
 #include "Translation.h"
 #include "MenuStyle.h"
+// HUD NG's native API, copied unchanged (theirs, GPL-3.0-or-later with the Modding Exception - HudNGNativeAPI.LICENSE.txt)
+#pragma warning(push, 0)
+#if defined(__clang__)
+#	pragma clang diagnostic push
+#	pragma clang diagnostic ignored "-Weverything"
+#endif
+#include "HudNGNativeAPI.h"
+#if defined(__clang__)
+#	pragma clang diagnostic pop
+#endif
+#pragma warning(pop)
 
 namespace Fade
 {
@@ -642,12 +654,13 @@ namespace Fade
 		// a_hue, opacity a_alpha, the clock a_now (seconds). False = no sheets, draw the old gem. The empty crystal above the
 		// charge level and the tinted lit crystal below it are two quads that meet at the level - never one over the other,
 		// so the charged part keeps the gem's opacity when the HUD's Gem opacity is below 100 %.
-		bool DrawGemArt(ImGuiMCP::ImDrawList* a_dl, ImGuiMCP::ImVec2 a_c, float a_hh, float a_fill, ImGuiMCP::ImVec4 a_hue, float a_alpha, double a_now)
+		bool DrawGemArt(ImGuiMCP::ImDrawList* a_dl, ImGuiMCP::ImVec2 a_c, float a_hh, float a_fill, ImGuiMCP::ImVec4 a_hue, float a_alpha, double a_now,
+			float a_stretch)
 		{
 			using namespace ImGuiMCP;
 			const auto& art = GemArt::Get(a_now);
 			const float h = 2.0f * a_hh / GemArt::kBody;  // the cell's drawn height
-			if (!std::isfinite(h) || h <= 0.0f) {
+			if (!std::isfinite(h) || h <= 0.0f || !std::isfinite(a_stretch) || a_stretch <= 0.0f) {
 				return false;
 			}
 			// the smallest loaded size that is not stretched more than kStretch, else the largest loaded one
@@ -669,7 +682,7 @@ namespace Fade
 			const int    frame = std::clamp(static_cast<int>(turns), 0, GemArt::kFrames - 1);
 			const float  blend = std::clamp(static_cast<float>(turns - static_cast<double>(frame)), 0.0f, 1.0f);  // toward the next frame
 			const float  tw = size.cellW * GemArt::kCols, th = size.cellH * GemArt::kRows;                        // the sheet in texels
-			const float  w = h * GemArt::kAspect;
+			const float  w = h * GemArt::kAspect * a_stretch;                                                     // a_stretch: HUD NG sized the width apart from the height
 			const ImVec2 lo{ a_c.x - w * 0.5f, a_c.y - h * 0.5f }, hi{ a_c.x + w * 0.5f, a_c.y + h * 0.5f };
 			// the charge level: the gem itself spans a_c.y +- a_hh, full at its top tip, empty at its bottom tip
 			const float fill = std::isfinite(a_fill) ? std::clamp(a_fill, 0.0f, 1.0f) : 0.0f;
@@ -704,6 +717,175 @@ namespace Fade
 			drawFrame((frame + 1) % GemArt::kFrames, over);
 			return true;
 		}
+
+		// HUD NG (HudNGNativeAPI.h): a player moves, sizes, fades or hides each gem in HUD NG's own editor. HUD NG stays optional -
+		// found once by its DLL's name, never loaded by us; not there, another API version or a call that fails leaves the gem as
+		// this mod draws it. The way is learned from HUD NG's own example adapter (GPL-3.0-or-later with the Modding Exception),
+		// written here for these gems. Render thread only. Never unregistered: HUD NG keeps no pointer of ours, and this DLL leaves
+		// only with the game - the API asks it only of a mod that unloads or turns itself off before that.
+		class HudNg
+		{
+		public:
+			struct Place
+			{
+				Glow::Placement where{};
+				bool            preview{ false };  // HUD NG's editor is open: a hidden gem shows a sample so it can be placed
+			};
+
+			[[nodiscard]] static HudNg& Get()
+			{
+				static HudNg hud;
+				return hud;
+			}
+
+			// true once HUD NG answered; while its export is there but has not answered yet it is asked again (one call a frame,
+			// only then) - absent, without the export or of another version it is never asked again
+			[[nodiscard]] bool Found()
+			{
+				if (!api && getApi) {
+					Ask();
+				}
+				return api != nullptr;
+			}
+
+			// a_frame: the gem's own place, in physical pixels of the whole game view; a_px: pixels per HUD unit on each axis
+			[[nodiscard]] Place Query(std::size_t a_hand, const HudNGNativeFrame& a_frame, ImGuiMCP::ImVec2 a_px)
+			{
+				if (!api || a_hand >= handles.size() || refused[a_hand]) {
+					return {};
+				}
+				auto& handle = handles[a_hand];
+				if (!handle) {
+					if (fullWait[a_hand] > 0) {
+						--fullWait[a_hand];
+						return {};
+					}
+					const auto status = api->Register(&descriptors[a_hand], &handle);
+					if (status == HUDNG_NATIVE_CAPACITY) {
+						// HUD NG is full now; another mod letting a widget go frees a place, so the gem is offered again a few seconds on
+						handle = 0;
+						fullWait[a_hand] = kFullWaitFrames;
+						if (!toldFull[a_hand]) {
+							toldFull[a_hand] = true;
+							SKSE::log::info("HUD NG: no free place for the {} gem yet - it stays where this mod draws it and is offered again", kSides[a_hand]);
+						}
+						return {};
+					}
+					if (status != HUDNG_NATIVE_OK) {
+						handle = 0;
+						refused[a_hand] = true;
+						SKSE::log::warn("HUD NG: the {} gem was not registered (status {}) - it stays where this mod draws it", kSides[a_hand],
+							static_cast<int>(status));
+						return {};
+					}
+				}
+				HudNGNativeResult result{};
+				result.structSize = sizeof(result);
+				const auto status = api->Query(handle, &a_frame, &result);
+				if (status == HUDNG_NATIVE_STALE_HANDLE) {
+					handle = 0;  // HUD NG forgot it: registered again on the next frame
+					return {};
+				}
+				if (status != HUDNG_NATIVE_OK) {
+					return {};
+				}
+				return { Glow::PlacementOf(result.offsetXpx, result.offsetYpx, result.scaleX, result.scaleY, result.opacityMultiplier, a_px.x, a_px.y),
+					result.editingPreview != 0 };
+			}
+
+		private:
+			// the widget ids HUD NG saves a player's layout under: never changed once shipped
+			static constexpr std::array<const char*, 2> kWidgets{ "left-gem", "right-gem" };
+			static constexpr std::array<const char*, 2> kLabels{ "Left charge gem", "Right charge gem" };
+			static constexpr std::array<const char*, 2> kSides{ "left", "right" };
+			static constexpr std::uint32_t              kFullWaitFrames{ 300 };
+
+			HudNg() { Bind(); }
+
+			// the provider id: the mod's own data folder (FadeConfig.h kHudArtDir ".../Plugins/<folder>/HUD/") - Illuminated,
+			// RELightSpellLightingNG - so it never changes with a renamed menu
+			[[nodiscard]] static std::string ProviderId()
+			{
+				const std::string_view     dir = Mod::kHudArtDir;
+				constexpr std::string_view kAfter = "Plugins/";
+				const auto                 at = dir.find(kAfter);
+				const auto                 from = at == std::string_view::npos ? at : at + kAfter.size();
+				const auto                 end = from == std::string_view::npos ? from : dir.find('/', from);
+				if (end == std::string_view::npos) {
+					return {};
+				}
+				std::string id(dir.substr(from, end - from));
+				const bool  valid = !id.empty() && id.size() < sizeof(HudNGNativeDescriptor::providerID) && std::ranges::all_of(id, [](char a_c) { return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_' || a_c == '-'; });
+				return valid ? id : std::string{};
+			}
+
+			template <std::size_t N>
+			static void Put(char (&a_out)[N], std::string_view a_text) noexcept
+			{
+				const auto n = std::min(a_text.size(), N - 1);
+				std::copy_n(a_text.data(), n, a_out);
+				a_out[n] = '\0';
+			}
+
+			void Bind()
+			{
+				const auto module = REX::W32::GetModuleHandleW(L"HudNG.dll");
+				getApi = module ? reinterpret_cast<GetApi>(REX::W32::GetProcAddress(module, "HudNG_GetNativeAPI")) : nullptr;
+				if (!getApi) {
+					SKSE::log::info("HUD NG: {} - the charge gems stay where this mod draws them", module ? "no native API in it" : "not loaded");
+					return;
+				}
+				Ask();
+			}
+
+			void Ask()
+			{
+				const auto* found = getApi(HUDNG_NATIVE_API_VERSION);
+				if (!found) {
+					if (!toldWaiting) {
+						toldWaiting = true;
+						SKSE::log::info("HUD NG: its native API has not answered yet - asked again on the next frames");
+					}
+					return;
+				}
+				if (found->structSize < sizeof(HudNGNativeAPI) || found->version != HUDNG_NATIVE_API_VERSION || !found->Register || !found->Query) {
+					getApi = nullptr;  // another version: it will not change while the game runs
+					SKSE::log::info("HUD NG: native API version {}, not {} - the charge gems stay where this mod draws them", found->version,
+						HUDNG_NATIVE_API_VERSION);
+					return;
+				}
+				const auto provider = ProviderId();
+				if (provider.empty()) {
+					getApi = nullptr;
+					SKSE::log::warn("HUD NG: no usable provider id in the mod's folder name - the charge gems stay where this mod draws them");
+					return;
+				}
+				for (std::size_t i = 0; i < descriptors.size(); ++i) {
+					auto& d = descriptors[i];
+					d.structSize = sizeof(d);
+					d.supportsEditingPreview = 1;
+					Put(d.providerID, provider);
+					Put(d.widgetID, kWidgets[i]);
+					Put(d.displayLabel, kLabels[i]);
+				}
+				api = found;
+				SKSE::log::info("HUD NG: native API {} found - the charge gems ({} / {} {}) can be placed in its editor", found->version, provider, kWidgets[0],
+					kWidgets[1]);
+			}
+
+			using GetApi = const HudNGNativeAPI*(HUDNG_NATIVE_CALL*)(std::uint32_t);
+			GetApi                               getApi{ nullptr };
+			bool                                 toldWaiting{ false };
+			const HudNGNativeAPI*                api{ nullptr };
+			std::array<HudNGNativeDescriptor, 2> descriptors{};
+			std::array<HudNGNativeHandle, 2>     handles{};
+			std::array<bool, 2>                  refused{};
+			std::array<std::uint32_t, 2>         fullWait{};  // frames before a gem HUD NG had no place for is offered again
+			std::array<bool, 2>                  toldFull{};
+		};
+
+		// pixels per HUD unit on one axis (ImGui's framebuffer scale), 1 when it reads nothing usable
+		[[nodiscard]] float PixelsPerUnit(float a_scale) noexcept { return std::isfinite(a_scale) && a_scale > 0.0f ? a_scale : 1.0f; }
 
 		// THE HUD GEMS (his word: each hand has its own cut soul gem on its own side of the health bar). 🔁 HIS WORD
 		// "the enchantment gems should not work for spells and only show when the weapon enchantment is dropping"
@@ -751,33 +933,67 @@ namespace Fade
 				shown[i] = std::clamp(shown[i] + (here[i] ? dt : -dt) * 4.0f, 0.0f, 1.0f);
 				colored[i] = colored[i] && shown[i] > 0.0f;
 			}
-			if (shown[0] <= 0.0f && shown[1] <= 0.0f) {
+			auto&      hudNg = HudNg::Get();
+			const bool anyShown = shown[0] > 0.0f || shown[1] > 0.0f;
+			if (!anyShown && !hudNg.Found()) {
+				return;
+			}
+			// sized to the screen (1080 lines = 1), each gem beside one end of the vanilla health bar
+			const float                 screen = Glow::ScreenScale(io->DisplaySize.y);
+			const float                 k = screen * std::clamp(hud.gemSize, 0.5f, 2.0f);  // the HUD page's Gem size
+			const float                 cx = io->DisplaySize.x * 0.5f, y = io->DisplaySize.y - Tuning::Get(Tuning::gGemHeight) * screen;
+			const float                 hw = 11.0f * k, hh = 19.0f * k, sh = 7.0f * k;  // half width, half height, shoulder height
+			const float                 apart = Tuning::Get(Tuning::gGemDistance) * screen;
+			const std::array<ImVec2, 2> centre{ ImVec2{ cx - apart, y }, ImVec2{ cx + apart, y } };
+			// HUD NG is asked every frame, hidden gems too, from this mod's own place - never from what it answered last frame
+			std::array<HudNg::Place, 2> place{};
+			if (hudNg.Found()) {
+				const ImVec2 px{ PixelsPerUnit(io->DisplayFramebufferScale.x), PixelsPerUnit(io->DisplayFramebufferScale.y) };
+				const float  boxH = 2.0f * hh / GemArt::kBody, boxW = boxH * GemArt::kAspect;  // the gem's drawn box; the drawn gem fits inside it
+				for (std::size_t i = 0; i < 2; ++i) {
+					HudNGNativeFrame frame{};
+					frame.structSize = sizeof(frame);
+					frame.intrinsicVisible = shown[i] > 0.0f ? 1u : 0u;
+					frame.leftPx = static_cast<double>((centre[i].x - boxW * 0.5f) * px.x);
+					frame.topPx = static_cast<double>((centre[i].y - boxH * 0.5f) * px.y);
+					frame.widthPx = static_cast<double>(boxW * px.x);
+					frame.heightPx = static_cast<double>(boxH * px.y);
+					frame.anchorXpx = static_cast<double>(centre[i].x * px.x);
+					frame.anchorYpx = static_cast<double>(centre[i].y * px.y);
+					frame.viewportWidthPx = static_cast<double>(io->DisplaySize.x * px.x);
+					frame.viewportHeightPx = static_cast<double>(io->DisplaySize.y * px.y);
+					place[i] = hudNg.Query(i, frame, px);
+				}
+			}
+			if (!anyShown && !place[0].preview && !place[1].preview) {
 				return;
 			}
 			auto* dl = GetForegroundDrawList();
 			if (!dl) {
 				return;
 			}
-			// sized to the screen (1080 lines = 1), each gem beside one end of the vanilla health bar
-			const float screen = Glow::ScreenScale(io->DisplaySize.y);
-			const float k = screen * std::clamp(hud.gemSize, 0.5f, 2.0f);  // the HUD page's Gem size
-			const float cx = io->DisplaySize.x * 0.5f, y = io->DisplaySize.y - Tuning::Get(Tuning::gGemHeight) * screen;
-			const float hw = 11.0f * k, hh = 19.0f * k, sh = 7.0f * k;  // half width, half height, shoulder height
 			for (std::size_t i = 0; i < 2; ++i) {
-				if (shown[i] <= 0.0f) {
+				// HUD NG's editor shows a sample of a hidden gem at 65 % charge; nothing of the gem's own state changes for it
+				const bool sample = shown[i] <= 0.0f && place[i].preview;
+				if (shown[i] <= 0.0f && !sample) {
 					continue;
 				}
-				const float  a = shown[i] * std::clamp(hud.gemOpacity, 0.1f, 1.0f);
+				const auto& where = place[i].where;
+				const float a = (sample ? 1.0f : shown[i]) * std::clamp(hud.gemOpacity, 0.1f, 1.0f) * where.alpha;
+				if (a <= 0.0f) {
+					continue;  // hidden in HUD NG's editor
+				}
 				const auto   col = [a](float r, float g, float b, float o) { return ColorConvertFloat4ToU32(ImVec4{ r, g, b, o * a }); };
-				const float  f = fill[i];
-				const auto   hue = f < hud.low ? ImVec4{ 1.0f, 0.42f, 0.18f, 1.0f } : tint[i];
-				const ImVec2 c{ cx + (i == 0 ? -1.0f : 1.0f) * Tuning::Get(Tuning::gGemDistance) * screen, y };
-				if (!DrawGemArt(dl, c, hh, f, hue, a, GetTime())) {
-					const GemPoints gem{ ImVec2{ c.x, c.y - hh }, ImVec2{ c.x + hw, c.y - sh }, ImVec2{ c.x + hw, c.y + sh },
-						ImVec2{ c.x, c.y + hh }, ImVec2{ c.x - hw, c.y + sh }, ImVec2{ c.x - hw, c.y - sh } };
+				const float  f = sample ? 0.65f : fill[i];
+				const auto   hue = f < hud.low ? ImVec4{ 1.0f, 0.42f, 0.18f, 1.0f } : (sample ? ImVec4{ 0.72f, 0.46f, 1.0f, 1.0f } : tint[i]);
+				const ImVec2 c{ centre[i].x + where.dx, centre[i].y + where.dy };  // sized about its own centre, so only moved
+				const float  ghw = hw * where.sx, ghh = hh * where.sy, gsh = sh * where.sy;
+				if (!DrawGemArt(dl, c, ghh, f, hue, a, GetTime(), where.sx / where.sy)) {
+					const GemPoints gem{ ImVec2{ c.x, c.y - ghh }, ImVec2{ c.x + ghw, c.y - gsh }, ImVec2{ c.x + ghw, c.y + gsh },
+						ImVec2{ c.x, c.y + ghh }, ImVec2{ c.x - ghw, c.y + gsh }, ImVec2{ c.x - ghw, c.y - gsh } };
 					// no sheets: the dark empty gem, then what is left of the charge, filled up from the bottom
 					ImDrawListManager::AddConvexPolyFilled(dl, gem.data(), static_cast<int>(gem.size()), col(0.05f, 0.04f, 0.06f, 0.85f));
-					const float level = c.y + hh - 2.0f * hh * f;
+					const float level = c.y + ghh - 2.0f * ghh * f;
 					if (f > 0.0f) {
 						const auto part = Below(gem, level);
 						if (part.count >= 3) {
@@ -788,10 +1004,10 @@ namespace Fade
 					const ImU32 facet = col(1.0f, 1.0f, 1.0f, 0.22f);
 					ImDrawListManager::AddLine(dl, gem[5], gem[1], facet, 1.0f);
 					ImDrawListManager::AddLine(dl, gem[4], gem[2], facet, 1.0f);
-					ImDrawListManager::AddLine(dl, gem[0], ImVec2{ c.x, c.y - sh }, facet, 1.0f);
-					ImDrawListManager::AddLine(dl, gem[3], ImVec2{ c.x, c.y + sh }, facet, 1.0f);
+					ImDrawListManager::AddLine(dl, gem[0], ImVec2{ c.x, c.y - gsh }, facet, 1.0f);
+					ImDrawListManager::AddLine(dl, gem[3], ImVec2{ c.x, c.y + gsh }, facet, 1.0f);
 					ImDrawListManager::AddPolyline(dl, gem.data(), static_cast<int>(gem.size()), col(0.90f, 0.85f, 0.74f, 0.95f), ImDrawFlags_Closed,
-						std::max(1.0f, 1.5f * k));
+						std::max(1.0f, 1.5f * k * std::min(where.sx, where.sy)));
 				}
 				if (!hud.gemPercent) {
 					continue;
@@ -800,7 +1016,7 @@ namespace Fade
 				char text[8];
 				std::snprintf(text, sizeof(text), "%d%%", static_cast<int>(std::lround(f * 100.0f)));
 				const float tw = 7.0f * static_cast<float>(std::strlen(text));
-				ImDrawListManager::AddText(dl, ImVec2{ c.x - tw * 0.5f, c.y + hh + 3.0f * k }, col(0.93f, 0.90f, 0.82f, 0.95f), text);
+				ImDrawListManager::AddText(dl, ImVec2{ c.x - tw * 0.5f, c.y + ghh + 3.0f * k * where.sy }, col(0.93f, 0.90f, 0.82f, 0.95f), text);
 			}
 		}
 	}

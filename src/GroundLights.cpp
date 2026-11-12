@@ -50,6 +50,7 @@ namespace Plugin
 
 		// the game's casting lights left hidden when their hands went down (a twin dropped with handsDown); main thread only
 		std::unordered_map<std::uint64_t, RE::NiPointer<RE::NiPointLight>> gLeftHidden;
+		std::atomic<std::size_t>                                           gHiddenCount{ 0 };  // its size, for devbench off the main thread
 
 		// its actor or that actor's 3D has gone: nobody is left to end its casting light, which must not come back lit
 		[[nodiscard]] bool ActorGone(std::uint64_t a_key)
@@ -60,9 +61,7 @@ namespace Plugin
 
 		void Drop(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
-			if (a_scene && a_twin.bs) {
-				a_scene->RemoveLight(a_twin.bs);
-			}
+			LightKit::TakeOff(a_scene, a_twin.bs);
 			if (a_twin.light && a_twin.light->parent) {
 				a_twin.light->parent->DetachChild(a_twin.light.get());
 			}
@@ -89,7 +88,7 @@ namespace Plugin
 		// as the game keeps it hidden then (Visit's "light that's not going away")
 		void ShowLeftHidden()
 		{
-			std::erase_if(gLeftHidden, [](const auto& a_entry) {
+			const auto letGo = std::erase_if(gLeftHidden, [](const auto& a_entry) {
 				auto* actor = RE::TESForm::LookupByID<RE::Actor>(static_cast<RE::FormID>(a_entry.first >> 1));
 				if (!actor || !actor->Is3DLoaded()) {
 					return true;
@@ -108,6 +107,11 @@ namespace Plugin
 				}
 				return true;
 			});
+			// this hold may have outlasted the moment that ended the light: without a look now, Keep.cpp holds it until the next one
+			if (letGo > 0) {
+				NoteSweep(SweepWhy::kMagicDrop);
+			}
+			gHiddenCount.store(gLeftHidden.size(), std::memory_order_relaxed);
 		}
 
 		// the twin made and hung on the hand node; it joins the scene in Visit, once Follow has given it its numbers and its place
@@ -381,6 +385,7 @@ namespace Plugin
 			return false;
 		});
 		gLive.store(gTwins.size(), std::memory_order_relaxed);
+		gHiddenCount.store(gLeftHidden.size(), std::memory_order_relaxed);
 	}
 
 	void RenewGroundLights()
@@ -406,8 +411,10 @@ namespace Plugin
 		}
 		DropAll(LightKit::Scene());
 		gLeftHidden.clear();  // a load: the lights left hidden went with the old game's 3D
+		gHiddenCount.store(0, std::memory_order_relaxed);
 	}
 
 	std::size_t GroundLightCount() { return gLive.load(std::memory_order_relaxed); }
 	std::size_t GroundLightsMade() { return gMade.load(std::memory_order_relaxed); }
+	std::size_t GroundLightsLeftHidden() { return gHiddenCount.load(std::memory_order_relaxed); }
 }

@@ -66,6 +66,25 @@ namespace Glow
 		return std::isfinite(a_lines) ? std::clamp(a_lines / 1080.0f, 0.6f, 2.5f) : 1.0f;
 	}
 
+	// One gem's place as HUD NG's editor set it: moved by (dx, dy) in the HUD's own units, sized by (sx, sy) about its centre,
+	// its opacity times alpha. Its answer comes in physical pixels, so the move is divided by the pixels per unit on each axis.
+	// A number that cannot be used gives the gem's own place, so a bad answer never throws a gem off screen.
+	struct Placement
+	{
+		float dx{ 0.0f }, dy{ 0.0f }, sx{ 1.0f }, sy{ 1.0f }, alpha{ 1.0f };
+	};
+
+	[[nodiscard]] inline Placement PlacementOf(double a_dx, double a_dy, double a_sx, double a_sy, double a_alpha, double a_pxX, double a_pxY) noexcept
+	{
+		const bool usable = std::isfinite(a_dx) && std::isfinite(a_dy) && std::isfinite(a_sx) && std::isfinite(a_sy) && std::isfinite(a_alpha) &&
+		                    std::isfinite(a_pxX) && std::isfinite(a_pxY) && a_sx > 0.0 && a_sy > 0.0 && a_pxX > 0.0 && a_pxY > 0.0;
+		if (!usable) {
+			return {};
+		}
+		return { static_cast<float>(a_dx / a_pxX), static_cast<float>(a_dy / a_pxY), static_cast<float>(a_sx), static_cast<float>(a_sy),
+			static_cast<float>(std::clamp(a_alpha, 0.0, 1.0)) };
+	}
+
 	[[nodiscard]] inline float ApplyCurve(Curve a_curve, float a_f) noexcept
 	{
 		a_f = Clamp01(a_f);
