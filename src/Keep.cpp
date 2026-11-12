@@ -191,55 +191,12 @@ namespace Plugin
 			}
 		}
 		std::vector<KeptLight> out;
-		auto*                  player = RE::PlayerCharacter::GetSingleton();
 		auto*                  scene = LightKit::Scene();
-		// the game's own objects that keep a light, around her: who else may still hold a kept light
-		struct Owner
-		{
-			const void* light{ nullptr };
-			const char* kind{ "" };
-			RE::FormID  id{ 0 };
-			bool        deleted{ false };
-			bool        loaded{ false };
-		};
-		std::vector<Owner> owners;
-		constexpr float    kOwnerReach = 6000.0f;
-		if (auto* tes = player ? RE::TES::GetSingleton() : nullptr) {
-			tes->ForEachReferenceInRange(player, kOwnerReach, [&owners](RE::TESObjectREFR* a_ref) {
-				const void* light = nullptr;
-				const char* kind = "";
-				if (const auto* explosion = a_ref ? skyrim_cast<const RE::Explosion*>(a_ref) : nullptr) {
-					light = explosion->GetExplosionRuntimeData().light.get();
-					kind = "explosion";
-				} else if (const auto* hazard = a_ref ? a_ref->As<RE::Hazard>() : nullptr) {
-					light = hazard->GetHazardRuntimeData().light.get();
-					kind = "hazard";
-				} else if (const auto* projectile = a_ref ? a_ref->As<RE::Projectile>() : nullptr) {
-					const auto& bs = projectile->GetProjectileRuntimeData().light;
-					light = bs ? bs->light.get() : nullptr;
-					kind = "projectile";
-				}
-				if (light) {
-					owners.push_back({ light, kind, a_ref->GetFormID(), a_ref->IsDeleted(), a_ref->Is3DLoaded() });
-				}
-				return RE::BSContainer::ForEachResult::kContinue;
-			});
-		}
 		for (const auto& held : kept) {
 			const auto* parent = held->parent;
 			const auto* root = parent;
 			while (root && root->parent) {
 				root = root->parent;
-			}
-			int caster = -1;
-			if (player) {
-				const auto& casters = player->GetActorRuntimeData().magicCasters;
-				for (std::size_t i = 0; i < std::size(casters); ++i) {
-					const auto* bs = casters[i] ? casters[i]->light.get() : nullptr;
-					if (bs && bs->light.get() == held.get()) {
-						caster = static_cast<int>(i);
-					}
-				}
 			}
 			KeptLight k{};
 			k.name = held->name.c_str();
@@ -247,21 +204,13 @@ namespace Plugin
 			k.refs = held->GetRefCount() - 1;
 			k.parent = parent ? parent->name.c_str() : "";
 			k.root = root ? root->name.c_str() : "";
-			k.caster = caster;
 			k.culled = held->GetAppCulled();
-			k.ground = GroundLightRole(held.get());
-			k.weapon = HeldLightHolds(held.get());
-			k.body = BodyLightHolds(held.get());
-			if (const auto it = std::ranges::find(owners, static_cast<const void*>(held.get()), &Owner::light); it != owners.end()) {
-				k.owner = std::format("{} {:08X}{}{}", it->kind, it->id, it->deleted ? " deleted" : "", it->loaded ? "" : " no 3D");
-			}
 			if (scene) {
 				auto&      lists = scene->GetRuntimeData();
-				const auto look = [&k, &held](const auto& a_list, int& a_count) {
+				const auto look = [&held](const auto& a_list, int& a_count) {
 					for (const auto& bsLight : a_list) {
 						if (bsLight && bsLight->light.get() == held.get()) {
 							++a_count;
-							k.bsRefs = bsLight->GetRefCount();
 						}
 					}
 				};

@@ -61,7 +61,7 @@ namespace Plugin
 
 		void Drop(Twin& a_twin, RE::ShadowSceneNode* a_scene)
 		{
-			TakeOffOwnLight(a_scene, a_twin.bs);
+			LightKit::TakeOff(a_scene, a_twin.bs);
 			if (a_twin.light && a_twin.light->parent) {
 				a_twin.light->parent->DetachChild(a_twin.light.get());
 			}
@@ -417,18 +417,4 @@ namespace Plugin
 	std::size_t GroundLightCount() { return gLive.load(std::memory_order_relaxed); }
 	std::size_t GroundLightsMade() { return gMade.load(std::memory_order_relaxed); }
 	std::size_t GroundLightsLeftHidden() { return gHiddenCount.load(std::memory_order_relaxed); }
-
-	int GroundLightRole(const RE::NiLight* a_light)
-	{
-		for (const auto& [key, twin] : gTwins) {
-			if (twin.source.get() == a_light) {
-				return 1;
-			}
-			if (twin.light.get() == a_light) {
-				return 2;
-			}
-		}
-		const auto hidden = std::ranges::find_if(gLeftHidden, [a_light](const auto& a_entry) { return a_entry.second.get() == a_light; });
-		return hidden != gLeftHidden.end() ? 3 : 0;
-	}
 }

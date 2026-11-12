@@ -235,7 +235,7 @@ namespace Plugin
 
 		void TakeOff(Live& a_v, RE::ShadowSceneNode* a_scene)
 		{
-			TakeOffOwnLight(a_scene, a_v.bs);
+			LightKit::TakeOff(a_scene, a_v.bs);
 			if (a_v.node && a_v.light && a_v.light->parent == a_v.node.get()) {
 				a_v.node->DetachChild(a_v.light.get());
 			}
@@ -495,9 +495,4 @@ namespace Plugin
 
 	std::size_t LiveBodyLights() { return gLive.size(); }
 	std::size_t BodyLightsMade() { return gMade; }
-
-	bool BodyLightHolds(const RE::NiLight* a_light)
-	{
-		return std::ranges::any_of(gLive, [a_light](const Live& v) { return v.light.get() == a_light || (v.bs && v.bs->light.get() == a_light); });
-	}
 }
