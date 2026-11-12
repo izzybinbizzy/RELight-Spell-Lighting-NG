@@ -756,7 +756,21 @@ namespace Fade
 				}
 				auto& handle = handles[a_hand];
 				if (!handle) {
+					if (fullWait[a_hand] > 0) {
+						--fullWait[a_hand];
+						return {};
+					}
 					const auto status = api->Register(&descriptors[a_hand], &handle);
+					if (status == HUDNG_NATIVE_CAPACITY) {
+						// HUD NG is full now; another mod letting a widget go frees a place, so the gem is offered again a few seconds on
+						handle = 0;
+						fullWait[a_hand] = kFullWaitFrames;
+						if (!toldFull[a_hand]) {
+							toldFull[a_hand] = true;
+							SKSE::log::info("HUD NG: no free place for the {} gem yet - it stays where this mod draws it and is offered again", kSides[a_hand]);
+						}
+						return {};
+					}
 					if (status != HUDNG_NATIVE_OK) {
 						handle = 0;
 						refused[a_hand] = true;
@@ -784,6 +798,7 @@ namespace Fade
 			static constexpr std::array<const char*, 2> kWidgets{ "left-gem", "right-gem" };
 			static constexpr std::array<const char*, 2> kLabels{ "Left charge gem", "Right charge gem" };
 			static constexpr std::array<const char*, 2> kSides{ "left", "right" };
+			static constexpr std::uint32_t              kFullWaitFrames{ 300 };
 
 			HudNg() { Bind(); }
 
@@ -865,6 +880,8 @@ namespace Fade
 			std::array<HudNGNativeDescriptor, 2> descriptors{};
 			std::array<HudNGNativeHandle, 2>     handles{};
 			std::array<bool, 2>                  refused{};
+			std::array<std::uint32_t, 2>         fullWait{};  // frames before a gem HUD NG had no place for is offered again
+			std::array<bool, 2>                  toldFull{};
 		};
 
 		// pixels per HUD unit on one axis (ImGui's framebuffer scale), 1 when it reads nothing usable

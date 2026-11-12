@@ -731,6 +731,12 @@ namespace Fade::Items
 
 	namespace
 	{
+		// the items file is read back as "<key> = <choice>" lines, trimmed, ';' and '[' lines skipped
+		[[nodiscard]] bool SavesAsIs(std::string_view a_key)
+		{
+			return !a_key.empty() && a_key == SettingsText::Trim(a_key) && a_key.find_first_of("=\r\n") == std::string_view::npos && a_key.front() != ';' && a_key.front() != '[';
+		}
+
 		void AddExternalItems(const FadePicker::Item* a_items, std::uint32_t a_count, const char* a_group) noexcept
 		{
 			LightKit::Guarded("lights by item: added items", [&]() {
@@ -739,6 +745,10 @@ namespace Fade::Items
 				for (std::uint32_t i = 0; a_items && i < a_count; ++i) {
 					const auto& item = a_items[i];
 					if (!item.key || !*item.key || !item.name || !*item.name || gExternalIds.contains(item.key)) {
+						continue;
+					}
+					if (!SavesAsIs(item.key)) {
+						SKSE::log::warn("Choose Your Own Color: an added item's key '{}' cannot be saved as it is - left out", item.key);
 						continue;
 					}
 					// the page's own items are saved under their form's key: an added item shaped like one would share its saved line
