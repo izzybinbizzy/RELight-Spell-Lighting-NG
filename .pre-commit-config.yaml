@@ -3,9 +3,10 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # HudNGNativeAPI.LICENSE.txt is HUD NG's own licence text, kept byte for byte as its author ships it
       - id: trailing-whitespace
-        exclude: (^|/)lib/
+        exclude: (^|/)lib/|^src/HudNGNativeAPI\.LICENSE\.txt$
       - id: end-of-file-fixer
-        exclude: (^|/)lib/
+        exclude: (^|/)lib/|^src/HudNGNativeAPI\.LICENSE\.txt$
       - id: check-yaml
       - id: check-added-large-files
