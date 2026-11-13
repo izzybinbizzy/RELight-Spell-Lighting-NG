@@ -186,7 +186,7 @@ namespace GameLighting
 		if (!a_found.modulesListed) {
 			out.warnings.emplace_back("lighting: the loaded modules could not be listed - no ENB assumed");
 		}
-		if (a_found.communityShaders && !a_found.inverseSquare) {
+		if (a_found.communityShaders && !a_found.inverseSquare && a_found.filesRead) {
 			out.warnings.emplace_back("lighting: CommunityShaders.dll is loaded but no shader of it names inverse square - every light of ours is drawn plain (linear)");
 		}
 		return out;
