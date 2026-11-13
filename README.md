@@ -14,8 +14,7 @@ plugin adds what RE::Light cannot do from a config.
 - **The lighting is detected automatically** (Community Shaders, ENB or Vanilla) - off Community Shaders the hand lights
   are drawn for the game's own lighting and light the ground too.
 - A switch for every installed option and patch, Brightness and Reach, presets, Lights by Item, Fading, the charge gems,
-  lights off while sneaking, a budget for big fights, wards (stepping aside for Dynamic Wards), FleshFX colors and VAER
-  Reborn's swirls kept.
+  a budget for big fights, wards (stepping aside for Dynamic Wards), FleshFX colors and VAER Reborn's swirls kept.
 - Its effect hooks follow [Light Placer](https://github.com/powerof3/LightPlacer) by powerof3 (GPL-3.0, used with permission).
 - **Reticle bars through Reticle Arcs** - with Reticle Arcs installed, each hand's spell light, a bound weapon's time and
   an enchanted weapon's charge are offered to it as add-on bars (its published interface only); no reticle of its own.

@@ -11,11 +11,6 @@
 //   StreamStrength=100          percent, 25 to 200 - the rows along streams, sprays and bolts and their own lights (Rows.cpp)
 //   GlowStrength=100            percent, 25 to 200 - glows on people: cloaks, flesh spells, FEC's bodies (BodyLights.cpp)
 //   EnchantedStrength=100       percent, 25 to 200 - enchanted weapons' lights, as the Enchanted weapons switch counts them
-//   LightsOffWhileSneaking=0    1 = her spell lights fade while she sneaks (the key keeps its old name: a player's file reads on)
-//   SneakingBrightness=0        percent, 0 to 100 - how bright they stay while she sneaks; 0 = they fade all the way out (Hooks.cpp)
-//   RunesFadeWhileSneaking=1    1 = her runes fade with her other lights; 0 = they stay lit
-//   SwirlsFadeWhileSneaking=0   1 = her weapons' enchantment art (VAER's swirls) fades with her lights too
-//   InShadow=0                  1 = her spell lights fade out while she is invisible or carries a sign that works only in the dark
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
@@ -59,11 +54,6 @@ namespace Plugin
 		std::array<std::atomic<int>, 4> gStrength{ 100, 100, 100, 100 };
 		std::atomic<int>                gBrightness{ 100 };
 		std::atomic<int>                gReach{ 100 };
-		std::atomic<bool>               gSneak{ false };
-		std::atomic<int>                gSneakBrightness{ 0 };
-		std::atomic<bool>               gRunes{ true };
-		std::atomic<bool>               gSwirls{ false };
-		std::atomic<bool>               gInvisible{ false };
 		std::atomic<bool>               gFecFrozenFades{ true };
 		std::atomic<bool>               gFecBurningFades{ true };
 		std::atomic<bool>               gHands{ true };
@@ -121,12 +111,6 @@ namespace Plugin
 			{ "StreamStrength", [] { return gStrength[1].load(); }, [](int v) { gStrength[1] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "GlowStrength", [] { return gStrength[2].load(); }, [](int v) { gStrength[2] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "EnchantedStrength", [] { return gStrength[3].load(); }, [](int v) { gStrength[3] = std::clamp(v, kStrengthMin, kStrengthMax); } },
-			{ "LightsOffWhileSneaking", [] { return gSneak ? 1 : 0; }, [](int v) { gSneak = v != 0; } },
-			{ "SneakingBrightness", [] { return gSneakBrightness.load(); }, [](int v) { gSneakBrightness = std::clamp(v, 0, 100); } },
-			{ "RunesFadeWhileSneaking", [] { return gRunes ? 1 : 0; }, [](int v) { gRunes = v != 0; } },
-			{ "SwirlsFadeWhileSneaking", [] { return gSwirls ? 1 : 0; }, [](int v) { gSwirls = v != 0; } },
-			// a new key: 2.9 saved "fade out" (its default) under FadeWhileInvisible into every file, which 3.0 must not carry over
-			{ "InShadow", [] { return gInvisible ? 1 : 0; }, [](int v) { gInvisible = v != 0; } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
@@ -323,9 +307,9 @@ namespace Plugin
 			off += (o.switchable && !o.on) ? 1 : 0;
 		}
 		SKSE::log::info(
-			"settings: brightness {}%, reach {}%, lights fade while sneaking {} (to {}%, runes {}), hand lights {}, weapon lights {}, {} "
+			"settings: brightness {}%, reach {}%, hand lights {}, weapon lights {}, {} "
 			"switch(es) off ({} line(s) read, {} problem(s))",
-			gBrightness.load(), gReach.load(), gSneak ? "on" : "off", gSneakBrightness.load(), gRunes ? "fade" : "stay lit", gHands ? "on" : "off",
+			gBrightness.load(), gReach.load(), gHands ? "on" : "off",
 			gWeapons ? "on" : "off", off, read, problems.size());
 	}
 
@@ -391,37 +375,6 @@ namespace Plugin
 		}
 	}
 
-	bool SneakOn() { return gSneak; }
-
-	void SetSneakOn(bool a_on)
-	{
-		if (gSneak.exchange(a_on) != a_on) {
-			SKSE::log::info("lights fade while sneaking turned {}", a_on ? "on" : "off");
-		}
-	}
-
-	int SneakBrightness() { return gSneakBrightness; }
-
-	bool RunesFadeOn() { return gRunes; }
-
-	void SetRunesFadeOn(bool a_on)
-	{
-		if (gRunes.exchange(a_on) != a_on) {
-			SKSE::log::info("runes fade while sneaking turned {}", a_on ? "on" : "off");
-		}
-	}
-
-	bool SwirlsFadeOn() { return gSwirls; }
-
-	void SetSwirlsFadeOn(bool a_on)
-	{
-		if (gSwirls.exchange(a_on) != a_on) {
-			SKSE::log::info("weapon swirls fade while sneaking turned {}", a_on ? "on" : "off");
-		}
-	}
-
-	bool InvisibleFadeOn() { return gInvisible; }
-
 	bool PulseShapes() { return gPulse; }
 
 	void SetPulseShapes(bool a_on)
@@ -453,26 +406,11 @@ namespace Plugin
 		}
 	}
 
-	void SetInvisibleFadeOn(bool a_on)
-	{
-		if (gInvisible.exchange(a_on) != a_on) {
-			SKSE::log::info("lights fade while invisible or in shadow turned {}", a_on ? "on" : "off");
-		}
-	}
-
 	std::size_t GlowLimit()
 	{
 		// off Community Shaders the game lights a surface with only a few lights at once and switches the rest off (they flicker
 		// as the camera moves): 5 there, as the rows; Light Limit Fix takes far more, and 16 keeps a big fight smooth
 		return LightingFound() == Lighting::kShaders ? 16 : 5;
-	}
-
-	void SetSneakBrightness(int a_percent)
-	{
-		a_percent = std::clamp(a_percent, 0, 100);
-		if (gSneakBrightness.exchange(a_percent) != a_percent) {
-			SKSE::log::info("sneaking brightness set to {}%", a_percent);
-		}
 	}
 
 	bool HandLightsOn() { return gHands; }
@@ -541,7 +479,6 @@ namespace Plugin
 					}
 				}
 			} else if (!ApplySetting(key, v)) {
-				// an older preset's FadeWhileInvisible is left out on purpose: 2.9 saved its old default there, not a pick
 				SKSE::log::info("a preset names the setting {}, which this version does not have - left out", key);
 			}
 		}

@@ -64,7 +64,7 @@ namespace DevBenchGlue
 	}
 
 	// a number field, sent as a number or as its text ("5", "-1", "0.25"); nullopt when it is missing, not a number or
-	// not finite. Parsed without the C locale (a decimal comma never sneaks in).
+	// not finite. Parsed without the C locale (a decimal comma is never read as a point).
 	inline std::optional<double> Number(const json& a_args, const char* a_key)
 	{
 		if (!a_args.is_object() || !a_args.contains(a_key))

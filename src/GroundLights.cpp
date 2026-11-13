@@ -8,11 +8,10 @@
 // configs where absolutely neccesary to make lights work, but relight is the main driver."
 // The game makes a casting light so that it lights the caster but not the land (Dynamic Wards measured it,
 // Illuminated: -0.09 on the ground before, +35 after its twin). So the casting light - ours or RE::Light's - is kept
-// (Brightness, the fading module, sneaking and the switches all keep writing to it) but hidden, and a twin made the way
+// (Brightness, the fading module and the switches all keep writing to it) but hidden, and a twin made the way
 // Dynamic Wards makes its hand light (land and water lighting on) copies it every frame. The twin hangs beside the hand's
 // magic node, not under it (the fading module scales every light under the magic node; the twin copies a light it scaled).
-// A light the mod keeps dark now (a switched-off option, a hand light held out - WantedDark) keeps its twin dark too; a light
-// the sneak fade dims gives its twin the dimmed fade.
+// A light the mod keeps dark now (a switched-off option, a hand light held out - WantedDark) keeps its twin dark too.
 // Under Community Shaders the casting light lights the ground itself: nothing is made.
 //
 // CREDIT: a light is made and registered the way ReLight by Truman does it (github.com/TrumanGIT/ReLight, GPL-3.0-or-later,

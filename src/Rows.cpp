@@ -9,7 +9,7 @@
 // up using". The projectile wears its own light at its own size (Streams.cpp); the row lights its length - lights no farther
 // apart than BeamRow::kSpacing, laid again every frame to where its art ends, where it hit something, or its range (BeamRow.h, the
 // same file as Illuminated's). Off on Performance (his Quality / Performance order of 2026-10-20), with All lights off, with
-// its option switched off, and once the sneak fade has her lights out (Hooks.cpp). With Dynamic Lighting on the row
+// its option switched off. With Dynamic Lighting on the row
 // flickers (BeamRow::Flicker; under Realistic in its spell's shape, BeamRow::Pulsing), held under its cap so the peak can
 // swing (BeamRow::Steady); with it off it holds still.
 // Truman's call after the Lightning Bolt freeze still stands for the loader threads: the Load3D hook only QUEUES the
@@ -47,7 +47,6 @@ namespace Plugin
 			std::vector<RE::NiPointer<RE::BSLight>> lights;
 			const RE::NiColor*                      tint{ nullptr };  // the art pick's color for this projectile, as its own light wears it (Brightness.cpp)
 			std::uint32_t                           tintEpoch{ 0 };   // an art pick changed in the menu: the tint is read again
-			bool                                    hers{ false };    // cast by the player: it fades with her lights while she sneaks
 		};
 		std::unordered_map<const RE::NiAVObject*, Live> gLive;  // main thread
 		std::size_t                                     gLights = 0;
@@ -55,7 +54,7 @@ namespace Plugin
 		std::mutex                                      gQueueLock;
 		std::vector<RE::NiPointer<RE::TESObjectREFR>>   gQueue;               // what a loader thread loaded, for the next frame (under gQueueLock)
 		std::atomic<bool>                               gRowsAwake{ false };  // set under gQueueLock, so a load is never missed as the pass goes to sleep
-		// a projectile whose row a switch took off while it still flies (Performance, All lights off, sneaking, its option, the light
+		// a projectile whose row a switch took off while it still flies (Performance, All lights off, its option, the light
 		// cap): hung again when the rows come back, or a held stream stays bare until the next cast (main thread)
 		std::vector<RE::NiPointer<RE::TESObjectREFR>> gParked;
 
@@ -72,12 +71,11 @@ namespace Plugin
 			RE::NiPoint3                     launch;
 			RE::NiPoint3                     spot;
 			float                            sinceEnd{ -1.0f };  // seconds since the cone ended; below 0 while it flies
-			bool                             hers{ false };
 		};
 		std::vector<Cloud>    gClouds;
 		constexpr std::size_t kMostClouds = 8;
 
-		// a cone whose cloud light could not hang yet (its 3D not in the world yet, her lights faded out while she sneaks, the
+		// a cone whose cloud light could not hang yet (its 3D not in the world yet, the
 		// cap): tried again every frame for a while (UpdateRows)
 		struct CloudWait
 		{
@@ -109,11 +107,6 @@ namespace Plugin
 		}
 
 		[[nodiscard]] bool RowsOn() { return !PerformanceMode() && !AllLightsOff(); }
-
-		// while she sneaks the rows on HER spells fade with her spell lights (Hooks.cpp dims the lights on what she cast) and
-		// come off once faded out; another caster's row keeps its light
-		[[nodiscard]] bool RowOn(bool a_hers) { return RowsOn() && (SneakLevel() > 0.0f || !a_hers); }
-		[[nodiscard]] bool RowOn(const RE::TESObjectREFR* a_ref) { return RowOn(CastByPlayer(a_ref)); }
 
 		// Community Shaders draws an inverse-square point light at four times its fade and writes back the reach that gives, so the
 		// cutoff is set for that (laid reach 197 read 389 otherwise)
@@ -260,14 +253,11 @@ namespace Plugin
 			}
 		}
 
-		// a cloud's light is the spell's one light: on Performance too, off with All lights off, its patch's switch and - hers -
-		// once the sneak fade has her lights out
+		// a cloud's light is the spell's one light: on Performance too, off with All lights off and its patch's switch
 		[[nodiscard]] bool CloudSwitchedOn(const RowRecipe& a_rec)
 		{
 			return !AllLightsOff() && (a_rec.option == kNone || OptionLit(a_rec.option));
 		}
-
-		[[nodiscard]] bool CloudOn(const RowRecipe& a_rec, bool a_hers) { return CloudSwitchedOn(a_rec) && (SneakLevel() > 0.0f || !a_hers); }
 
 		[[nodiscard]] const RowRecipe* CloudRecipe(const RE::TESObjectREFR* a_ref)
 		{
@@ -293,13 +283,12 @@ namespace Plugin
 			auto*       root = a_ref ? a_ref->Get3D() : nullptr;
 			auto*       holder = root ? root->parent : nullptr;
 			const auto* rec = CloudRecipe(a_ref);
-			const bool  hers = CastByPlayer(a_ref);
 			const bool  listed = root && std::ranges::any_of(gClouds, [root](const Cloud& a_c) { return a_c.root.get() == root; });
 			if (!rec || listed) {
 				return true;  // not a cloud of ours, or lit already
 			}
-			// switched off: kept waiting (CloudOn below), so turning it on while the cone still stands hangs its light
-			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudOn(*rec, hers)) {
+			// switched off: kept waiting (CloudSwitchedOn below), so turning it on while the cone still stands hangs its light
+			if (!a_scene || !holder || gClouds.size() >= kMostClouds || !CloudSwitchedOn(*rec)) {
 				return false;
 			}
 			auto* light = LightKit::CloneLight();
@@ -318,7 +307,7 @@ namespace Plugin
 			const auto* proj = a_ref->As<RE::Projectile>();
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			gClouds.push_back({ RE::NiPointer<RE::NiAVObject>(root), RE::NiPointer<RE::TESObjectREFR>(a_ref), RE::NiPointer<RE::NiNode>(holder),
-				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f, hers });
+				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f });
 			return true;
 		}
 
@@ -337,7 +326,7 @@ namespace Plugin
 			}
 			auto*       light = a_c.light ? netimmerse_cast<RE::NiPointLight*>(a_c.light->light.get()) : nullptr;
 			const float left = BeamRow::CloudFade(a_c.sinceEnd, BeamRow::kCloudLife);
-			if (!light || !a_c.holder || !a_c.holder->parent || !a_c.recipe || left <= 0.0f || !CloudOn(*a_c.recipe, a_c.hers)) {
+			if (!light || !a_c.holder || !a_c.holder->parent || !a_c.recipe || left <= 0.0f || !CloudSwitchedOn(*a_c.recipe)) {
 				return false;
 			}
 			const auto& rec = *a_c.recipe;
@@ -352,7 +341,7 @@ namespace Plugin
 				color = *own;  // the spell's Lights by Item color
 			}
 			color = VanillaLook(color);  // after the override, as the caster light (Brightness.cpp)
-			Dress(light, color, steady * left * (a_c.hers ? SneakLevel() : 1.0f), reach, isl);
+			Dress(light, color, steady * left, reach, isl);
 			light->local.translate = a_c.holder->world.Invert() * a_c.spot;
 			RE::NiUpdateData update{};
 			light->Update(update);
@@ -406,7 +395,6 @@ namespace Plugin
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };
 			live.tint = TintOf(base);
 			live.tintEpoch = TintEpoch();
-			live.hers = CastByPlayer(a_ref);
 			for (std::size_t i = 0; i < n; ++i) {
 				auto* light = LightKit::CloneLight();
 				if (!light) {
@@ -589,7 +577,7 @@ namespace Plugin
 		// gone (its 3D out of the world or rebuilt), switched off, or every row off: taken off the scene now
 		ForgetIf(scene, [](const Live& a_live) {
 			const bool gone = !a_live.root->parent || !a_live.ref || a_live.ref->Get3D() != a_live.root.get();
-			const bool off = gone || !RowOn(a_live.hers) || (a_live.recipe->option != kNone && !OptionLit(a_live.recipe->option)) ||
+			const bool off = gone || !RowsOn() || (a_live.recipe->option != kNone && !OptionLit(a_live.recipe->option)) ||
 			                 SpellRowOff(a_live.ref.get());
 			if (off && !gone) {
 				gParked.push_back(a_live.ref);
@@ -600,9 +588,9 @@ namespace Plugin
 			gParked.insert(gParked.end(), queued.begin(), queued.end());  // kept: tried again once rows are on and the scene is there
 		} else {
 			// kept while its option or the light cap still holds it back, so it is tried again
-			std::erase_if(gParked, [scene](const auto& a_ref) { return RowOn(a_ref.get()) && Hang(a_ref.get(), scene); });
+			std::erase_if(gParked, [scene](const auto& a_ref) { return RowsOn() && Hang(a_ref.get(), scene); });
 			for (const auto& ref : queued) {
-				if (!RowOn(ref.get()) || !Hang(ref.get(), scene)) {
+				if (!RowsOn() || !Hang(ref.get(), scene)) {
 					gParked.push_back(ref);
 				}
 			}

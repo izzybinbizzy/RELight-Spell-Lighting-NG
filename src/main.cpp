@@ -13,13 +13,13 @@
 //   - a weapon's or staff's own light while it is drawn (Held.cpp); the sprays' and beams' light records kept to them (Streams.cpp);
 //   - the body glow while casting: a light on art the game hangs on an actor - a cloak, a heal (BodyLights.cpp);
 //   - one ward, one dome (Wards.cpp); VAER Reborn's swirls given back (VaerSwirls.cpp);
-//   - the menu's switches, Brightness and Reach, lights fading while sneaking, "Hand lights for", and the fading module.
+//   - the menu's switches, Brightness and Reach, "Hand lights for", and the fading module.
 // Every choice is a setting in the menu (SKSE Menu Framework - the only menu this mod has); the few values the menu does not
 // show are in the one advanced settings file (Fade::Tuning, registered below).
 //
 // THE FILES, AND WHAT EACH ONE IS FOR
 //   main.cpp        this file - the order of work, and the SKSE messages
-//   Hooks.cpp       the hooks, and spell lights fading while you sneak
+//   Hooks.cpp       the hooks
 //   Lighting.cpp    Community Shaders, ENB or Vanilla - found by itself (Illuminated's, the same tests)
 //   Data.cpp        the data files the installer put down: what this mod lights, its switches, its streams
 //   Settings.cpp    the settings file
@@ -82,7 +82,6 @@ namespace
 		Plugin::RaiseStreamLights();        // 2.3: the sprays' and bolts' raised copies - before the hand lights remember each effect's own light
 		Plugin::ApplyWards("data loaded");  // before the hand lights: a silenced ward effect must not get one
 		Plugin::MakeHandLights();
-		Plugin::FindSpellBases();   // before the late hooks: the 3D-load hooks read it from loader threads
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
@@ -116,7 +115,6 @@ namespace
 		Plugin::DropBodyLights();
 		Plugin::DropHeldLights();
 		Plugin::DropRows();
-		Plugin::DropSwirlLevel();
 		Fade::OnGameLoading();
 	}
 

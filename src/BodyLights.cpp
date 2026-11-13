@@ -8,8 +8,8 @@
 // enchantment shader. Art the game hangs on an actor - a cloak, a heal, CS Light's Magic FX rows - is neither, so those
 // configs lit nothing. Here, once a frame on the main thread, every art model on an actor that a `body` line names gets that
 // line's light, hung where RE::Light hangs its enchantment light (the third-person node of the art's attach root), and it
-// comes off the frame the art is gone or finished, its option is switched off, her own glow has faded out while she sneaks
-// (Hooks.cpp, as her held lights), "All RELight - Spell Lighting NG lights off" is on, or "Hand lights for" leaves
+// comes off the frame the art is gone or finished, its option is switched off, "All RELight - Spell Lighting NG lights off"
+// is on, or "Hand lights for" leaves
 // its actor out. Any art a spell plays as its casting art (the hand lights; a master spell's casting body art too) and a
 // weapon's enchantment art (held lights, Truman's enchantments) never get one. Body art that outlived its spell once kept a
 // light on for a day (Illuminated's CLAUDE.md, the lighting data's rules): this light lives exactly as long as the art does.
@@ -91,7 +91,7 @@ namespace Plugin
 			RE::NiPointer<RE::NiPointLight>    light;
 			float                              written{ -1.0f }, wroteReach{ -1.0f };
 			bool                               seen{ false };
-			bool                               hers{ false };   // on the player: it fades with her spell lights while she sneaks
+			bool                               hers{ false };   // on the player: never counted under the cap
 			float                              distSq{ 0.0f };  // its actor's squared distance to her, this frame
 		};
 
@@ -142,7 +142,6 @@ namespace Plugin
 		std::unordered_set<const RE::BGSArtObject*> gHandOrWeaponArt;
 		bool                                        gArtKnown = false;
 		std::uint32_t                               gLastGen = 0;
-		bool                                        gLastHerDark = false;
 
 		void LearnHandOrWeaponArt()
 		{
@@ -244,10 +243,9 @@ namespace Plugin
 
 	void UpdateBodyLights()
 	{
-		// nothing lit and nothing new: a setting, her sneak, an art's start or a look asked for is what changes that
+		// nothing lit and nothing new: a setting, an art's start or a look asked for is what changes that
 		const std::uint32_t gen = SettingsGeneration();
-		const bool          herDark = SneakLevel() <= 0.0f;
-		if (gArtKnown && gLive.empty() && gFailed.empty() && !gCapWaiting && gen == gLastGen && herDark == gLastHerDark &&
+		if (gArtKnown && gLive.empty() && gFailed.empty() && !gCapWaiting && gen == gLastGen &&
 			!gArtStarted.load(std::memory_order_relaxed) && !gLookNow.load(std::memory_order_relaxed)) {
 			return;
 		}
@@ -262,10 +260,9 @@ namespace Plugin
 			LearnHandOrWeaponArt();
 		}
 		++gUpdate;
-		// a setting, a switch or her sneak changed since the last frame: look again at once, so a glow let go comes straight back
-		const bool changed = gen != gLastGen || herDark != gLastHerDark;
+		// a setting or a switch changed since the last frame: look again at once, so a glow let go comes straight back
+		const bool changed = gen != gLastGen;
 		gLastGen = gen;
-		gLastHerDark = herDark;
 		const bool started = gArtStarted.exchange(false);
 		if (started) {
 			gWaitUpdates = kWaitUpdates;
@@ -287,10 +284,8 @@ namespace Plugin
 				f.seen = false;
 			}
 		}
-		// "All RELight - Spell Lighting NG lights off" puts every light of the mod out (2.5), and while she sneaks her own body glow
-		// fades with her spell lights (her held lights the same way - Held.cpp)
-		const bool  hidden = AllLightsOff();
-		const float sneak = SneakLevel();  // Hooks.cpp: her body glow comes off once it has faded out
+		// "All RELight - Spell Lighting NG lights off" puts every light of the mod out (2.5)
+		const bool hidden = AllLightsOff();
 		const auto [ownScale, reachScale] = OwnLightScale();
 		const float scale = ownScale * StrengthOf(Strength::kGlows);
 		struct Todo
@@ -329,7 +324,7 @@ namespace Plugin
 				noBody = true;  // the game stores its body a moment after its load is noted, and nothing says so
 				return;
 			}
-			if (!actor || (sneak <= 0.0f && actor == player)) {
+			if (!actor) {
 				return;
 			}
 			// no event says when a far actor comes near: looked at again while it waits, as a glow past the cap
@@ -405,7 +400,7 @@ namespace Plugin
 				gLive.erase(farthest);
 				gCapWaiting = true;  // the one it lost to may move away
 			}
-			const float       fade = body->fade * scale * (hers ? sneak : 1.0f) * FecBodyFade(art);
+			const float       fade = body->fade * scale * FecBodyFade(art);
 			const float       reach = body->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
 			// her Candlelight casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
@@ -429,7 +424,7 @@ namespace Plugin
 				SKSE::log::info("[BODY] {} | on {:08X} at {} | fade {:.2f} | radius {:.0f}", body->key, t.formId, node->name.c_str(), fade, reach);
 			}
 		}
-		// what was not seen this frame - the art is gone, finished, switched off, or she sneaks - comes off
+		// what was not seen this frame - the art is gone, finished or switched off - comes off
 		const auto wereLit = gLive.size();
 		std::erase_if(gLive, [scene](Live& v) {
 			if (!v.seen) {
@@ -453,7 +448,7 @@ namespace Plugin
 		}
 		// the sliders reach a light already hung
 		for (auto& v : gLive) {
-			const float fade = v.body->fade * scale * (v.hers ? sneak : 1.0f) * FecBodyFade(v.art.get());
+			const float fade = v.body->fade * scale * FecBodyFade(v.art.get());
 			const float reach = v.body->radius * reachScale;
 			if (fade != v.written || reach != v.wroteReach) {
 				RetuneOwnLight(v.light.get(), *v.body, fade, reach, reach != v.wroteReach);
