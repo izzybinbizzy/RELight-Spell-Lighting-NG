@@ -751,28 +751,31 @@ namespace Plugin
 
 	std::uint32_t TintEpoch() { return gTintEpoch.load(std::memory_order_acquire); }
 
-	const Stream* HeldOf(const RE::TESObjectWEAP* a_weapon, bool a_firstPerson)
+	const Stream* HeldOf(const RE::TESBoundObject* a_item, bool a_firstPerson)
 	{
-		if (!a_weapon || (gHeld.empty() && gHeldBase.empty())) {
+		if (!a_item || (gHeld.empty() && gHeldBase.empty())) {
 			return nullptr;
 		}
-		return Cached(gHeldCache[a_firstPerson ? 1 : 0], a_weapon, [&]() -> const Stream* {
-			const auto pathOf = [](const RE::TESForm* a_form) -> const char* {
-				const auto* model = a_form ? a_form->As<RE::TESModel>() : nullptr;
-				const char* path = model ? model->GetModel() : nullptr;
+		return Cached(gHeldCache[a_firstPerson ? 1 : 0], a_item, [&]() -> const Stream* {
+			const auto pathOf = [](const RE::TESModel* a_model) -> const char* {
+				const char* path = a_model ? a_model->GetModel() : nullptr;
 				return path && *path ? path : nullptr;
 			};
+			const auto modelOf = [](const RE::TESForm* a_form) { return a_form ? a_form->As<RE::TESModel>() : nullptr; };
+			// a shield's models live in its biped form, which no TESModel cast reaches
+			const auto*         armor = a_item->As<RE::TESObjectARMO>();
+			const RE::TESModel* own = armor ? &armor->worldModels[RE::SEXES::kMale] : modelOf(a_item);
 			// a light by form that names a model stands down on any other: a mod re-modelling the weapon lights its own model
-			if (auto it = gHeldBase.find(a_weapon->GetFormID()); it != gHeldBase.end()) {
-				const char* own = it->second.model.empty() ? nullptr : pathOf(a_weapon);
-				if (it->second.model.empty() || (own && PathKey(own) == it->second.model)) {
+			if (auto it = gHeldBase.find(a_item->GetFormID()); it != gHeldBase.end()) {
+				const char* path = it->second.model.empty() ? nullptr : pathOf(own);
+				if (it->second.model.empty() || (path && PathKey(path) == it->second.model)) {
 					return &it->second;
 				}
 			}
 			// exact: a weapon's own mesh by its full path first (two mods' staves can share a file name), then its bare name -
 			// never a key inside another. In first person the game draws the first-person model, which a config may light
-			const auto find = [&](const RE::TESForm* a_form) -> const Stream* {
-				const char* path = pathOf(a_form);
+			const auto find = [&](const RE::TESModel* a_model) -> const Stream* {
+				const char* path = pathOf(a_model);
 				if (!path) {
 					return nullptr;
 				}
@@ -782,8 +785,25 @@ namespace Plugin
 				}
 				return it != gHeld.end() ? &it->second : nullptr;
 			};
-			const Stream* first = a_firstPerson ? find(a_weapon->firstPersonModelObject) : nullptr;
-			return first ? first : find(a_weapon);
+			if (armor) {
+				if (const Stream* s = find(own)) {
+					return s;
+				}
+				for (const auto* addon : armor->armorAddons) {
+					if (!addon) {
+						continue;
+					}
+					for (const auto& model : addon->bipedModels) {
+						if (const Stream* s = find(&model)) {
+							return s;
+						}
+					}
+				}
+				return nullptr;
+			}
+			const auto*   weapon = a_item->As<RE::TESObjectWEAP>();
+			const Stream* first = a_firstPerson && weapon ? find(modelOf(weapon->firstPersonModelObject)) : nullptr;
+			return first ? first : find(own);
 		});
 	}
 

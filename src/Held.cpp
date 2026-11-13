@@ -2,10 +2,11 @@
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
-// A weapon's own light while it is drawn. RE::Light lights a weapon's mesh only where the weapon is a reference (on the
-// ground, on a rack) and reaches a weapon in the hand only through its enchantment shader. The build writes the light each
-// staff and weapon config of ours gives that mesh as a `held` line; this hangs it on the drawn weapon of whoever holds it
-// (the player, in both views, and the actors near them) and takes it off when it is sheathed, unequipped or switched off.
+// A weapon's own light while it is drawn, and a shield's on the arm. RE::Light lights a weapon's mesh only where the weapon
+// is a reference (on the ground, on a rack) and reaches a weapon in the hand only through its enchantment shader. The build
+// writes the light each staff and weapon config of ours gives that mesh as a `held` line; this hangs it on the drawn weapon
+// or shield of whoever holds it (the player, in both views, and the actors near them) and takes it off when it is sheathed,
+// unequipped or switched off.
 // One object, one light: a weapon whose enchantment shader is one of ours may wear RE::Light's enchantment light in the
 // hand, so the held light steps aside the frame that light is on its node (ReLightOn). "Hand lights for" (the light budget
 // for big fights) leaves out the same actors here as it does for hand lights. Nothing on any record is edited.
@@ -165,12 +166,13 @@ namespace Plugin
 			return found;
 		}
 
-		// the drawn weapon's own 3D in this view, parented to the hand node - the config's position is relative to the mesh.
-		// A bow is held in the left hand, so its 3D may sit under SHIELD though it is equipped in the right. Falls back to the
-		// hand node itself when the biped has no clone of it.
-		[[nodiscard]] RE::NiNode* NodeFor(RE::Actor* a_actor, bool a_left, bool a_firstPerson, const RE::TESObjectWEAP* a_weapon)
+		// the drawn weapon's or shield's own 3D in this view, parented to the hand node - the config's position is relative to
+		// the mesh. A bow is held in the left hand, so its 3D may sit under SHIELD though it is equipped in the right. Falls back
+		// to the hand node itself when the biped has no clone of it.
+		[[nodiscard]] RE::NiNode* NodeFor(RE::Actor* a_actor, bool a_left, bool a_firstPerson, const RE::TESBoundObject* a_item)
 		{
-			auto* root = a_actor->Get3D(a_firstPerson);
+			const auto* weapon = a_item->As<RE::TESObjectWEAP>();
+			auto*       root = a_actor->Get3D(a_firstPerson);
 			if (!root) {
 				return nullptr;
 			}
@@ -178,7 +180,7 @@ namespace Plugin
 			if (const auto& biped = a_actor->GetBiped(a_firstPerson)) {
 				RE::NiNode* other = nullptr;
 				for (auto& obj : biped->objects) {
-					auto*       clone = obj.item == a_weapon && obj.partClone ? obj.partClone->AsNode() : nullptr;
+					auto*       clone = obj.item == a_item && obj.partClone ? obj.partClone->AsNode() : nullptr;
 					const char* parent = clone && clone->parent ? clone->parent->name.c_str() : nullptr;
 					if (!parent) {
 						continue;
@@ -186,7 +188,7 @@ namespace Plugin
 					if (hand == parent) {
 						return clone;
 					}
-					if (!a_left && a_weapon->IsBow() && std::string_view(parent) == "SHIELD") {
+					if (!a_left && weapon && weapon->IsBow() && std::string_view(parent) == "SHIELD") {
 						other = clone;
 					}
 				}
@@ -200,7 +202,15 @@ namespace Plugin
 			return node ? node->AsNode() : nullptr;
 		}
 
-		// the weapons one actor has drawn, and the node each light hangs on, in each view the actor has
+		// a shield is worn, not held: the left hand's is the armor in the biped's shield slot (a torch there is a light)
+		[[nodiscard]] const RE::TESObjectARMO* ShieldOf(RE::Actor* a_actor)
+		{
+			const auto& biped = a_actor->GetBiped(false);
+			auto*       item = biped ? biped->objects[RE::BIPED_OBJECTS::kShield].item : nullptr;
+			return item ? item->As<RE::TESObjectARMO>() : nullptr;
+		}
+
+		// the weapons and shield one actor has drawn, and the node each light hangs on, in each view the actor has
 		void WantsOf(RE::Actor* a_actor, std::vector<Want>& a_out)
 		{
 			if (!a_actor || !a_actor->Is3DLoaded() || !a_actor->AsActorState()->IsWeaponDrawn()) {
@@ -214,19 +224,27 @@ namespace Plugin
 				auto* form = a_actor->GetEquippedObject(left);
 				auto* weapon = form ? form->As<RE::TESObjectWEAP>() : nullptr;
 				// a weapon held in both hands is one weapon: it is lit once, from the right hand
-				if (!weapon || (left && weapon == a_actor->GetEquippedObject(false) && BothHands(weapon))) {
+				if (left && weapon && weapon == a_actor->GetEquippedObject(false) && BothHands(weapon)) {
 					continue;
 				}
-				const bool enchanted = EnchantmentLit(a_actor, left, weapon);
+				const RE::TESBoundObject* item = weapon;
+				if (!item && left) {
+					item = ShieldOf(a_actor);
+				}
+				if (!item) {
+					continue;
+				}
+				// RE::Light's enchantment light hangs on a weapon's hand, never on a shield
+				const bool enchanted = weapon && EnchantmentLit(a_actor, left, weapon);
 				for (const bool fp : { false, true }) {
 					if (fp && !isPlayer) {
 						break;
 					}
-					const Stream* held = HeldOf(weapon, fp);
+					const Stream* held = HeldOf(item, fp);
 					if (!held || !OptionLit(held->option) || AllLightsOff()) {
 						continue;
 					}
-					if (auto* node = NodeFor(a_actor, left, fp, weapon); node && !(enchanted && ReLightOn(node))) {
+					if (auto* node = NodeFor(a_actor, left, fp, item); node && !(enchanted && ReLightOn(node))) {
 						a_out.push_back({ a_actor, left, fp, held, node });
 					}
 				}

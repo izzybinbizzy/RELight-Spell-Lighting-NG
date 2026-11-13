@@ -164,8 +164,9 @@ namespace Plugin
 	[[nodiscard]] const std::unordered_set<RE::FormID>& BeamLightRecords();                // beam light records (2.3: raised copies, Streams.cpp)
 	[[nodiscard]] std::optional<RE::Color>              RecordColor(RE::FormID a_record);  // his color for a spray / beam record, if the data names one
 	[[nodiscard]] const HandFx*                         HandFxOf(std::string_view a_key);  // nullptr: this hand does not breathe
-	// nullptr unless we light this weapon in the hand: its form first, then (first person) its first-person model, then its model
-	[[nodiscard]] const Stream* HeldOf(const RE::TESObjectWEAP* a_weapon, bool a_firstPerson);
+	// nullptr unless we light this weapon in the hand or this shield on the arm: its form first, then (a weapon in first person)
+	// its first-person model, then its model - a shield's world model, then each of its addons' worn models
+	[[nodiscard]] const Stream* HeldOf(const RE::TESBoundObject* a_item, bool a_firstPerson);
 	// nullptr unless a `body` line lights this art model on an actor (BodyLights.cpp): its full path key, then its bare name
 	[[nodiscard]] const Stream* BodyOf(const RE::BGSArtObject* a_art);
 	// nullptr unless a `body` line names this effect shader by its form ("0xID~Plugin" - Frozen Electrocuted Combustion's bodies)
