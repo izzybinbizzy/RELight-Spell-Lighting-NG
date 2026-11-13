@@ -726,6 +726,7 @@ namespace Plugin
 
 		void DrawArtPicks()
 		{
+			ImGuiMCP::TextDisabled("%s", T("Colors change at once; the rest of a pick at the next game start."));
 			GlowHeading("Fire");
 			DrawArtPick(0, T("Fire Art"), { T("Vanilla fire"), T("Inferno"), T("Embers XD"), T("Kittytail Flame") },
 				{ T("Skyrim's orange."),
