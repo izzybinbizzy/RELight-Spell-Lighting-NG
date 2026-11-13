@@ -15,7 +15,9 @@
 // it"): one list of the loaded modules, each asked for the export. A list that cannot be read is no ENB, said in the log - the
 // copies before this one let ENB's leftover settings files decide there, which made a Vanilla game read as ENB.
 //
-// Include it from one .cpp only, after <Windows.h>.
+// Include it from one .cpp only.
+
+#include <Windows.h>
 
 #include <Psapi.h>
 
@@ -46,6 +48,7 @@ namespace GameLighting
 		bool     enb{ false };                    // a loaded module exports ENBGetSDKVersion
 		bool     enbFilesLeft{ false };           // enbseries.ini / enblocal.ini in the game folder (logged only)
 		bool     modulesListed{ true };           // false: the module list could not be read, so no ENB was assumed
+		bool     folderRead{ true };              // false: the game folder could not be read, so no shader or ENB file was seen
 	};
 
 	[[nodiscard]] constexpr Lighting Decide(bool a_communityShaders, bool a_enb) noexcept
@@ -117,7 +120,8 @@ namespace GameLighting
 		std::error_code rootError;
 		const auto      root = std::filesystem::current_path(rootError);
 		out.communityShaders = ::GetModuleHandleW(L"CommunityShaders.dll") != nullptr;
-		if (!rootError) {
+		out.folderRead = !rootError;
+		if (out.folderRead) {
 			std::error_code ec;
 			out.shaderAddOn = std::filesystem::exists(root / "Data/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli", ec);
 			out.shaderInLightLimitFix = Detail::FileNames(root / "Data/Shaders/LightLimitFix/Attenuation.hlsli", "InverseSquare");
@@ -142,6 +146,9 @@ namespace GameLighting
 			Name(a_found.lighting), a_found.communityShaders ? "loaded" : "not loaded", a_found.shaderAddOn ? "installed" : "not installed",
 			a_found.shaderInLightLimitFix ? "yes" : "no", a_found.enb ? "yes" : "no", a_found.enbFilesLeft ? "yes" : "no",
 			leftover ? " - left over, not used" : "", a_found.inverseSquare ? "inverse square" : "plain");
+		if (!a_found.folderRead) {
+			SKSE::log::warn("lighting: the game folder could not be read - no shader or ENB file seen, so no inverse square");
+		}
 		if (!a_found.modulesListed) {
 			SKSE::log::warn("lighting: the loaded modules could not be listed - no ENB assumed");
 		}
