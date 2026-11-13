@@ -2,7 +2,7 @@
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
-// The one place a light the GAME made is held. The spell lights, the lights put out while sneaking, the hand lights,
+// The one place a light the GAME made is held. The spell lights, the hand lights,
 // the lights the sliders scale and the lights a switch holds out are lists of plain pointers; the one reference that
 // keeps such a light alive for them is here (the fading module, Lights by Item and the ground twins hold some too, so a light
 // can stay a few frames past its last use). A light has left the game when this reference is its last, when the only other

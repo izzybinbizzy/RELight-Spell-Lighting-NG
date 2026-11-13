@@ -201,14 +201,14 @@ namespace Plugin
 		}
 
 		// the weapons one actor has drawn, and the node each light hangs on, in each view the actor has
-		void WantsOf(RE::Actor* a_actor, bool a_hidden, std::vector<Want>& a_out)
+		void WantsOf(RE::Actor* a_actor, std::vector<Want>& a_out)
 		{
 			if (!a_actor || !a_actor->Is3DLoaded() || !a_actor->AsActorState()->IsWeaponDrawn()) {
 				return;
 			}
 			const bool isPlayer = a_actor->IsPlayerRef();
-			if ((isPlayer && a_hidden) || LeftOutByBudget(a_actor)) {
-				return;  // sneaking, or an actor "Hand lights for" leaves out (the audit, 2026-10-14: held lights ignored it)
+			if (LeftOutByBudget(a_actor)) {
+				return;  // an actor "Hand lights for" leaves out (the audit, 2026-10-14: held lights ignored it)
 			}
 			for (const bool left : { false, true }) {
 				auto* form = a_actor->GetEquippedObject(left);
@@ -333,12 +333,6 @@ namespace Plugin
 			return;
 		}
 		++gUpdate;
-		// her own held lights fade with her spell lights while she sneaks (Hooks.cpp), and come off once faded out
-		const float sneak = SneakLevel();
-		const bool  hidden = sneak <= 0.0f;
-		const auto  ownFade = [&](const Stream& a_held, RE::FormID a_actor) {
-			return a_held.fade * (a_actor == player->GetFormID() ? sneak : 1.0f);
-		};
 		{
 			std::lock_guard lock(gDrawnLock);
 			for (const auto id : gDrawnNoted) {
@@ -359,13 +353,11 @@ namespace Plugin
 			return;  // no weapon out and nothing lit
 		}
 		// what a weapon wants changes only with what NoteSweep hears (a draw, a sheathe, an equip, a death, a 3D, a view, her cell, an art's start), a
-		// setting or her sneak level; a refused light is tried again, and neither a far actor coming near nor Everyone nearby has an event
+		// setting; a refused light is tried again, and neither a far actor coming near nor Everyone nearby has an event
 		static std::uint32_t genWas = 0;
-		static float         sneakWas = -1.0f;
 		const auto           gen = SettingsGeneration();
-		const bool           changed = gen != genWas || sneak != sneakWas;
+		const bool           changed = gen != genWas;
 		genWas = gen;
-		sneakWas = sneak;
 		if (!changed && !looked && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
 			return;
 		}
@@ -385,7 +377,7 @@ namespace Plugin
 				return !gWaitingBody;
 			}
 			if (process && process->InHighProcess()) {
-				WantsOf(actor, actor == player && hidden, want);
+				WantsOf(actor, want);
 			} else {
 				gFar.push_back(a_id);
 			}
@@ -425,7 +417,7 @@ namespace Plugin
 				}
 				continue;
 			}
-			const float       fade = ownFade(*w.held, w.actor->GetFormID()) * scale;
+			const float       fade = w.held->fade * scale;
 			const float       reach = w.held->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
 			auto*             bs = MakeOwnLight(*w.held, fade, reach, w.node, scene, kLightName, light);
@@ -450,7 +442,7 @@ namespace Plugin
 		}
 		// the sliders reach a light already hung
 		for (auto& v : gLive) {
-			const float fade = ownFade(*v.held, v.actor) * scale;
+			const float fade = v.held->fade * scale;
 			const float reach = v.held->radius * reachScale;
 			if (fade != v.written || reach != v.wroteReach) {
 				RetuneOwnLight(v.light.get(), *v.held, fade, reach, reach != v.wroteReach);

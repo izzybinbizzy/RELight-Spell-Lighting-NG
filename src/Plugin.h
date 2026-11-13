@@ -106,7 +106,6 @@ namespace Plugin
 	using LightKit::kK;
 
 	// ------------------------------------------------------------------ Hooks.cpp (out of main.cpp since 2.2, as Illuminated's main.cpp)
-	void FindSpellBases();          // data load, before InstallLateHooks: what counts as magic for "Lights off while sneaking"
 	void InstallSpellLightHooks();  // SKSE's post-load, every plugin loaded: the spell-light call sites (ours before RE::Light's)
 	void InstallLateHooks();        // data load: the 3D loads, the player update, effect updates and cell animations
 
@@ -147,10 +146,6 @@ namespace Plugin
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: a caster's light "Hand lights for - Everyone nearby" keeps out while the caster is far (main thread)
 	[[nodiscard]] bool KeptOutByBudget(RE::NiLight* a_light);
-	// Hooks.cpp: how far the sneak fade has her lights now, 1 = full, down to "Sneaking brightness" (any thread)
-	[[nodiscard]] float SneakLevel();
-	// Hooks.cpp: a light on the player or on what she cast - only those fade while she sneaks (main thread: it resolves handles)
-	[[nodiscard]] bool CastByPlayer(const RE::TESObjectREFR* a_ref);
 
 	void                                                LoadData();
 	[[nodiscard]] std::vector<Option>&                  Options();
@@ -232,17 +227,7 @@ namespace Plugin
 	[[nodiscard]] int         ReachPercent();
 	void                      SetReachPercent(int a_percent);
 	[[nodiscard]] float       Reach();
-	[[nodiscard]] bool        SneakOn();
-	void                      SetSneakOn(bool a_on);
-	[[nodiscard]] int         SneakBrightness();  // percent, 0 to 100
-	void                      SetSneakBrightness(int a_percent);
-	[[nodiscard]] std::size_t GlowLimit();    // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
-	[[nodiscard]] bool        RunesFadeOn();  // her runes fade with her lights while she sneaks (Hooks.cpp)
-	void                      SetRunesFadeOn(bool a_on);
-	[[nodiscard]] bool        SwirlsFadeOn();  // her weapons' enchantment art fades with her lights while she sneaks
-	void                      SetSwirlsFadeOn(bool a_on);
-	[[nodiscard]] bool        InvisibleFadeOn();  // her lights fade out while she is invisible or carries a shadow sign (Hooks.cpp)
-	void                      SetInvisibleFadeOn(bool a_on);
+	[[nodiscard]] std::size_t GlowLimit();          // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
 	[[nodiscard]] bool        FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
 	void                      SetFecFrozenFadesOut(bool a_on);
 	[[nodiscard]] bool        FecBurningFadesOut();  // a body FEC burned: its glow fades once its flames die down
@@ -304,7 +289,7 @@ namespace Plugin
 	// ------------------------------------------------------------------ Options.cpp: the switches
 	// lights handed from a hook that may run on a loader thread to the main thread (an SKSE task holds them until then)
 	using LightList = std::vector<RE::NiPointer<RE::NiLight>>;
-	void UpdateOptionLights();  // every frame, after the sneaking pass (main thread)
+	void UpdateOptionLights();  // every frame (main thread)
 	// on a 3D that has just loaded (any thread): a switched-off option's lights under it are put out at once and returned,
 	// with that option in a_option, for AdoptOptionLights to take into the list on the main thread
 	[[nodiscard]] LightList          CullOptionLightsUnder(RE::NiAVObject* a_root, std::size_t& a_option);
@@ -357,7 +342,6 @@ namespace Plugin
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
 	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
 	void                      UpdateRows();                                                          // every frame, main thread (the player update)
-	void                      DropSwirlLevel();                                                      // a game loads: her weapons' art is full again
 	void                      DropRows();                                                            // a game loads: the projectiles they hang on are the old game's
 	[[nodiscard]] bool        IsRowLight(const RE::NiLight* a_light);                                // one of Rows.cpp's lights (any pass that walks the scene skips it)
 	[[nodiscard]] std::size_t LiveRowLights();

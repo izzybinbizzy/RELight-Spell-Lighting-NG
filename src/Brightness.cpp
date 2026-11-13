@@ -10,7 +10,7 @@
 // RE::Light rewrites fade every frame on a light that flickers or pulses, so each light remembers the fade we last
 // wrote; anything else it carries is a new base, so no slider ever scales a value we wrote. A hand light with Dynamic
 // Lighting breathes or crackles here (Oscillate), and a light on an object an art pick recolors (`tint`) takes that
-// color. Runs in the player update after the switches and before the fading module, the sneak dim and the ground twins.
+// color. Runs in the player update after the switches and before the fading module and the ground twins.
 //
 // (Light colors and the Fire / Frost / Shock color picks were here until his order took the color variations out of the
 // menu, 2026-10-09; Light colors came back 2026-10-20 and left again 2026-10-21 - "pale and deep also need to be removed":

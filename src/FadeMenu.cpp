@@ -188,8 +188,7 @@ namespace Fade
 
 			GlowHeading(Icon::kSun, "Fading");
 			Percent("Brightness when empty", t.floor, 0, 50,
-				"What is left of the light at 0% charge. 0% puts it out; 10% (the default) keeps a faint glow so you can "
-				"tell the weapon is enchanted but spent.",
+				"What is left of the light at 0% charge. 10% (the default) keeps a faint glow.",
 				save);
 			{
 				static const char* const kCurves[] = { TR_MARK("Linear"), TR_MARK("Gentle - stays bright longer") };
@@ -200,9 +199,7 @@ namespace Fade
 				"How much of the fade the light's reach follows too. 0%: only the brightness fades; 100%: the reach shrinks just as much.",
 				save);
 			Toggle("Dim the glow too", s.dimShader,
-				"The glow on the blade (the enchantment's shader and its art, VAER's swirls among them) fades with the charge, "
-				"and the glow of a spell you cast on yourself (a heal, a cloak) with your magicka, like the lights - that part needs "
-				"Spells on.",
+				"The blade's glow fades with the charge too, and a self-cast spell's glow with your magicka while Spells is on.",
 				save);
 
 			GlowHeading(Icon::kMoon, "Nearly empty");
@@ -215,8 +212,7 @@ namespace Fade
 			// HIS WORD: "remove cools toward option in color cooling, the only option will be grey, ember cooling only
 			// for fire spell types that are orange" (Glow::TintFor)
 			Toggle("Color cooling", t.cool,
-				"Below the sputter level the light's color drains toward grey. Fire magic with an orange light turns a dull ember "
-				"instead, like a dying fire.",
+				"Below the sputter level the light drains toward grey; orange fire turns a dull ember.",
 				save);
 			ImGuiMCP::BeginDisabled(!t.cool);
 			Percent("Cooling amount", t.coolAmount, 0, 100, "How far the color goes toward grey (or ember) at empty.", save);
@@ -241,8 +237,7 @@ namespace Fade
 			ImGuiMCP::SameLine(column);
 			Toggle("Staves", s.staves, "A staff's lights and glow follow its charge.", save);
 			Toggle("Spells", s.spells,
-				"A spell in hand: the lights and glow on the casting hand follow your magicka, dimming as it runs low and "
-				"coming back as it refills.",
+				"A spell's hand lights and glow dim as your magicka runs low.",
 				save);
 			Toggle("Bound weapons", s.bound,
 				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
@@ -261,8 +256,7 @@ namespace Fade
 			{
 				static const char* const kWho[] = { TR_MARK("Player"), TR_MARK("Player and followers"), TR_MARK("Everyone") };
 				Choice("Whose", s.who, kWho, 3,
-					"Everyone: every caster near you, enemies too - their spells follow their magicka. Other characters' weapons "
-					"usually never lose charge in the base game, so theirs stay full unless another mod makes them spend it.",
+					"Whose lights fade: yours, your followers' too, or every caster near you (other people's weapons rarely lose charge).",
 					save);
 			}
 
@@ -313,8 +307,7 @@ namespace Fade
 			const bool hooked = ChargeBarHooked();
 			ImGuiMCP::BeginDisabled(!s.enabled || !hooked);
 			Toggle("Hide the charge bar", s.hideChargeBar,
-				hooked ? "The HUD's enchantment charge bar is hidden: the weapon's light shows the charge instead. Works with the "
-						 "vanilla HUD, SkyHUD and TrueHUD. Needs Fading on - with Fading off the bar shows." :
+				hooked ? "Hides the HUD's charge bar; the weapon's light shows the charge instead. Needs Fading on." :
 						 "Not available here: this is Skyrim VR, or another mod changed the charge bar first.",
 				save);
 			ImGuiMCP::EndDisabled();
@@ -322,9 +315,7 @@ namespace Fade
 			GlowHeading(Icon::kGem, "Charge gems");
 			ImGuiMCP::BeginDisabled(!s.enabled);
 			Toggle("Charge gems on the HUD", s.hudGems,
-				"A soul gem for each enchanted weapon hand beside the health bar - the left hand's on the left, the right hand's on "
-				"the right - as full as that weapon's charge (a bound weapon's: the time its spell has left), in the color of the weapon's light. It shows once the charge "
-				"starts dropping, while your weapons are out - full ones too with Show at full charge. Needs Fading on.",
+				"A soul gem beside the health bar for each enchanted weapon, as full as its charge. Needs Fading on.",
 				save);
 			ImGuiMCP::BeginDisabled(!s.hudGems);
 			Percent("Gem size", s.hudGemSize, 50, 200, "How big the gems are.", save);
@@ -333,8 +324,7 @@ namespace Fade
 			// his ask 2026-10-16 ("it was fully charged, give toggle to change that setting"): off keeps his 2026-10-10 rule - a gem
 			// only once the charge drops
 			Toggle("Show at full charge", s.hudGemFull,
-				"On: a gem for every enchanted or bound weapon in your hands whose light fades (What fades), full ones too, while they "
-				"are out. Off: a gem shows once the charge starts dropping.",
+				"Shows a gem for full weapons too, not only once the charge starts dropping.",
 				save);
 			ImGuiMCP::EndDisabled();
 			ImGuiMCP::EndDisabled();
@@ -350,7 +340,7 @@ namespace Fade
 			{
 				Settings s = Config();
 				bool     save = false;
-				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to the mod's log file.", save);
+				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to my log file.", save);
 				if (save) {
 					ApplySetting("DebugLog", s.debugLog ? 1 : 0);
 					QueueSave();
@@ -363,8 +353,7 @@ namespace Fade
 			if (ImGuiMCP::Checkbox(T("Pretend the charge is"), &on)) {
 				preview.on = on;
 			}
-			Tip("Every tracked weapon shows this charge instead of its own, to see the fade, sputter and cooling without "
-				"fighting. Not saved: it switches off when the game restarts.");
+			Tip("Every weapon shows this charge, to see the fade without fighting. Not saved.");
 			ImGuiMCP::SameLine();
 			{
 				int v = static_cast<int>(std::lround(preview.fraction.load() * 100.0f));
@@ -420,8 +409,7 @@ namespace Fade
 			ImGuiMCP::Text(T("%zu light(s) being scaled; %zu glow(s) dimmed"), ScaledLightCount(), DimmedGlowCount());
 			if (const auto frozen = FrozenLightCount()) {
 				ImGuiMCP::TextColored(kGold, T("%zu light(s) held steady: another plugin scales them the same way"), frozen);
-				Tip("Two plugins each scaling the other's output would drive the light to black or white. This mod noticed "
-					"and holds its base value; the light still fades, but check which other mod touches weapon lights.");
+				Tip("Another mod scales these lights too, so I hold them steady; they still fade.");
 			}
 
 			GlowHeading(Icon::kBook, "Rule files");

@@ -171,8 +171,6 @@ namespace Fade
 		// this frame's switches, for the effect hooks, which run for every effect in the world and must not lock and copy
 		// the settings each time
 		std::atomic<bool> gEnabled{ false }, gDimShader{ false };
-		// how far her weapons' enchantment art dims while she sneaks (the mod sets it every frame; 1 = untouched)
-		std::atomic<float> gSneakArt{ 1.0f };
 		// spell hands followed this frame (a self-cast glow fades with them; gActiveHands counts weapon hands only)
 		std::atomic<std::size_t> gActiveSpellHands{ 0 };
 		// this frame's settings, for the effect hooks (under gLock)
@@ -1021,8 +1019,7 @@ namespace Fade
 
 	bool EffectsWanted() noexcept
 	{
-		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding() ||
-		       gSneakArt.load(std::memory_order_relaxed) < 1.0f;
+		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding();
 	}
 
 	void UpdateHands(float a_delta)
@@ -1244,7 +1241,6 @@ namespace Fade
 			return;
 		}
 		const bool      items = gItemRootsWanted.load(std::memory_order_relaxed);
-		const float     sneakArt = gSneakArt.load(std::memory_order_relaxed);
 		RE::Actor*      actor = nullptr;
 		bool            left = false;
 		RE::NiAVObject* root = nullptr;
@@ -1268,7 +1264,6 @@ namespace Fade
 				}
 			}
 		}
-		const float sneak = actor == RE::PlayerCharacter::GetSingleton() ? sneakArt : 1.0f;
 		if (auto* hand = gEnabled ? ActiveHand(actor, left) : nullptr) {
 			for (auto* node : nodes) {
 				if (!node) {
@@ -1278,12 +1273,10 @@ namespace Fade
 				ApplyUnder(node, *hand);  // right after Light Placer wrote this frame's values for this effect
 			}
 			const bool dim = gDimShader.load(std::memory_order_relaxed);
-			if (nodes[1] && (dim || sneak < 1.0f)) {
+			if (nodes[1] && dim) {
 				// the art's own glowing meshes: VAER's swirls, EAE's art
-				DimArt(nodes[1], (dim ? hand->out.brightness : 1.0f) * sneak);
+				DimArt(nodes[1], hand->out.brightness);
 			}
-		} else if (nodes[1] && sneak < 1.0f) {
-			DimArt(nodes[1], sneak);
 		}
 		for (auto* node : nodes) {
 			Items::ReapplyUnder(node);  // last: an item's own choice over Light Placer's animation of this frame
@@ -1364,8 +1357,6 @@ namespace Fade
 			seen.enbGlow->local.scale = seen.glowScale.Apply(seen.enbGlow->local.scale, (std::max)(k * k * k, 0.05f));
 		}
 	}
-
-	void SetSneakArt(float a_level) { gSneakArt.store(std::clamp(a_level, 0.0f, 1.0f), std::memory_order_relaxed); }
 
 	void ReapplyAll()
 	{

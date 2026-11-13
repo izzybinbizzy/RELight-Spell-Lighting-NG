@@ -636,8 +636,7 @@ namespace Fade::Items
 		static char           search[64]{};
 		static bool           handsOnly = false;
 		MenuStyle::Header(MenuStyle::Icon::kBulb, T("Choose Your Own Color"));
-		TextWrapped("%s", T("Find a spell, staff or weapon and change its light: switch it off, or give it a color of its own. Everything "
-							"else keeps its light as it is (Auto). The main Brightness and Reach sliders still reach them all."));
+		TextWrapped("%s", T("Find a spell, staff or weapon and switch its light off or give it a color of its own."));
 		// his list: "explain the buttons in light by item and make them one above the other" - each control on its own line,
 		// what it does beside it
 		SetNextItemWidth(260.0f);
@@ -662,8 +661,7 @@ namespace Fade::Items
 		}
 		SameLine();
 		TextDisabled("%s", T("Everything back to Auto."));
-		TextDisabled("%s", T("Each item: first box = its light on or off, second box = a color of its own (pick it in the square), "
-							 "Reset = back to Auto."));
+		TextDisabled("%s", T("The first box turns its light on or off, the second gives it a color; Reset goes back to Auto."));
 		std::unordered_map<RE::FormID, Choice> choices;
 		{
 			std::lock_guard lock(gLock);

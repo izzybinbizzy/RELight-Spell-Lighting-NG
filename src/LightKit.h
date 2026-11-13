@@ -266,7 +266,7 @@ namespace LightKit
 
 	// THE TURN (his checklist 317, item 1 - one turn-taking rule for every light write): every pass that writes a light's
 	// fields does it inside a turn, so a game thread and the main thread never write one light at the same moment. Its order:
-	// the sneak / dim locks, then the fading module's, then the turn, then the small list locks (the handshakes, the flicker
+	// the dim locks, then the fading module's, then the turn, then the small list locks (the handshakes, the flicker
 	// list). Inside a turn nothing waits on a game lock, and nothing after it asks for it or for an earlier lock - a turn can
 	// never close a freeze. Recursive: a writer may call another inside its own turn.
 	[[nodiscard]] inline std::unique_lock<std::recursive_mutex> Turn()
