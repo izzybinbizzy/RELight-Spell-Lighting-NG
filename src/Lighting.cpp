@@ -31,7 +31,11 @@ namespace Plugin
 		gEnb = found.enb;
 		gEnbFiles = found.enbFilesLeft;
 		gFound = static_cast<Lighting>(found.lighting);
-		GameLighting::Log(found);
+		const auto lines = GameLighting::Describe(found);
+		SKSE::log::info("{}", lines.info);
+		for (const auto& warning : lines.warnings) {
+			SKSE::log::warn("{}", warning);
+		}
 	}
 
 	Lighting LightingFound()

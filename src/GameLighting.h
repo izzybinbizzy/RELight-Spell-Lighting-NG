@@ -15,17 +15,22 @@
 // it"): one list of the loaded modules, each asked for the export. A list that cannot be read is no ENB, said in the log - the
 // copies before this one let ENB's leftover settings files decide there, which made a Vanilla game read as ENB.
 //
+// It needs no game and no logging library (Describe hands the carrier its log lines), so an off-game test reads it as it is.
 // Include it from one .cpp only.
 
 #include <Windows.h>
 
 #include <Psapi.h>
 
+#include <cstddef>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace GameLighting
@@ -48,7 +53,7 @@ namespace GameLighting
 		bool     enb{ false };                    // a loaded module exports ENBGetSDKVersion
 		bool     enbFilesLeft{ false };           // enbseries.ini / enblocal.ini in the game folder (logged only)
 		bool     modulesListed{ true };           // false: the module list could not be read, so no ENB was assumed
-		bool     folderRead{ true };              // false: the game folder could not be read, so no shader or ENB file was seen
+		bool     filesRead{ true };               // false: the game folder or one of the files above could not be read (not "missing")
 	};
 
 	[[nodiscard]] constexpr Lighting Decide(bool a_communityShaders, bool a_enb) noexcept
@@ -73,14 +78,31 @@ namespace GameLighting
 
 	namespace Detail
 	{
-		[[nodiscard]] inline bool FileNames(const std::filesystem::path& a_file, std::string_view a_word)
+		// false when the file is not there; nullopt when it is there but could not be read
+		[[nodiscard]] inline std::optional<bool> FileNames(const std::filesystem::path& a_file, std::string_view a_word)
 		{
+			std::error_code ec;
+			if (!std::filesystem::exists(a_file, ec)) {
+				return ec ? std::nullopt : std::optional<bool>{ false };
+			}
 			std::ifstream in{ a_file, std::ios::binary };
 			if (!in) {
-				return false;
+				return std::nullopt;
 			}
 			const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+			if (in.bad()) {
+				return std::nullopt;
+			}
 			return text.find(a_word) != std::string::npos;
+		}
+
+		// whether a file is there; an error other than "not found" leaves a_unread set
+		[[nodiscard]] inline bool There(const std::filesystem::path& a_file, bool& a_unread)
+		{
+			std::error_code ec;
+			const bool      there = std::filesystem::exists(a_file, ec);
+			a_unread = a_unread || static_cast<bool>(ec);
+			return there;
 		}
 
 		[[nodiscard]] inline std::optional<bool> EnbLoaded()
@@ -120,13 +142,18 @@ namespace GameLighting
 		std::error_code rootError;
 		const auto      root = std::filesystem::current_path(rootError);
 		out.communityShaders = ::GetModuleHandleW(L"CommunityShaders.dll") != nullptr;
-		out.folderRead = !rootError;
-		if (out.folderRead) {
-			std::error_code ec;
-			out.shaderAddOn = std::filesystem::exists(root / "Data/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli", ec);
-			out.shaderInLightLimitFix = Detail::FileNames(root / "Data/Shaders/LightLimitFix/Attenuation.hlsli", "InverseSquare");
-			out.enbFilesLeft = std::filesystem::exists(root / "enbseries.ini", ec) || std::filesystem::exists(root / "enblocal.ini", ec);
+		bool unread = static_cast<bool>(rootError);
+		if (!unread) {
+			// a file that could not be read counts as not there (no inverse square from it) and is logged as unread
+			out.shaderAddOn = Detail::There(root / "Data/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli", unread);
+			const auto inLlf = Detail::FileNames(root / "Data/Shaders/LightLimitFix/Attenuation.hlsli", "InverseSquare");
+			out.shaderInLightLimitFix = inLlf.value_or(false);
+			unread = unread || !inLlf.has_value();
+			const bool series = Detail::There(root / "enbseries.ini", unread);
+			const bool local = Detail::There(root / "enblocal.ini", unread);
+			out.enbFilesLeft = series || local;
 		}
+		out.filesRead = !unread;
 		out.inverseSquare = out.communityShaders && (out.shaderAddOn || out.shaderInLightLimitFix);
 		const auto enb = Detail::EnbLoaded();
 		out.modulesListed = enb.has_value();
@@ -135,25 +162,33 @@ namespace GameLighting
 		return out;
 	}
 
-	// the one log line every carrier writes, and the two warnings
-	inline void Log(const Found& a_found)
+	// what every carrier logs: one info line and its warnings (written by the carrier's own log, so this header needs none)
+	struct Lines
+	{
+		std::string              info;
+		std::vector<std::string> warnings;
+	};
+
+	[[nodiscard]] inline Lines Describe(const Found& a_found)
 	{
 		const bool leftover = (a_found.enbFilesLeft && !a_found.enb && !a_found.communityShaders) ||
 		                      ((a_found.shaderAddOn || a_found.shaderInLightLimitFix) && !a_found.communityShaders);
-		SKSE::log::info(
+		Lines      out;
+		out.info = std::format(
 			"lighting: {} (found by itself - CommunityShaders.dll {}, inverse square shader {}, in Light Limit Fix {}, ENB running {}, "
 			"ENB settings in the game folder {}{}); lights drawn {}",
 			Name(a_found.lighting), a_found.communityShaders ? "loaded" : "not loaded", a_found.shaderAddOn ? "installed" : "not installed",
 			a_found.shaderInLightLimitFix ? "yes" : "no", a_found.enb ? "yes" : "no", a_found.enbFilesLeft ? "yes" : "no",
 			leftover ? " - left over, not used" : "", a_found.inverseSquare ? "inverse square" : "plain");
-		if (!a_found.folderRead) {
-			SKSE::log::warn("lighting: the game folder could not be read - no shader or ENB file seen, so no inverse square");
+		if (!a_found.filesRead) {
+			out.warnings.emplace_back("lighting: the game folder or a shader / ENB file in it could not be read - counted as not there, so no inverse square from it");
 		}
 		if (!a_found.modulesListed) {
-			SKSE::log::warn("lighting: the loaded modules could not be listed - no ENB assumed");
+			out.warnings.emplace_back("lighting: the loaded modules could not be listed - no ENB assumed");
 		}
 		if (a_found.communityShaders && !a_found.inverseSquare) {
-			SKSE::log::warn("lighting: CommunityShaders.dll is loaded but no shader of it names inverse square - every light of ours is drawn plain (linear)");
+			out.warnings.emplace_back("lighting: CommunityShaders.dll is loaded but no shader of it names inverse square - every light of ours is drawn plain (linear)");
 		}
+		return out;
 	}
 }
