@@ -87,7 +87,8 @@ namespace GameLighting
 				return ec ? std::nullopt : std::optional<bool>{ false };
 			}
 			const std::uintmax_t size = std::filesystem::file_size(a_file, ec);
-			if (ec) {
+			// a shader file is a few kilobytes: anything past 16 MB is not one and counts as unread, never a huge allocation
+			if (ec || size > 16u * 1024u * 1024u) {
 				return std::nullopt;
 			}
 			std::ifstream in{ a_file, std::ios::binary };
@@ -189,8 +190,9 @@ namespace GameLighting
 			a_found.shaderInLightLimitFix ? "yes" : "no", a_found.enb ? "yes" : "no", a_found.enbFilesLeft ? "yes" : "no",
 			leftover ? " - left over, not used" : "", a_found.inverseSquare ? "inverse square" : "plain");
 		if (!a_found.shadersRead) {
-			out.warnings.emplace_back("lighting: the game folder or a shader file in it could not be read - counted as not there, so no inverse square from it");
-		} else if (!a_found.enbFilesRead) {
+			out.warnings.emplace_back("lighting: the game folder or a shader file in it could not be read - a file that could not be read counts as not there");
+		}
+		if (!a_found.enbFilesRead) {
 			out.warnings.emplace_back("lighting: an ENB settings file in the game folder could not be read - it is only logged, nothing depends on it");
 		}
 		if (!a_found.modulesListed) {
