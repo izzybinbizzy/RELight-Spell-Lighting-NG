@@ -239,6 +239,120 @@ namespace Plugin
 				a_v.node->DetachChild(a_v.light.get());
 			}
 		}
+
+		// one art the walk found to light: made after the walk, the nearest first
+		struct Todo
+		{
+			RE::NiPointer<RE::ReferenceEffect> art;
+			const Stream*                      body{};
+			RE::NiPointer<RE::NiNode>          node;
+			bool                               hers{};
+			RE::FormID                         formId{};
+			float                              distSq{};
+		};
+
+		// made and put in the scene after the walk (the game holds its effect list's lock through it), the nearest first; at the
+		// glow cap a glow on someone clearly nearer takes the farthest one's place; a light the scene refused is tried again later
+		void MakeQueued(std::vector<Todo>& a_todo, RE::ShadowSceneNode* a_scene, float a_scale, float a_reachScale)
+		{
+			std::ranges::sort(a_todo, {}, &Todo::distSq);
+			for (const auto& t : a_todo) {
+				auto*       art = t.art.get();
+				auto*       node = t.node.get();
+				const auto* body = t.body;
+				const bool  hers = t.hers;
+				if (const auto have = std::ranges::find_if(gLive, [art](const Live& v) { return v.art.get() == art; }); have != gLive.end()) {
+					TakeOff(*have, a_scene);
+					gLive.erase(have);
+				}
+				const auto failed = std::ranges::find_if(gFailed, [art](const Failed& f) { return f.art == art; });
+				if (failed != gFailed.end()) {
+					failed->seen = true;
+					if (gUpdate < failed->retryAt) {
+						continue;
+					}
+				}
+				// her own art is never left out by the cap: at the cap a glow on someone clearly nearer takes the farthest one's place,
+				// the rest wait for one to go out
+				if (!hers && OthersLit() >= GlowLimit()) {
+					const auto farthest = std::ranges::max_element(gLive, {}, [](const Live& v) { return v.hers ? -1.0f : v.distSq; });
+					if (farthest == gLive.end() || farthest->hers || t.distSq >= farthest->distSq * kNearerBy) {
+						gCapWaiting = true;
+						if (!gCapLogged) {
+							gCapLogged = true;
+							SKSE::log::info("[BODY] {} body lights on others are lit at once, the most there may be: the nearest keep them", OthersLit());
+						}
+						continue;
+					}
+					TakeOff(*farthest, a_scene);
+					gLive.erase(farthest);
+					gCapWaiting = true;  // the one it lost to may move away
+				}
+				const float       fade = body->fade * a_scale * FecBodyFade(art);
+				const float       reach = body->radius * a_reachScale;
+				RE::NiPointLight* light = nullptr;
+				// her Candlelight casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
+				const bool shadow = hers && ShadowPatch() && body->key == "lightspellactorfx";
+				auto*      bs = MakeOwnLight(*body, fade, reach, node, a_scene, kLightName, light, shadow);
+				if (!bs) {
+					if (failed != gFailed.end()) {
+						failed->retryAt = gUpdate + kRetryUpdates;
+					} else {
+						SKSE::log::warn("[BODY] {}: the light could not be made or registered; tried again every {} updates while the art is there",
+							body->key, kRetryUpdates);
+						gFailed.push_back({ art, gUpdate + kRetryUpdates, true });
+					}
+					continue;
+				}
+				if (failed != gFailed.end()) {
+					gFailed.erase(failed);  // made at last: a later failure warns again
+				}
+				gLive.push_back({ t.art, body, t.node, RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, true, hers });
+				if (++gMade <= 16) {
+					SKSE::log::info("[BODY] {} | on {:08X} at {} | fade {:.2f} | radius {:.0f}", body->key, t.formId, node->name.c_str(), fade, reach);
+				}
+			}
+		}
+
+		// what was not seen this frame - the art is gone, finished or switched off - comes off; never more than the cap on others
+		void TakeOffUnseen(RE::ShadowSceneNode* a_scene, bool a_look)
+		{
+			const auto wereLit = gLive.size();
+			std::erase_if(gLive, [a_scene](Live& v) {
+				if (!v.seen) {
+					TakeOff(v, a_scene);
+				}
+				return !v.seen;
+			});
+			if (gLive.size() < wereLit) {
+				gLookNow.store(true, std::memory_order_relaxed);  // a glow waiting past the cap takes its place at once
+			}
+			if (a_look) {
+				std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
+			}
+			// never more than the cap on others, whatever came in this frame: the newest come off and wait like any other
+			for (auto it = gLive.end(); OthersLit() > GlowLimit() && it != gLive.begin();) {
+				--it;
+				if (!it->hers) {
+					TakeOff(*it, a_scene);
+					it = gLive.erase(it);
+				}
+			}
+		}
+
+		// the sliders reach a light already hung
+		void RetuneLit(float a_scale, float a_reachScale)
+		{
+			for (auto& v : gLive) {
+				const float fade = v.body->fade * a_scale * FecBodyFade(v.art.get());
+				const float reach = v.body->radius * a_reachScale;
+				if (fade != v.written || reach != v.wroteReach) {
+					RetuneOwnLight(v.light.get(), *v.body, fade, reach, reach != v.wroteReach);
+					v.written = fade;
+					v.wroteReach = reach;
+				}
+			}
+		}
 	}
 
 	void UpdateBodyLights()
@@ -287,16 +401,7 @@ namespace Plugin
 		// "All RELight - Spell Lighting NG lights off" puts every light of the mod out (2.5)
 		const bool hidden = AllLightsOff();
 		const auto [ownScale, reachScale] = OwnLightScale();
-		const float scale = ownScale * StrengthOf(Strength::kGlows);
-		struct Todo
-		{
-			RE::NiPointer<RE::ReferenceEffect> art;
-			const Stream*                      body{};
-			RE::NiPointer<RE::NiNode>          node;
-			bool                               hers{};
-			RE::FormID                         formId{};
-			float                              distSq{};
-		};
+		const float              scale = ownScale * StrengthOf(Strength::kGlows);
 		static std::vector<Todo> todo;  // main thread; its storage kept between frames
 		todo.clear();
 		// one art judged: kept (seen), queued to be made, or left - the same rules on a look and between looks
@@ -366,96 +471,9 @@ namespace Plugin
 			--gWaitUpdates;
 			gLookNow.store(true, std::memory_order_relaxed);
 		}
-		// made and put in the scene after the walk: the game holds its effect list's lock through it; the nearest first
-		std::ranges::sort(todo, {}, &Todo::distSq);
-		for (const auto& t : todo) {
-			auto*       art = t.art.get();
-			auto*       node = t.node.get();
-			const auto* body = t.body;
-			const bool  hers = t.hers;
-			if (const auto have = std::ranges::find_if(gLive, [art](const Live& v) { return v.art.get() == art; }); have != gLive.end()) {
-				TakeOff(*have, scene);
-				gLive.erase(have);
-			}
-			const auto failed = std::ranges::find_if(gFailed, [art](const Failed& f) { return f.art == art; });
-			if (failed != gFailed.end()) {
-				failed->seen = true;
-				if (gUpdate < failed->retryAt) {
-					continue;
-				}
-			}
-			// her own art is never left out by the cap: at the cap a glow on someone clearly nearer takes the farthest one's place,
-			// the rest wait for one to go out
-			if (!hers && OthersLit() >= GlowLimit()) {
-				const auto farthest = std::ranges::max_element(gLive, {}, [](const Live& v) { return v.hers ? -1.0f : v.distSq; });
-				if (farthest == gLive.end() || farthest->hers || t.distSq >= farthest->distSq * kNearerBy) {
-					gCapWaiting = true;
-					if (!gCapLogged) {
-						gCapLogged = true;
-						SKSE::log::info("[BODY] {} body lights on others are lit at once, the most there may be: the nearest keep them", OthersLit());
-					}
-					continue;
-				}
-				TakeOff(*farthest, scene);
-				gLive.erase(farthest);
-				gCapWaiting = true;  // the one it lost to may move away
-			}
-			const float       fade = body->fade * scale * FecBodyFade(art);
-			const float       reach = body->radius * reachScale;
-			RE::NiPointLight* light = nullptr;
-			// her Candlelight casts a shadow with the optional Bottled Shaders shadow download (his checklist 262, "b")
-			const bool shadow = hers && ShadowPatch() && body->key == "lightspellactorfx";
-			auto*      bs = MakeOwnLight(*body, fade, reach, node, scene, kLightName, light, shadow);
-			if (!bs) {
-				if (failed != gFailed.end()) {
-					failed->retryAt = gUpdate + kRetryUpdates;
-				} else {
-					SKSE::log::warn("[BODY] {}: the light could not be made or registered; tried again every {} updates while the art is there",
-						body->key, kRetryUpdates);
-					gFailed.push_back({ art, gUpdate + kRetryUpdates, true });
-				}
-				continue;
-			}
-			if (failed != gFailed.end()) {
-				gFailed.erase(failed);  // made at last: a later failure warns again
-			}
-			gLive.push_back({ t.art, body, t.node, RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, true, hers });
-			if (++gMade <= 16) {
-				SKSE::log::info("[BODY] {} | on {:08X} at {} | fade {:.2f} | radius {:.0f}", body->key, t.formId, node->name.c_str(), fade, reach);
-			}
-		}
-		// what was not seen this frame - the art is gone, finished or switched off - comes off
-		const auto wereLit = gLive.size();
-		std::erase_if(gLive, [scene](Live& v) {
-			if (!v.seen) {
-				TakeOff(v, scene);
-			}
-			return !v.seen;
-		});
-		if (gLive.size() < wereLit) {
-			gLookNow.store(true, std::memory_order_relaxed);  // a glow waiting past the cap takes its place at once
-		}
-		if (look) {
-			std::erase_if(gFailed, [](const Failed& f) { return !f.seen; });  // its art is gone: a new art there warns again
-		}
-		// never more than the cap on others, whatever came in this frame: the newest come off and wait like any other
-		for (auto it = gLive.end(); OthersLit() > GlowLimit() && it != gLive.begin();) {
-			--it;
-			if (!it->hers) {
-				TakeOff(*it, scene);
-				it = gLive.erase(it);
-			}
-		}
-		// the sliders reach a light already hung
-		for (auto& v : gLive) {
-			const float fade = v.body->fade * scale * FecBodyFade(v.art.get());
-			const float reach = v.body->radius * reachScale;
-			if (fade != v.written || reach != v.wroteReach) {
-				RetuneOwnLight(v.light.get(), *v.body, fade, reach, reach != v.wroteReach);
-				v.written = fade;
-				v.wroteReach = reach;
-			}
-		}
+		MakeQueued(todo, scene, scale, reachScale);
+		TakeOffUnseen(scene, look);
+		RetuneLit(scale, reachScale);
 	}
 
 	void RenewBodyLights()

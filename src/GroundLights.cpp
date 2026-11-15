@@ -1,30 +1,33 @@
-// RELight - Spell Lighting NG - SKSE plugin
+// The hand light that lights the GROUND where the game's casting light does not - one file in Illuminated and RELight - Spell
+// Lighting NG (master in Tools\Shared Plugin Code\); what differs between the two mods is in each one's GroundConfig.h
 // Copyright (C) 2026 izzydoingit
-// GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
+// GPL-3.0-or-later; see the LICENSE file and the notice at the top of main.cpp.
 //
-// The hand light that lights the GROUND, off Community Shaders (ENB and Vanilla) - Illuminated's GroundLights.cpp, copied
-// (the two mods never run together; code is copied across, never shared at run time). HIS WORD: "relight casting
-// light is not working ... re add the enb and cs and vanilla versions ... relight only uses illuminated vanilla, cs and enb
-// configs where absolutely neccesary to make lights work, but relight is the main driver."
-// The game makes a casting light so that it lights the caster but not the land (Dynamic Wards measured it,
-// Illuminated: -0.09 on the ground before, +35 after its twin). So the casting light - ours or RE::Light's - is kept
-// (Brightness, the fading module and the switches all keep writing to it) but hidden, and a twin made the way
-// Dynamic Wards makes its hand light (land and water lighting on) copies it every frame. The twin hangs beside the hand's
-// magic node, not under it (the fading module scales every light under the magic node; the twin copies a light it scaled).
-// A light the mod keeps dark now (a switched-off option, a hand light held out - WantedDark) keeps its twin dark too.
-// Under Community Shaders the casting light lights the ground itself: nothing is made.
+// HIS REPORT (Illuminated): "lighting is still not working on vanilla ... spells light the character and work with sliders but
+// don't work on the ground at all no sliders do. please use dynamic wards code for everything we can here." The game makes a
+// casting light so that it lights the caster but not the land - Dynamic Wards measured the same and hangs its own light, made with
+// land and water lighting on, which lights the ground. Measured (Illuminated - Vanilla, his save, Flames readied, the ground in front
+// of her): -0.09 on the ground before, the game's light with its "land" flag set afterwards +0.98 - the flag alone is not enough,
+// the light has to be MADE that way.
+//
+// So, Dynamic Wards' way (its DomeLights.cpp Make): the casting light is kept - flicker, Brightness, Reach, the light budget, the
+// switches and the fading module all keep writing to it as before - but it is hidden, and a twin made like Dynamic Wards' hand light
+// copies it every frame (color, strength, reach). The twin hangs beside the hand's magic node (on its parent, at the magic node's
+// place), not under it: the fading module scales every light under the magic node, and the twin copies a light it already scaled.
+// When twins stand is each mod's (Illuminated: the record route, no Light Placer; RELight: off Community Shaders); a light the mod
+// keeps dark keeps its twin dark too.
 //
 // CREDIT: a light is made and registered the way ReLight by Truman does it (github.com/TrumanGIT/ReLight, GPL-3.0-or-later,
 // used with his permission): a master NiPointLight cloned for every use (LightKit::CloneLight), placed and updated once,
 // then handed to the shadow scene node (LightKit::AddToScene).
 
-#include "Plugin.h"
+#include "GroundConfig.h"
 
 namespace Plugin
 {
 	namespace
 	{
-		constexpr const char* kName = "RELightSpellLightingNGGroundLight";
+		constexpr const char* kName = Ground::kLightName;
 
 		struct Twin
 		{
@@ -42,7 +45,7 @@ namespace Plugin
 		// the counts the testing DLL's page and DevBench read, from the render thread too: gTwins itself is the main thread's
 		std::atomic<std::size_t> gLive{ 0 }, gMade{ 0 };
 		// a twin the scene refused: not made again until this tick (about a second later), so a full light list is not met
-		// with a light made, hung and dropped every frame (2.2's code review); main thread only
+		// with a light made, hung and dropped every frame (RELight 2.2's code review); main thread only
 		std::unordered_map<std::uint64_t, std::uint64_t> gRefused;
 		std::uint64_t                                    gTick{ 0 };  // TickGroundLights calls; 64 bits, so a retry deadline never wraps
 		constexpr std::uint64_t                          kRetryTicks = 60;
@@ -64,7 +67,7 @@ namespace Plugin
 			if (a_twin.light && a_twin.light->parent) {
 				a_twin.light->parent->DetachChild(a_twin.light.get());
 			}
-			if (a_twin.source && a_twin.source->parent && !a_twin.handsDown && !WantedDark(a_twin.source.get())) {
+			if (a_twin.source && a_twin.source->parent && !a_twin.handsDown && !Ground::WantedDark(a_twin.source.get())) {
 				a_twin.source->SetAppCulled(false);  // the casting light shows again
 			}
 			a_twin = {};
@@ -101,14 +104,13 @@ namespace Plugin
 				if (!state || !state->IsWeaponDrawn()) {
 					return false;
 				}
-				if (!WantedDark(a_entry.second.get())) {
+				if (!Ground::WantedDark(a_entry.second.get())) {
 					a_entry.second->SetAppCulled(false);  // a light wanted dark stays as Drop leaves it
 				}
 				return true;
 			});
-			// this hold may have outlasted the moment that ended the light: without a look now, Keep.cpp holds it until the next one
 			if (letGo > 0) {
-				NoteSweep(SweepWhy::kMagicDrop);
+				Ground::LetGo();
 			}
 			gHiddenCount.store(gLeftHidden.size(), std::memory_order_relaxed);
 		}
@@ -121,7 +123,7 @@ namespace Plugin
 				return false;
 			}
 			light->name = kName;
-			light->fadeAmount = kMovingLightMark;  // RE::Light's flicker prevention lets it reach every surface (Plugin.h)
+			Ground::Mark(light);
 			// no radius yet: the first Follow always sees a change and sets the attenuation (the clone's own may equal the source's;
 			// Illuminated's code review, c863073)
 			light->GetLightRuntimeData().radius.x = -1.0f;
@@ -173,12 +175,29 @@ namespace Plugin
 			return at;
 		}
 
+		// Community Shaders: where Light Placer hangs a hand row's light - every hand row of the data at 0,-40,0 under the art's
+		// root; the art's own light node sits lower, which lit the floor ~1.5x Light Placer's
+		RE::NiPoint3 RowPointUnder(const RE::NiAVObject* a_magic, const RE::NiAVObject* a_light)
+		{
+			constexpr RE::NiPoint3 kRowPoint = LightKit::kHandPoint;
+			const RE::NiAVObject*  root = a_light;
+			while (root && root->parent && root->parent != a_magic) {
+				root = root->parent;
+			}
+			// a casting light hung straight under the magic node (the record route's) takes the point in the magic node's frame
+			if (!root || root == a_light || root->parent != a_magic) {
+				return kRowPoint;
+			}
+			// a billboard turns with the view, not the hand (OffsetUnder)
+			return std::string_view(root->name.c_str()).find("Billboard") != std::string_view::npos ? root->local.translate + kRowPoint : root->local * kRowPoint;
+		}
+
 		// this frame's numbers of the casting light onto the twin, the twin at the magic node's place
 		void Follow(Twin& a_twin)
 		{
 			auto*       light = a_twin.light.get();
 			auto*       source = a_twin.source.get();
-			const bool  dark = WantedDark(source);  // before the turn: it asks the hand lights' own lock
+			const bool  dark = Ground::WantedDark(source);  // before the turn: it may ask the hand lights' own lock
 			const auto  turn = LightKit::Turn();
 			const auto* anchor = a_twin.anchor ? a_twin.anchor.get() : source->parent;
 			const auto& from = source->GetLightRuntimeData();
@@ -194,7 +213,8 @@ namespace Plugin
 			}
 			// the casting light's place under its own magic node, put under the anchor (the third-person magic node of that name)
 			light->local = anchor ? anchor->local : RE::NiTransform{};
-			light->local.translate = light->local * OffsetUnder(a_twin.magic.get(), source);
+			light->local.translate = light->local * (LightingFound() == Lighting::kShaders ? RowPointUnder(a_twin.magic.get(), source) :
+																							 OffsetUnder(a_twin.magic.get(), source));
 			RE::NiUpdateData update{};
 			light->Update(update);
 			if (!source->GetAppCulled()) {
@@ -214,7 +234,8 @@ namespace Plugin
 			if (!a_magic || std::string_view(a_magic->name.c_str()).find("MagicNode") == std::string_view::npos) {
 				return a_magic;
 			}
-			// VR with the advanced file's GroundLightAtVRHand on: the player's twin stays at the VR hand's own magic node
+			// VR, with the advanced file's GroundLightAtVRHand on (his answer 2026-10-16, "make it optional for vr users only"): the
+			// player's twin stays at the VR hand's own magic node
 			if (REL::Module::IsVR() && a_actor->IsPlayerRef() && gGroundLightVRHand.load(std::memory_order_relaxed) >= 0.5f) {
 				return a_magic;
 			}
@@ -270,7 +291,7 @@ namespace Plugin
 					}
 					continue;  // no casting light in this hand, or the hands are down: a twin it had is dropped with the unseen ones
 				}
-				if (KeptOutByBudget(source)) {
+				if (Ground::KeptOut(source)) {
 					continue;  // a far caster's light kept out: no twin (one it had is dropped with the unseen ones, its light left out)
 				}
 				auto* magic = MagicNodeAbove(source);
@@ -322,38 +343,30 @@ namespace Plugin
 
 	void TickGroundLights()
 	{
-		if (LightLimitFix()) {
-			return;  // Community Shaders, inverse square or linear: the casting light lights the ground itself
+		if (!Ground::Wanted()) {
+			return;  // the casting light lights the ground itself here (GroundConfig.h)
 		}
-		// no twin, nothing left hidden or refused, nobody's hands listed and hers down: a look would change nothing (Visit)
+		// no twin, nothing left hidden or refused, nobody else's hands out and hers down: a look would change nothing (Visit)
 		const auto* her = RE::PlayerCharacter::GetSingleton();
-		if (gTwins.empty() && gLeftHidden.empty() && gRefused.empty() && DrawnActorIds().empty() && !(her && her->AsActorState()->IsWeaponDrawn())) {
+		if (gTwins.empty() && gLeftHidden.empty() && gRefused.empty() && !Ground::OthersDrawn() && !(her && her->AsActorState()->IsWeaponDrawn())) {
 			return;
 		}
 		const LightKit::Cost::Pass pass{ 14, "ground lights" };
 		ShowLeftHidden();  // before Visit: a twin made this tick hides its light again (Follow)
 		auto* scene = LightKit::Scene();
-		if (!scene || gGroundLightsOn.load(std::memory_order_relaxed) < 0.5f || AllLightsOff()) {  // switched off (advanced settings file, or all lights off)
+		if (!scene || gGroundLightsOn.load(std::memory_order_relaxed) < 0.5f || Ground::AllOff()) {  // switched off (advanced settings file, or all lights off)
 			// no scene to light, or switched off: let every twin go and give each source light back (with a scene, each twin
 			// leaves its lists too - CodeRabbit, RELight #8)
 			DropAll(scene);
 			return;
 		}
 		++gTick;
-		std::erase_if(gRefused, [](const auto& a_entry) { return gTick >= a_entry.second; });  // a hand that left is not kept (2.2's code review)
+		std::erase_if(gRefused, [](const auto& a_entry) { return gTick >= a_entry.second; });  // a hand that left is not kept (RELight 2.2's code review)
 		for (auto& entry : gTwins) {
 			entry.second.seen = false;
 		}
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		Visit(player, scene);
-		// the actors with their hands out, from the draw events (Held.cpp keeps the list, earlier in this update)
-		for (const auto id : DrawnActorIds()) {
-			auto*       actor = RE::TESForm::LookupByID<RE::Actor>(id);
-			const auto* process = actor ? actor->GetActorRuntimeData().currentProcess : nullptr;
-			if (actor && actor != player && process && process->InHighProcess()) {
-				Visit(actor, scene);
-			}
-		}
+		// the player first, then every actor with drawn hands (GroundConfig.h)
+		Ground::ForEachDrawn([scene](RE::Actor* a_actor) { Visit(a_actor, scene); });
 		// an actor whose hands went down since still holds a twin: its look marks the twin hands-down, so the game's light is left
 		// hidden as the game keeps it
 		static std::vector<RE::FormID> down;

@@ -30,6 +30,7 @@
 // (AfterShaderEffect) and the emissive scale of an enchantment art's glowing meshes (DimArt: VAER's swirls, EAE's art).
 
 #include "Fade.h"
+#include "FadeHudGem.h"
 #include "Plugin.h"
 
 namespace Fade
@@ -1022,6 +1023,188 @@ namespace Fade
 		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding();
 	}
 
+	namespace
+	{
+		// what the fading preview asks of every hand this frame (read once, before the hands)
+		struct FrameAsks
+		{
+			bool  previewOn{ false };
+			bool  previewToggled{ false };
+			bool  pulse{ false };
+			bool  flare{ false };
+			float previewFraction{ 0.0f };
+		};
+
+		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw over the HUD, at once when
+		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames. Never while the HUD's
+		// own movie holds the gems (FadeHudGem.cpp): they hide and fade with it by themselves. Before gLock (a game read)
+		bool HudHiddenNow(const Settings& a_s, bool& a_gems)
+		{
+			static bool          hudHiddenWas = false;
+			static bool          gemsWere = false;
+			static std::uint32_t hudLook = 0;
+			a_gems = a_s.enabled && a_s.hudGems && gGemsShown.load(std::memory_order_relaxed) && !HudGem::Live();
+			bool hudHidden = false;
+			if (a_gems) {
+				const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
+				hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
+			}
+			gemsWere = a_gems;
+			hudHiddenWas = hudHidden;
+			return hudHidden;
+		}
+
+		// under gLock: Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen
+		// for a few frames are let go (they hold the effects' 3D)
+		void PruneRoots()
+		{
+			gItemRootsWanted.store(false, std::memory_order_relaxed);
+			if (gFrame % 60 != 0) {
+				return;
+			}
+			for (auto it = gItemRoots.begin(); it != gItemRoots.end();) {
+				std::erase_if(it->second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
+				it = it->second.empty() ? gItemRoots.erase(it) : std::next(it);
+			}
+			std::erase_if(gNotedLights, [](auto& a_kv) {
+				std::erase_if(a_kv.second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
+				return a_kv.second.empty();
+			});
+		}
+
+		// under gLock: one weapon hand this frame - the reading taken before the lock, the verdict, the glow stepped onto its lights
+		void UpdateWeaponHand(RE::Actor* a_actor, bool a_left, const Reading& a_reading, const Settings& a_s, float a_delta, const FrameAsks& a_asks)
+		{
+			auto& h = gHands[Key(a_actor->GetHandle(), a_left)];
+			h.actor = a_actor->GetHandle();
+			h.key = Key(h.actor, a_left);
+			h.actorSeen = a_actor;
+			h.left = a_left;
+			h.frame = gFrame;
+			h.reading = a_reading;
+			if (!h.reading.tracked) {
+				h.active = false;
+				h.weapon = nullptr;
+				h.effectRoots.clear();  // nothing of ours here: let go of the old effects' 3D
+				return;
+			}
+			// the verdict changes only with the weapon, the settings or the rules: worked out again only then
+			if (!h.verdictKnown || h.verdictWeapon != h.reading.weapon || h.verdictEnch != h.reading.ench ||
+				h.verdictEnchID != (h.reading.ench ? h.reading.ench->GetFormID() : 0) || h.verdictRules != RulesGeneration() ||
+				!(h.verdictSettings == a_s)) {
+				h.verdict = Judge(h.reading.weapon, h.reading.ench, a_s);
+				h.verdictKnown = true;
+				h.verdictWeapon = h.reading.weapon;
+				h.verdictEnch = h.reading.ench;
+				h.verdictEnchID = h.reading.ench ? h.reading.ench->GetFormID() : 0;
+				h.verdictRules = RulesGeneration();
+				h.verdictSettings = a_s;
+				h.weaponLabel = Label(h.reading.weapon);
+				h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
+				h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
+			}
+			if (const auto* state = a_actor->AsActorState()) {
+				h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
+			}
+			if (h.verdict.mode == Mode::kExempt) {
+				if (h.active || h.weapon != h.reading.weapon) {
+					h.actorName = a_actor->GetName();
+					LogHand(h, "left alone", a_s.debugLog);
+				}
+				h.active = false;
+				h.weapon = h.reading.weapon;
+				h.effectRoots.clear();
+				return;
+			}
+			const Glow::Follow follow = Glow::FollowOf(h.reading.bound, h.verdict.mode == Mode::kBound, h.reading.current,
+				h.reading.max, h.verdict.boundFadeSeconds, h.reading.fraction);
+			h.fraction = follow.fraction;
+			if (a_asks.previewOn) {  // before a new weapon's reset, so the preview's charge is not taken as a hit or a refill
+				h.fraction = Glow::Clamp01(a_asks.previewFraction);
+			}
+			// the gem of a bound weapon counts its spell's whole time down (his report 2026-10-16: no gem on a bound sword
+			// with half its time gone - it read the light's fraction, full until the last seconds)
+			h.hudFraction = Glow::HudFraction(h.reading.bound, a_asks.previewOn, h.reading.current, h.reading.max, h.fraction);
+			if (a_asks.previewToggled) {
+				h.glow.lastFraction = h.fraction;  // the preview going on or off is not a hit or a refill either
+			}
+			if (!h.active || h.weapon != h.reading.weapon || h.instance != h.reading.instance) {
+				h.weapon = h.reading.weapon;
+				h.instance = h.reading.instance;
+				h.glow.Reset(h.fraction, static_cast<std::uint32_t>(Key(h.actor, a_left) * 2654435761u));
+				h.actorName = a_actor->GetName();
+				LogHand(h, "now tracked", a_s.debugLog);
+				if (a_s.debugLog) {
+					LogActorLights(a_actor);
+				}
+			}
+			if (a_asks.pulse) {
+				h.glow.TriggerPulse(h.verdict.tuning);
+			}
+			if (a_asks.flare) {
+				h.glow.TriggerFlare();
+			}
+			h.active = true;
+			// a spell's time left is not a charge; nor is the preview's slider, which moves the charge by hand (its
+			// buttons pulse and flare on purpose, above)
+			h.out = Glow::Step(h.verdict.tuning, h.glow, h.fraction, a_delta, follow.timed || a_asks.previewOn);
+			if ((h.out.pulsed || h.out.flared) && a_s.debugLog) {
+				LogHand(h, h.out.pulsed ? "spent charge (pulse)" : "recharged (flare)", true);
+			}
+			ApplyHand(a_actor, h);
+		}
+
+		// under gLock, the frame's end: the hands not read this frame, the sweep, the lists, the HUD, Lights by Item, then rest and sleep
+		void FinishFrame(const Settings& a_s, bool a_hudHidden, bool a_gems, bool a_previewOn)
+		{
+			// a hand not read this frame (a follower dismissed, an actor unloaded) is no longer active: the effect hooks must not
+			// keep putting last frame's numbers on its lights
+			for (auto& [key, hand] : gHands) {
+				if (hand.frame != gFrame) {
+					hand.active = false;
+					hand.effectRoots.clear();  // its effects' 3D is not ours to keep
+				}
+			}
+			const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
+			Sweep();
+			gActiveList.clear();
+			std::size_t spells = 0;
+			for (auto& [key, hand] : gHands) {
+				if (hand.active && !hand.spell) {
+					gActiveList.push_back(&hand);
+				}
+				spells += hand.active && hand.spell ? 1 : 0;
+			}
+			gActiveHands = gActiveList.size();
+			gActiveSpellHands = spells;
+			PublishHud(a_s, a_hudHidden);
+			Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
+			// asleep too with every hand at rest, once Sweep has had its passes; a gem on screen keeps the pass for its HUD check. Full is what the
+			// lights already show, so the effect hooks have nothing to do either, and no actor is held
+			const bool rest = !a_gems && !a_previewOn && !Items::Holding() && std::ranges::all_of(gHands, [](const auto& a_hand) { return !a_hand.second.active || AtRest(a_hand.second); });
+			gRestPasses = rest ? gRestPasses + 1 : 0;
+			const bool rested = gRestPasses > kKeepFrames;
+			if (rested) {
+				gActiveHands = 0;
+				gActiveSpellHands = 0;
+				gActors.clear();
+				// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
+				// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
+				PutBack();
+			}
+			const bool nothing = NothingHeld();
+			if ((rested || nothing) && !Items::Holding()) {
+				for (auto& [key, hand] : gHands) {
+					hand.effectRoots.clear();  // the effects' 3D
+				}
+				gItemRoots.clear();
+				gNotedLights.clear();
+			}
+			gNothingToFollow.store(nothing, std::memory_order_relaxed);
+			gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
+		}
+	}
+
 	void UpdateHands(float a_delta)
 	{
 		// asleep: nothing of ours in any hand and nothing to put back, or every hand at rest; only what can change that wakes the pass
@@ -1051,35 +1234,12 @@ namespace Fade
 				readings.push_back({ ReadHand(actor.get(), false), ReadHand(actor.get(), true) });
 			}
 		}
-		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw, at once when
-		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames
-		static bool          hudHiddenWas = false;
-		static bool          gemsWere = false;
-		static std::uint32_t hudLook = 0;
-		const bool           gems = s.enabled && s.hudGems && gGemsShown.load(std::memory_order_relaxed);
-		bool                 hudHidden = false;
-		if (gems) {
-			const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
-			hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
-		}
-		gemsWere = gems;
-		hudHiddenWas = hudHidden;
+		bool            gems = false;
+		const bool      hudHidden = HudHiddenNow(s, gems);
 		std::lock_guard lock(gLock);
 		++gFrame;
 		gFrameSettings = s;
-		// Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen for a
-		// few frames are let go (they hold the effects' 3D)
-		gItemRootsWanted.store(false, std::memory_order_relaxed);
-		if (gFrame % 60 == 0) {
-			for (auto it = gItemRoots.begin(); it != gItemRoots.end();) {
-				std::erase_if(it->second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
-				it = it->second.empty() ? gItemRoots.erase(it) : std::next(it);
-			}
-			std::erase_if(gNotedLights, [](auto& a_kv) {
-				std::erase_if(a_kv.second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
-				return a_kv.second.empty();
-			});
-		}
+		PruneRoots();
 		gEnabled = s.enabled;
 		gDimShader = s.dimShader;
 		if (!s.enabled) {
@@ -1096,87 +1256,10 @@ namespace Fade
 		static bool previewWas = false;
 		const bool  previewToggled = previewOn != previewWas;
 		previewWas = previewOn;
-		const bool flareNow = preview.flare.exchange(false);
+		const FrameAsks asks{ previewOn, previewToggled, pulseNow, preview.flare.exchange(false), preview.fraction };
 		for (std::size_t i = 0; i < gActors.size() && i < readings.size(); ++i) {
-			auto& actor = gActors[i];
 			for (const bool left : { false, true }) {
-				auto& h = gHands[Key(actor->GetHandle(), left)];
-				h.actor = actor->GetHandle();
-				h.key = Key(h.actor, left);
-				h.actorSeen = actor.get();
-				h.left = left;
-				h.frame = gFrame;
-				h.reading = readings[i][left ? 1 : 0];
-				if (!h.reading.tracked) {
-					h.active = false;
-					h.weapon = nullptr;
-					h.effectRoots.clear();  // nothing of ours here: let go of the old effects' 3D
-					continue;
-				}
-				// the verdict changes only with the weapon, the settings or the rules: worked out again only then
-				if (!h.verdictKnown || h.verdictWeapon != h.reading.weapon || h.verdictEnch != h.reading.ench ||
-					h.verdictEnchID != (h.reading.ench ? h.reading.ench->GetFormID() : 0) || h.verdictRules != RulesGeneration() ||
-					!(h.verdictSettings == s)) {
-					h.verdict = Judge(h.reading.weapon, h.reading.ench, s);
-					h.verdictKnown = true;
-					h.verdictWeapon = h.reading.weapon;
-					h.verdictEnch = h.reading.ench;
-					h.verdictEnchID = h.reading.ench ? h.reading.ench->GetFormID() : 0;
-					h.verdictRules = RulesGeneration();
-					h.verdictSettings = s;
-					h.weaponLabel = Label(h.reading.weapon);
-					h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
-					h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
-				}
-				if (const auto* state = actor->AsActorState()) {
-					h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
-				}
-				if (h.verdict.mode == Mode::kExempt) {
-					if (h.active || h.weapon != h.reading.weapon) {
-						h.actorName = actor->GetName();
-						LogHand(h, "left alone", s.debugLog);
-					}
-					h.active = false;
-					h.weapon = h.reading.weapon;
-					h.effectRoots.clear();
-					continue;
-				}
-				const Glow::Follow follow = Glow::FollowOf(h.reading.bound, h.verdict.mode == Mode::kBound, h.reading.current,
-					h.reading.max, h.verdict.boundFadeSeconds, h.reading.fraction);
-				h.fraction = follow.fraction;
-				if (previewOn) {  // before a new weapon's reset, so the preview's charge is not taken as a hit or a refill
-					h.fraction = Glow::Clamp01(preview.fraction);
-				}
-				// the gem of a bound weapon counts its spell's whole time down (his report 2026-10-16: no gem on a bound sword
-				// with half its time gone - it read the light's fraction, full until the last seconds)
-				h.hudFraction = Glow::HudFraction(h.reading.bound, previewOn, h.reading.current, h.reading.max, h.fraction);
-				if (previewToggled) {
-					h.glow.lastFraction = h.fraction;  // the preview going on or off is not a hit or a refill either
-				}
-				if (!h.active || h.weapon != h.reading.weapon || h.instance != h.reading.instance) {
-					h.weapon = h.reading.weapon;
-					h.instance = h.reading.instance;
-					h.glow.Reset(h.fraction, static_cast<std::uint32_t>(Key(h.actor, left) * 2654435761u));
-					h.actorName = actor->GetName();
-					LogHand(h, "now tracked", s.debugLog);
-					if (s.debugLog) {
-						LogActorLights(actor.get());
-					}
-				}
-				if (pulseNow) {
-					h.glow.TriggerPulse(h.verdict.tuning);
-				}
-				if (flareNow) {
-					h.glow.TriggerFlare();
-				}
-				h.active = true;
-				// a spell's time left is not a charge; nor is the preview's slider, which moves the charge by hand (its
-				// buttons pulse and flare on purpose, above)
-				h.out = Glow::Step(h.verdict.tuning, h.glow, h.fraction, a_delta, follow.timed || previewOn);
-				if ((h.out.pulsed || h.out.flared) && s.debugLog) {
-					LogHand(h, h.out.pulsed ? "spent charge (pulse)" : "recharged (flare)", true);
-				}
-				ApplyHand(actor.get(), h);
+				UpdateWeaponHand(gActors[i].get(), left, readings[i][left ? 1 : 0], s, a_delta, asks);
 			}
 		}
 		// the spells in hand: their lights and glow follow the caster's magicka
@@ -1188,51 +1271,7 @@ namespace Fade
 				}
 			}
 		}
-		// a hand not read this frame (a follower dismissed, an actor unloaded) is no longer active: the effect hooks must not
-		// keep putting last frame's numbers on its lights
-		for (auto& [key, hand] : gHands) {
-			if (hand.frame != gFrame) {
-				hand.active = false;
-				hand.effectRoots.clear();  // its effects' 3D is not ours to keep
-			}
-		}
-		const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
-		Sweep();
-		gActiveList.clear();
-		std::size_t spells = 0;
-		for (auto& [key, hand] : gHands) {
-			if (hand.active && !hand.spell) {
-				gActiveList.push_back(&hand);
-			}
-			spells += hand.active && hand.spell ? 1 : 0;
-		}
-		gActiveHands = gActiveList.size();
-		gActiveSpellHands = spells;
-		PublishHud(s, hudHidden);
-		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
-		// asleep too with every hand at rest, once Sweep has had its passes; a gem on screen keeps the pass for its HUD check. Full is what the
-		// lights already show, so the effect hooks have nothing to do either, and no actor is held
-		const bool rest = !gems && !previewOn && !Items::Holding() && std::ranges::all_of(gHands, [](const auto& a_hand) { return !a_hand.second.active || AtRest(a_hand.second); });
-		gRestPasses = rest ? gRestPasses + 1 : 0;
-		const bool rested = gRestPasses > kKeepFrames;
-		if (rested) {
-			gActiveHands = 0;
-			gActiveSpellHands = 0;
-			gActors.clear();
-			// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
-			// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
-			PutBack();
-		}
-		const bool nothing = NothingHeld();
-		if ((rested || nothing) && !Items::Holding()) {
-			for (auto& [key, hand] : gHands) {
-				hand.effectRoots.clear();  // the effects' 3D
-			}
-			gItemRoots.clear();
-			gNotedLights.clear();
-		}
-		gNothingToFollow.store(nothing, std::memory_order_relaxed);
-		gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
+		FinishFrame(s, hudHidden, gems, previewOn);
 	}
 
 	void AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D)

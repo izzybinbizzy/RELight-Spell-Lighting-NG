@@ -39,13 +39,14 @@ namespace StrangeRunes
 		return id.starts_with("po3_rune_") && (id.ends_with("effectl") || id.ends_with("effectr"));
 	}
 
-	// the same light with no reach and no strength: the rune's effect still finds a light to make, it lights nothing
+	// the same light with no strength and the smallest reach: the rune's effect still finds a light to make, it lights nothing
+	// (radius 1, never 0, so no attenuation divides by zero)
 	[[nodiscard]] inline RE::TESObjectLIGH* DarkCopy(const RE::TESObjectLIGH* a_light)
 	{
 		auto* dark = LightKit::NewForm<RE::TESObjectLIGH>();
 		if (dark) {
 			dark->data = a_light->data;
-			dark->data.radius = 0;
+			dark->data.radius = 1;
 			dark->fade = 0.0f;
 		}
 		return dark;

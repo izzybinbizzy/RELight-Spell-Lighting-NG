@@ -32,6 +32,7 @@
 #include "DataText.h"
 #include "Fade.h"
 #include "FadeFormText.h"
+#include "CreatureBases.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -457,6 +458,51 @@ namespace Plugin
 		return out;
 	}
 
+	namespace
+	{
+		// a base form Illuminated - Creature Lighting NG lights through RE::Light by base ID (its creature records on the models we
+		// share): RE::Light looks base IDs up first and lights it by Creatures' config, so no switch, slider or tint of ours touches
+		// it (CreatureBases.h, tested off the game). Only Creatures' own folder is read, once at data load
+		constexpr std::string_view     kConfigs = "Data/SKSE/Plugins/ReLight/Configs";
+		std::unordered_set<RE::FormID> gCreatureBases;
+
+		void ReadCreatureBases()
+		{
+			gCreatureBases.clear();
+			std::size_t     files = 0;
+			std::size_t     bad = 0;
+			std::error_code ec;
+			for (fs::directory_iterator top{ fs::path(kConfigs), ec }, end; !ec && top != end; top.increment(ec)) {
+				std::error_code topEc;
+				if (!top->is_directory(topEc) || !CreatureBases::CreaturesFolder(Fade::PathText(top->path().filename()))) {
+					continue;
+				}
+				std::error_code inEc;
+				for (fs::recursive_directory_iterator it{ top->path(), inEc }, inEnd; !inEc && it != inEnd; it.increment(inEc)) {
+					std::error_code entryEc;
+					if (Lower(Fade::PathText(it->path().extension())) != ".json" || !it->is_regular_file(entryEc)) {
+						continue;
+					}
+					std::ifstream     in(it->path(), std::ios::binary);
+					const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+					const auto        tokens = CreatureBases::BaseTokens(text);
+					if (!tokens) {
+						++bad;
+						continue;
+					}
+					++files;
+					for (const auto& token : *tokens) {
+						if (const auto form = ResolveBase(token)) {
+							gCreatureBases.insert(form);
+						}
+					}
+				}
+			}
+			SKSE::log::info("data: {} base form(s) Creatures lights through RE::Light are left to it ({} file(s) read, {} did not)",
+				gCreatureBases.size(), files, bad);
+		}
+	}
+
 	void LoadData()
 	{
 		gOptions.clear();
@@ -512,6 +558,7 @@ namespace Plugin
 				SKSE::log::warn("{} does not read - its lights stay as RE::Light makes them", Fade::PathText(f.filename()));
 			}
 		}
+		ReadCreatureBases();
 		gKeysLongestFirst = LongestFirst(gMeshOwner);
 		FindShaderOwners();
 		gStreamKeysLongestFirst = LongestFirst(gStreams);
@@ -554,6 +601,9 @@ namespace Plugin
 			if (auto it = gBaseOwner.find(a_base->GetFormID()); it != gBaseOwner.end()) {
 				return it->second;
 			}
+			if (CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
+				return kNone;
+			}
 			const auto key = KeyOf(a_base);
 			const auto it = key.empty() ? gMeshOwner.cend() : Find(gMeshOwner, gKeysLongestFirst, key);
 			return it != gMeshOwner.cend() ? it->second : kNone;
@@ -577,7 +627,10 @@ namespace Plugin
 
 	const Stream* StreamOf(const RE::TESForm* a_base)
 	{
-		if (!a_base || gStreams.empty()) {
+		// the Dwarven Spider's bolt (Skyrim.esm 0x4EFDF) is Illuminated - Creature Lighting NG's, row and light; the other bolts on its
+		// model (Storm Calling's) keep ours
+		constexpr RE::FormID kCreatureBolt = 0x0004EFDF;
+		if (!a_base || gStreams.empty() || a_base->GetFormID() == kCreatureBolt || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
 		return Cached(gStreamCache, a_base, [&]() -> const Stream* {
@@ -684,12 +737,12 @@ namespace Plugin
 
 	const RE::NiColor* HandColorOf(const RE::TESForm* a_base)
 	{
-		return a_base ? ElementHandColor(a_base, KeyOf(a_base)) : nullptr;
+		return a_base && !CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner) ? ElementHandColor(a_base, KeyOf(a_base)) : nullptr;
 	}
 
 	const RE::NiColor* TintOf(const RE::TESForm* a_base)
 	{
-		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty())) {
+		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty()) || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
 		const auto work = [&]() -> const RE::NiColor* {

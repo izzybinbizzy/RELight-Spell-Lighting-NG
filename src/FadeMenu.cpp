@@ -47,6 +47,7 @@
 #	pragma clang diagnostic ignored "-Weverything"
 #endif
 #include "HudNGNativeAPI.h"
+#include "FadeHudGem.h"
 #if defined(__clang__)
 #	pragma clang diagnostic pop
 #endif
@@ -916,6 +917,22 @@ namespace Fade
 					}
 				}
 			}
+			// the gems in the HUD's own layer when that movie answers (FadeHudGem.cpp); with HUD NG it places them and the movie
+			// stands down for good; the ImGui gems below are the fallback
+			if (HudNg::Get().Found()) {
+				HudGem::StandDown();
+			} else if (HudGem::Live() || hud.gems) {
+				std::array<HudGem::Gem, 2> g{};
+				for (std::size_t i = 0; i < 2; ++i) {
+					const auto hue = fill[i] < hud.low ? ImVec4{ 1.0f, 0.42f, 0.18f, 1.0f } : tint[i];
+					const auto byte = [](float v) { return static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+					g[i] = { here[i], fill[i], (byte(hue.x) << 16) | (byte(hue.y) << 8) | byte(hue.z) };
+				}
+				HudGem::Publish(g, { hud.gemSize, hud.gemOpacity, hud.gemPercent }, !(hud.gems && hud.drawn && !hud.hudHidden));
+				if (HudGem::Live()) {
+					return;
+				}
+			}
 			const float dt = std::isfinite(io->DeltaTime) ? std::clamp(io->DeltaTime, 0.0f, 0.25f) : 0.0f;
 			for (std::size_t i = 0; i < 2; ++i) {
 				shown[i] = std::clamp(shown[i] + (here[i] ? dt : -dt) * 4.0f, 0.0f, 1.0f);
@@ -1016,6 +1033,7 @@ namespace Fade
 		if (auto* ui = RE::UI::GetSingleton()) {
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(&MenuWatch::Get());  // the HUD elements hide over the game's menus
 		}
+		HudGem::Register();  // the HUD-layer gems (FadeHudGem.cpp)
 		if (!SKSEMenuFramework::IsInstalled()) {
 			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
 			return;

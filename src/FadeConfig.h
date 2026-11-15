@@ -3,9 +3,8 @@
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
 // The fading module is the same code in Illuminated and in RELight - Spell Lighting NG (the two never run together, so each
-// carries its own copy). This header and FadeDevBench.cpp are each mod's own: the mod's name and its folders here, its
-// DevBench glue there. Every other Fade* file must be byte-identical in both (`PC Runner\fade copies check.py`, in
-// preflight).
+// carries its own copy). This header is each mod's own: the mod's name, its folders and its DevBench names. Every other Fade*
+// file, FadeDevBench.cpp included, is one file with its master in Tools\Shared Plugin Code\ (`PC Runner\shared code sync.py`).
 // Game-free: the fading tests include it.
 
 #pragma once
@@ -24,4 +23,8 @@ namespace Fade::Mod
 	inline constexpr const char* kOldSettingsPath = "Data/SKSE/Plugins/RelightSpellAddon/Fading.ini";
 	inline constexpr const char* kOldItemsPath = "Data/SKSE/Plugins/RelightSpellAddon/Lights by Item.ini";
 	inline constexpr const char* kOldAdvancedPath = "Data/SKSE/Plugins/RelightSpellAddon/RELight - Spell Addon - Advanced Settings.ini";
+	// the fading module's DevBench names (FadeDevBench.cpp): its inspect kind and menu alias, its tool, its event
+	inline constexpr const char* kDevBenchKey = "relightfade";
+	inline constexpr const char* kDevBenchTool = "relightfade.control";
+	inline constexpr const char* kDevBenchRulesEvent = "relightfade.rulesLoaded";
 }

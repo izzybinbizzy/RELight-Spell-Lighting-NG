@@ -83,7 +83,9 @@ namespace Fade::Items
 
 		std::vector<Item>              gCatalog;
 		std::unordered_set<RE::FormID> gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
-		bool                           gCatalogBuilt{ false };
+		// a shield of light a spell wears (the Sunlight Targe): shield ARMO -> the spell of the same name, made with the catalog
+		std::unordered_map<RE::FormID, RE::FormID> gShieldSpell;
+		bool                                       gCatalogBuilt{ false };
 		// another DLL's items: ids of their own, far above any form the catalog holds, so a lookup needs no table
 		constexpr RE::FormID                        kExternalFirst = 0xFFFE0000;
 		std::vector<Item>                           gExternalItems;
@@ -367,6 +369,18 @@ namespace Fade::Items
 				return;
 			}
 			const bool player = a_actor->IsPlayerRef();
+			// a shield of light a spell wears takes that spell's choice on the lights hung on it (the shield is the left hand's ARMO,
+			// which the hand loop below does not read)
+			if (!gShieldSpell.empty()) {
+				const auto* shield = a_actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kShield);
+				const auto  pair = shield ? gShieldSpell.find(shield->GetFormID()) : gShieldSpell.end();
+				if (const auto it = pair != gShieldSpell.end() ? gApplied.find(pair->second) : gApplied.end(); it != gApplied.end()) {
+					for (const bool first : { false, true }) {
+						auto* root = (!first || player) ? a_actor->Get3D(first) : nullptr;
+						TouchUnder(root ? root->GetObjectByName("SHIELD") : nullptr, it->second);
+					}
+				}
+			}
 			for (const bool left : { false, true }) {
 				auto* form = a_actor->GetEquippedObject(left);
 				if (player) {
@@ -481,6 +495,19 @@ namespace Fade::Items
 				continue;
 			}
 			gCatalog.push_back({ spell->GetFormID(), key, name, Lower(name), kind.school >= 0 ? kSchools[kind.school] : "Other spells", true, false });
+		}
+		gShieldSpell.clear();
+		std::unordered_map<std::string, RE::FormID> spellByName;
+		for (const auto& item : gCatalog) {
+			if (item.spell) {
+				spellByName.emplace(item.lower, item.id);
+			}
+		}
+		for (auto* armor : dh->GetFormArray<RE::TESObjectARMO>()) {
+			const char* name = armor && armor->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kShield) ? armor->GetFullName() : nullptr;
+			if (const auto it = name && *name ? spellByName.find(Lower(name)) : spellByName.end(); it != spellByName.end()) {
+				gShieldSpell.emplace(armor->GetFormID(), it->second);
+			}
 		}
 		for (auto* weapon : dh->GetFormArray<RE::TESObjectWEAP>()) {
 			if (!weapon || !weapon->GetPlayable()) {

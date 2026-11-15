@@ -1,18 +1,17 @@
-// RELight - Spell Lighting NG - the fading module's DevBench glue (Illuminated's FadeDevBench.cpp, the same for this mod - his order
-// 2026-10-14: "relight brought up to illuminated standards in every way that matters"; each mod keeps its own copy of this
-// file, FadeConfig.h's twin)
+// The fading module's DevBench glue - one file in Illuminated and RELight - Spell Lighting NG; its names (the inspect kind, the
+// tool, the event) are each mod's own, in FadeConfig.h
 // Copyright (C) 2026 izzydoingit
-// GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
+// GPL-3.0-or-later; see the LICENSE file and the notice at the top of main.cpp.
 //
 // DevBench, when it is in the load order (it is optional; nothing here runs without it):
-//   inspect kind=relightfade    the fading state as JSON (what the testing DLL's debug page shows) - each tracked hand, and the
-//                               fade each of its lights holds now next to the base it was scaled from.
-//   relightfade.control         action = preview (value = charge 0-1, -1 stops) | pulse | flare | setting (key = a
-//                               RELightSpellLightingNG/Fading.ini key, value = a whole number) | settings (every key and its value) |
-//                               reloadrules. Each reply is what the plugin holds after the change. DevBench never saves; a
-//                               later change made in the menu saves the settings as they are then.
-//   menu invoke name=relightfade the same actions with `set` for `action`.
-//   event relightfade.rulesLoaded {rules, files, problems} each time the rule files are read.
+//   inspect kind=<Mod::kDevBenchKey>   the fading state as JSON (what the testing DLL's debug page shows) - each tracked hand, and
+//                                      the fade each of its lights holds now next to the base it was scaled from.
+//   <Mod::kDevBenchTool>               action = preview (value = charge 0-1, -1 stops) | pulse | flare | setting (key = a Fading.ini
+//                                      key, value = a whole number) | settings (every key and its value) | reloadrules. Each reply
+//                                      is what the plugin holds after the change. DevBench never saves; a later change made in the
+//                                      menu saves the settings as they are then.
+//   menu invoke name=<the same key>    the same actions with `set` for `action`.
+//   event <Mod::kDevBenchRulesEvent>   {rules, files, problems} each time the rule files are read.
 
 #include "Fade.h"
 
@@ -24,16 +23,16 @@ namespace Fade
 	{
 		using DevBenchGlue::json;
 
-		constexpr const char* kKey = "relightfade";
+		constexpr const char* kKey = Mod::kDevBenchKey;
 
 		constexpr const char* kInspect =
-			R"json({"description":"RELight - Spell Lighting NG - each tracked hand (weapon, enchantment, charge, brightness, reach, cooling, lights found), and every light being scaled with the fade it holds now and the base it was scaled from. Read only.","inputSchema":{"type":"object","properties":{}},"readOnly":true})json";
+			R"json({"description":"The fading module - each tracked hand (weapon, enchantment, charge, brightness, reach, cooling, lights found), and every light being scaled with the fade it holds now and the base it was scaled from. Read only.","inputSchema":{"type":"object","properties":{}},"readOnly":true})json";
 
 		constexpr const char* kTool =
-			R"json({"description":"RELight - Spell Lighting NG (enchanted weapon and spell-hand lights that fade with charge or magicka): drive its fading (a preview charge, a pulse or a flare) and settings. action=preview with value = the charge to show on every tracked hand (0..1, -1 stops the preview); pulse / flare start a hit pulse or recharge flare on every tracked hand; setting sets one RELightSpellLightingNG/Fading.ini key (key, value = whole number) the way the Settings page does, not saved; settings lists every key and its value; reloadrules reads the rule files again. Read state with inspect kind=relightfade.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["preview","pulse","flare","setting","settings","reloadrules"]},"value":{"type":"number","description":"preview: charge 0..1, or -1 to stop; setting: the whole-number value"},"key":{"type":"string","description":"setting: a RELightSpellLightingNG/Fading.ini key, e.g. EmptyBrightness, Curve, Sputter (action=settings lists them)"}},"required":["action"]}})json";
+			R"json({"description":"The fading module (enchanted weapon and spell-hand lights that fade with charge or magicka): drive its fading (a preview charge, a pulse or a flare) and settings. action=preview with value = the charge to show on every tracked hand (0..1, -1 stops the preview); pulse / flare start a hit pulse or recharge flare on every tracked hand; setting sets one Fading.ini key (key, value = whole number) the way the Settings page does, not saved; settings lists every key and its value; reloadrules reads the rule files again. Read state with inspect on the same kind.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["preview","pulse","flare","setting","settings","reloadrules"]},"value":{"type":"number","description":"preview: charge 0..1, or -1 to stop; setting: the whole-number value"},"key":{"type":"string","description":"setting: a Fading.ini key, e.g. EmptyBrightness, Curve, Sputter (action=settings lists them)"}},"required":["action"]}})json";
 
 		constexpr const char* kMenu =
-			R"json({"description":"RELight - Spell Lighting NG - the same as the relightfade.control tool, with set for action: set=preview value=charge 0..1 (-1 stops), set=pulse, set=flare, set=setting key=<RELightSpellLightingNG/Fading.ini key> value=<whole number>, set=settings, set=reloadrules. Not saved from here.","inputSchema":{"type":"object","properties":{"set":{"type":"string"},"key":{"type":"string"},"value":{"type":"number"}}}})json";
+			R"json({"description":"The fading module - the same as its .control tool, with set for action: set=preview value=charge 0..1 (-1 stops), set=pulse, set=flare, set=setting key=<Fading.ini key> value=<whole number>, set=settings, set=reloadrules. Not saved from here.","inputSchema":{"type":"object","properties":{"set":{"type":"string"},"key":{"type":"string"},"value":{"type":"number"}}}})json";
 
 		void InspectNow(void* a_sink, DevBenchAPI::WriteFn a_write)
 		{
@@ -161,7 +160,8 @@ namespace Fade
 			return DevBenchGlue::Refusal("unknown action '" + action + "'", json::array({ "preview", "pulse", "flare", "setting", "settings", "reloadrules" }));
 		}
 
-		// the refusal after a throw, and a fixed one when even that cannot be built (no memory): nothing leaves through DevBench
+		// the refusal after a throw (the mod's name, then a_what), and a fixed one when even that cannot be built (no memory): nothing
+		// leaves through DevBench
 		void Refuse(void* a_sink, DevBenchAPI::WriteFn a_write, const char* a_what) noexcept
 		{
 			if (!a_write) {
@@ -169,7 +169,7 @@ namespace Fade
 			}
 			std::string text;
 			try {
-				text = DevBenchGlue::Dump(DevBenchGlue::Refusal(a_what));
+				text = DevBenchGlue::Dump(DevBenchGlue::Refusal(std::string(Mod::kName) + a_what));
 			} catch (...) {
 				text.clear();  // not even the refusal could be built: the fixed one below
 			}
@@ -186,7 +186,7 @@ namespace Fade
 			try {
 				InspectNow(a_sink, a_write);
 			} catch (...) {
-				Refuse(a_sink, a_write, "RELight - Spell Lighting NG could not build its report");
+				Refuse(a_sink, a_write, " could not build its report");
 			}
 		}
 
@@ -195,14 +195,14 @@ namespace Fade
 			try {
 				DevBenchGlue::Reply(a_sink, a_write, Act(DevBenchGlue::Args(a_args)));
 			} catch (...) {
-				Refuse(a_sink, a_write, "RELight - Spell Lighting NG could not handle that");
+				Refuse(a_sink, a_write, " could not handle that");
 			}
 		}
 	}
 
 	void RulesLoaded()
 	{
-		DevBenchGlue::Emit("relightfade.rulesLoaded", RulesNow());
+		DevBenchGlue::Emit(Mod::kDevBenchRulesEvent, RulesNow());
 	}
 
 	void OfferToDevBench()
@@ -212,8 +212,8 @@ namespace Fade
 			return;  // DevBench is not in this load order, or too old; nothing depends on it
 		}
 		devbench->RegisterToolExtension("inspect", kKey, kInspect, Inspect, nullptr);
-		devbench->RegisterTool("relightfade.control", kTool, Control, nullptr);
+		devbench->RegisterTool(Mod::kDevBenchTool, kTool, Control, nullptr);
 		devbench->RegisterMenuHandler(kKey, kMenu, Control, nullptr);
-		SKSE::log::info("DevBench: inspect kind={}, the tool relightfade.control and menu invoke name={} registered", kKey, kKey);
+		SKSE::log::info("DevBench: inspect kind={}, the tool {} and menu invoke name={} registered", kKey, Mod::kDevBenchTool, kKey);
 	}
 }
