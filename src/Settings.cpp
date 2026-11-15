@@ -36,6 +36,7 @@
 #include "Fade.h"
 #include "FadeSettingsText.h"
 #include "Plugin.h"
+#include "StrangeRunes.h"
 
 namespace Plugin
 {
@@ -59,6 +60,7 @@ namespace Plugin
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<bool>               gEnchantedWeapons{ true };
+		std::atomic<bool>               gStrangeRunes{ false };  // 1 = Strange Runes' runes light the casting hands
 		std::atomic<int>                gWard{ 0 };
 		std::atomic<int>                gHandsFor{ 0 };
 		std::atomic<bool>               gAuto{ true };
@@ -116,6 +118,7 @@ namespace Plugin
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
+			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
@@ -441,6 +444,19 @@ namespace Plugin
 			SKSE::log::info("enchanted weapons' lights turned {}", a_on ? "on" : "off");
 		}
 	}
+
+	bool StrangeRunesLightOn() { return gStrangeRunes; }
+
+	void SetStrangeRunesLightOn(bool a_on)
+	{
+		if (gStrangeRunes.exchange(a_on) != a_on) {
+			SKSE::log::info("Strange Runes lights the hands: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool StrangeRunesLoaded() { return StrangeRunes::Loaded(); }
+
+	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
 
 	int WardColor() { return gWard; }
 

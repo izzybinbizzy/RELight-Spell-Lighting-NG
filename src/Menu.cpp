@@ -716,11 +716,24 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
 
-			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
-			if (const auto* cs = CSLightLoaded()) {
+			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text; with Strange
+			// Runes loaded its switch hands the casting hands back to its runes
+			const auto* cs = CSLightLoaded();
+			if (cs || StrangeRunesLoaded()) {
 				GlowHeading("Other Light Mods", Icon::kBulb);
+			}
+			if (cs) {
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
 				MenuStyle::Tip(T("You don't need CS Light. If you keep it, untick its spell options or those lights glow twice."));
+			}
+			if (StrangeRunesLoaded()) {
+				bool runes = StrangeRunesLightOn();
+				if (ImGuiMCP::Checkbox(T("Strange Runes lights the hands"), &runes)) {
+					SetStrangeRunesLightOn(runes);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(T("On: Strange Runes' runes light casting hands in place of RELight's hand light."));
 			}
 		}
 

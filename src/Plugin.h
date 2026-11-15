@@ -235,6 +235,11 @@ namespace Plugin
 	void                      SetFecBurningFadesOut(bool a_on);
 	[[nodiscard]] bool        HandLightsOn();
 	void                      SetHandLightsOn(bool a_on);
+	[[nodiscard]] bool        StrangeRunesLightOn();  // the Strange Runes switch (Settings.cpp)
+	void                      SetStrangeRunesLightOn(bool a_on);
+	[[nodiscard]] bool        StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
+	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
+	void                      FindStrangeRunes();    // data load, before the hand lights (HandLights.cpp)
 	[[nodiscard]] bool        WeaponLightsOn();
 	void                      SetWeaponLightsOn(bool a_on);
 	[[nodiscard]] bool        EnchantedWeaponsOn();

@@ -20,6 +20,7 @@
 
 #include "Fade.h"
 #include "Plugin.h"
+#include "StrangeRunes.h"
 
 namespace Plugin
 {
@@ -381,13 +382,20 @@ namespace Plugin
 		ApplyHandLights(true);
 	}
 
+	void FindStrangeRunes()
+	{
+		SKSE::log::info("Strange Runes: {} hand rune light(s) found", StrangeRunes::Find());
+	}
+
 	void ApplyHandLights(bool a_log)
 	{
 		std::size_t lit = 0, given = 0;
+		// the runes' own light: back with the Strange Runes switch on, or with every light of ours off
+		StrangeRunes::Apply(StrangeRunesHands() || AllLightsOff());
 		{
 			std::lock_guard l{ gLock };
 			gInUse.clear();
-			const bool on = HandLightsOn() && !AllLightsOff();
+			const bool on = HandLightsOn() && !AllLightsOff() && !StrangeRunesHands();
 			for (auto& [key, copy] : gCopies) {
 				if (const Hand* h = on ? Picked(Winner(key)) : nullptr) {
 					Fill(copy, *h);

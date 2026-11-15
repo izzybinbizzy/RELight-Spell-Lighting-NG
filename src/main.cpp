@@ -81,6 +81,7 @@ namespace
 		Plugin::ReadLighting();             // before the hand lights: off Community Shaders they are drawn plain
 		Plugin::RaiseStreamLights();        // 2.3: the sprays' and bolts' raised copies - before the hand lights remember each effect's own light
 		Plugin::ApplyWards("data loaded");  // before the hand lights: a silenced ward effect must not get one
+		Plugin::FindStrangeRunes();         // before the hand lights: with its switch on they step aside
 		Plugin::MakeHandLights();
 		Plugin::VaerSwirls();       // after LoadData: it needs to know whether the VAER Reborn option is installed
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
