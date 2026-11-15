@@ -241,27 +241,6 @@ namespace LightKit
 			Write(a_light, { kInitialised, 0u });
 			a_light->GetLightRuntimeData().ambient.blue = 0.0f;
 		}
-
-		// where Community Shaders draws inverse square: its separate add-on's shader, or Light Limit Fix's attenuation naming it
-		// (built in since Bottled Shaders 1.0.10). Community Shaders 1.4.6 without the add-on draws every light linear, its radius
-		// taken straight from the light (read in its source, read only - Dynamic Wards #36). Read once, at data load
-		struct Drawn
-		{
-			bool               addOn{ false };
-			bool               inLightLimitFix{ false };
-			[[nodiscard]] bool Any() const noexcept { return addOn || inLightLimitFix; }
-		};
-		[[nodiscard]] inline Drawn DrawnByShaders()
-		{
-			std::error_code ec;
-			const auto      root = std::filesystem::current_path(ec);
-			Drawn           out{ .addOn = std::filesystem::exists(root / "Data/Shaders/InverseSquareLighting/InverseSquareLighting.hlsli", ec), .inLightLimitFix = false };
-			if (std::ifstream in{ root / "Data/Shaders/LightLimitFix/Attenuation.hlsli", std::ios::binary }) {
-				const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
-				out.inLightLimitFix = text.find("InverseSquare") != std::string::npos;
-			}
-			return out;
-		}
 	}
 
 	// THE TURN (his checklist 317, item 1 - one turn-taking rule for every light write): every pass that writes a light's
