@@ -28,6 +28,7 @@ namespace Plugin
 
 	// the mod's own values in the advanced settings file (his rule, Fade::Tuning; registered in main.cpp)
 	inline std::atomic<float> gNearby{ 2800.0f };          // [Lights] NearbyDistance: Hand lights for - Everyone nearby
+	inline std::atomic<float> gVaeEffects{ 4.0f };         // [Enchanted Weapons] VAERebornEffects: VAE Reborn's swirls, a share of its own
 	inline std::atomic<float> gGroundLightsOn{ 1.0f };     // [Vanilla and ENB] GroundLights
 	inline std::atomic<float> gGroundLightVRHand{ 0.0f };  // [Vanilla and ENB] GroundLightAtVRHand - VR only (Illuminated's)
 	inline std::atomic<float> gVanillaSaturation{ 1.4f };  // [Vanilla and ENB] VanillaColorStrength - Vanilla and ENB (Illuminated's)
@@ -170,7 +171,8 @@ namespace Plugin
 	// nullptr unless a `body` line lights this art model on an actor (BodyLights.cpp): its full path key, then its bare name
 	[[nodiscard]] const Stream* BodyOf(const RE::BGSArtObject* a_art);
 	// nullptr unless a `body` line names this effect shader by its form ("0xID~Plugin" - Frozen Electrocuted Combustion's bodies)
-	[[nodiscard]] const Stream* BodyOf(const RE::TESEffectShader* a_shader);
+	[[nodiscard]] const Stream*                     BodyOf(const RE::TESEffectShader* a_shader);
+	[[nodiscard]] std::vector<RE::TESEffectShader*> BodyShaders();  // every effect shader a body line lights (after data load)
 	// nullptr unless a `cloud` line lights this cone: one light held where its cloud is (Rows.cpp), matched exactly, as `body`
 	[[nodiscard]] const Stream* CloudOf(const RE::BGSProjectile* a_projectile);
 
@@ -239,7 +241,14 @@ namespace Plugin
 	void                      SetStrangeRunesLightOn(bool a_on);
 	[[nodiscard]] bool        StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
 	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
-	void                      FindStrangeRunes();    // data load, before the hand lights (HandLights.cpp)
+	[[nodiscard]] bool        EnbShaderLightsOn();   // the ENB Lights For Effect Shaders switch (Settings.cpp)
+	void                      SetEnbShaderLightsOn(bool a_on);
+	[[nodiscard]] bool        EnbShaderLightsLoaded();                   // its DLL is loaded
+	[[nodiscard]] bool        EnbShadersGivenBack();                     // its switch on and it loaded: its lights glow on FEC's bodies, ours stand down
+	[[nodiscard]] bool        EnbShaderActor(const RE::Actor* a_actor);  // an actor its own ini lets it light
+	void                      ApplyEnbShaderLights();                    // its light on our shaders: back with its switch on, else off (main thread)
+	void                      TakeEnbShaderLights();                     // once, before a game loads: the body shaders we light that it lit
+	void                      FindStrangeRunes();                        // data load, before the hand lights (HandLights.cpp)
 	[[nodiscard]] bool        WeaponLightsOn();
 	void                      SetWeaponLightsOn(bool a_on);
 	[[nodiscard]] bool        EnchantedWeaponsOn();
@@ -255,6 +264,8 @@ namespace Plugin
 		kGlows,
 		// enchanted weapons' lights, as the Enchanted weapons switch counts them
 		kEnchanted,
+		// spells left on the ground: a hazard's light (Brightness.cpp StrengthOfBase)
+		kGround,
 	};
 	[[nodiscard]] int   StrengthPercent(Strength a_kind);
 	void                SetStrengthPercent(Strength a_kind, int a_percent);
@@ -302,8 +313,11 @@ namespace Plugin
 	void                             AdoptOptionLights(std::size_t a_option, const LightList& a_lights);  // main thread
 	[[nodiscard]] bool               HeldOutForOption(const RE::NiLight* a_light);                        // main thread
 	[[nodiscard]] RE::TESObjectREFR* ReferenceOf(RE::NiAVObject* a_obj);                                  // the reference a scene-graph object belongs to
-	[[nodiscard]] std::size_t        EnchantOptionOf(const RE::NiLight* a_light);                         // kNone unless it is an enchantment light of ours
-	[[nodiscard]] Strength           EnchantStrengthOf(const RE::NiLight* a_light);                       // its strength's kind this frame (main thread)
+	// a hazard's or explosion's 3D at its Load3D, and its end (any thread): a plain NiNode root carries no reference, so ReferenceOf asks this pair
+	void                      NotePlainRoot(const RE::NiAVObject* a_root, const RE::TESObjectREFR* a_ref);
+	void                      ForgetPlainRoots(const RE::TESObjectREFR* a_ref);
+	[[nodiscard]] std::size_t EnchantOptionOf(const RE::NiLight* a_light);    // kNone unless it is an enchantment light of ours
+	[[nodiscard]] Strength    EnchantStrengthOf(const RE::NiLight* a_light);  // its strength's kind this frame (main thread)
 	// a flesh spell's light this frame where FleshFX's look wins on its shader: the hue it is drawn in (LightKit.h FleshFx),
 	// else nullptr. HIS CALL: "do the changes proposed with the dim light in its own color" (main thread)
 	[[nodiscard]] const RE::NiColor* FleshHueOf(const RE::NiLight* a_light);
@@ -361,6 +375,7 @@ namespace Plugin
 	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
 	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
 	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
+	void                      RenewAfterFailedLoad();           // a save that did not load: the lights kPreLoadGame let go made again
 	enum class SweepWhy : std::uint8_t
 	{
 		kDraw,

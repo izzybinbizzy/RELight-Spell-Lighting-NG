@@ -2,8 +2,8 @@
 // Copyright (C) 2026 izzydoingit
 // GPL-3.0-or-later; see the LICENSE file and the notice at the top of main.cpp.
 //
-// Pages in SKSE Menu Framework's Mod Control Panel, under the mod's own section, in his order: HUD (the charge bar and the
-// charge gems) right below the mod's Configs page, then Fading - his answer 2026-10-13: "HUD right below Configs, Lights by
+// Pages in SKSE Menu Framework's Mod Control Panel, under the mod's own section, in his order: HUD (the charge gems) right
+// below the mod's Configs page, then Fading - his answer 2026-10-13: "HUD right below Configs, Lights by
 // Item after Fading" (the mod's own Menu.cpp adds Choose Your Own Color, FadeItems.cpp's Items::Render, after these). Settings ("Fading"): every other setting of the
 // module (his rule: settings live in the SKSE menu only), live on the next frame and saved on the game's main thread (never
 // the render thread); the rule files pick weapons one by one. Debug (ONLY in the testing DLL of the PDB and Source download - his call: "remove fading
@@ -292,7 +292,7 @@ namespace Fade
 		// HIS MENU: "make a HUD submenu placed right below configs. add logical and simple options for
 		// toggling and messing with our hud stuff" - its own page (registered first of the module's pages, so it sits right
 		// below the mod's Configs page; his answer 2026-10-13):
-		// the charge bar and the charge gems (size, opacity, the percent). The gems show what the fading module tracks, so they
+		// the charge gems (place, size, opacity, the percent). The gems show what the fading module tracks, so they
 		// need Fading's Enabled on.
 		void __stdcall RenderHudSettings()
 		{
@@ -300,25 +300,21 @@ namespace Fade
 			const Settings  before = Config();
 			Settings        s = before;
 			bool            save = false;
+			const float     column = ImGuiMCP::GetContentRegionAvail().x * 0.5f;  // where a setting's own pick starts
 			ImGuiMCP::PushItemWidth(ImGuiMCP::GetContentRegionAvail().x * 0.45f);
-
-			GlowHeading(Icon::kGauge, "Charge bar");
-			// his answer 2026-10-13: with Fading off nothing else shows a weapon's charge, so the bar comes back and this
-			// switch greys out (FadeSettings.cpp hides the bar only while both are on)
-			const bool hooked = ChargeBarHooked();
-			ImGuiMCP::BeginDisabled(!s.enabled || !hooked);
-			Toggle("Hide the charge bar", s.hideChargeBar,
-				hooked ? "Hides the HUD's charge bar; the weapon's light shows the charge instead. Needs Fading on." :
-						 "Not available here: this is Skyrim VR, or another mod changed the charge bar first.",
-				save);
-			ImGuiMCP::EndDisabled();
 
 			GlowHeading(Icon::kGem, "Charge gems");
 			ImGuiMCP::BeginDisabled(!s.enabled);
-			Toggle("Charge gems on the HUD", s.hudGems,
-				"A soul gem beside the health bar for each enchanted weapon, as full as its charge. Needs Fading on.",
-				save);
+			Toggle("Charge gems on the HUD", s.hudGems, "A soul gem for each enchanted weapon, as full as its charge. Needs Fading on.", save);
 			ImGuiMCP::BeginDisabled(!s.hudGems);
+			// the place belongs to the switch: on its line, to its right
+			{
+				static const char* const kPlaces[] = { TR_MARK("By the charge meters"), TR_MARK("By the health bars") };
+				ImGuiMCP::SameLine(column);
+				ImGuiMCP::SetNextItemWidth(column * 0.6f);
+				Choice("Gem place", s.hudGemPlace, kPlaces, 2, "Above the HUD's own charge meters, or at the end of the health, magicka and stamina bars.",
+					save);
+			}
 			Percent("Gem size", s.hudGemSize, 50, 200, "How big the gems are.", save);
 			Percent("Gem opacity", s.hudGemOpacity, 10, 100, "How strongly the gems show over the game.", save);
 			Toggle("Show the percent", s.hudGemPercent, "The charge in percent under each gem.", save);
@@ -928,7 +924,7 @@ namespace Fade
 					const auto byte = [](float v) { return static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
 					g[i] = { here[i], fill[i], (byte(hue.x) << 16) | (byte(hue.y) << 8) | byte(hue.z) };
 				}
-				HudGem::Publish(g, { hud.gemSize, hud.gemOpacity, hud.gemPercent }, !(hud.gems && hud.drawn && !hud.hudHidden));
+				HudGem::Publish(g, { hud.gemSize, hud.gemOpacity, hud.gemPercent, static_cast<int>(hud.gemPlace) }, !(hud.gems && hud.drawn && !hud.hudHidden));
 				if (HudGem::Live()) {
 					return;
 				}
@@ -943,13 +939,19 @@ namespace Fade
 			if (!anyShown && !hudNg.Found()) {
 				return;
 			}
-			// sized to the screen (1080 lines = 1), each gem beside one end of the vanilla health bar
-			const float                 screen = Glow::ScreenScale(io->DisplaySize.y);
-			const float                 k = screen * std::clamp(hud.gemSize, 0.5f, 2.0f);  // the HUD page's Gem size
-			const float                 cx = io->DisplaySize.x * 0.5f, y = io->DisplaySize.y - Tuning::Get(Tuning::gGemHeight) * screen;
-			const float                 hw = 11.0f * k, hh = 19.0f * k, sh = 7.0f * k;  // half width, half height, shoulder height
-			const float                 apart = Tuning::Get(Tuning::gGemDistance) * screen;
-			const std::array<ImVec2, 2> centre{ ImVec2{ cx - apart, y }, ImVec2{ cx + apart, y } };
+			// sized to the screen (1080 lines = 1); the fixed place is each gem beside one end of the vanilla health bar
+			const float           screen = Glow::ScreenScale(io->DisplaySize.y);
+			const float           k = screen * std::clamp(hud.gemSize, 0.5f, 2.0f);  // the HUD page's Gem size
+			const float           cx = io->DisplaySize.x * 0.5f, y = io->DisplaySize.y - Tuning::Get(Tuning::gGemHeight) * screen;
+			const float           hw = 11.0f * k, hh = 19.0f * k, sh = 7.0f * k;  // half width, half height, shoulder height
+			const float           apart = Tuning::Get(Tuning::gGemDistance) * screen;
+			std::array<ImVec2, 2> centre{ ImVec2{ cx - apart, y }, ImVec2{ cx + apart, y } };
+			// the HUD page's Gem place: by the HUD's own charge meters or past its bars, read off the HUD (ReadHudBoxes); the fixed
+			// place stays when the HUD shows neither
+			std::array<Glow::GemSpot, 2> spot{};
+			if (Glow::GemCentres(hud.gemPlace, hud.boxes, io->DisplaySize.x, io->DisplaySize.y, 2.0f * hw, 2.0f * hh, hud.gemPercent ? 16.0f * k : 0.0f, spot)) {
+				centre = { ImVec2{ spot[0].x, spot[0].y }, ImVec2{ spot[1].x, spot[1].y } };
+			}
 			// HUD NG is asked every frame, hidden gems too, from this mod's own place - never from what it answered last frame
 			std::array<HudNg::Place, 2> place{};
 			if (hudNg.Found()) {

@@ -392,6 +392,7 @@ namespace Plugin
 		std::size_t lit = 0, given = 0;
 		// the runes' own light: back with the Strange Runes switch on, or with every light of ours off
 		StrangeRunes::Apply(StrangeRunesHands() || AllLightsOff());
+		ApplyEnbShaderLights();  // ENB Lights For Effect Shaders' light on FEC's bodies: back with its switch on, or with all ours off
 		{
 			std::lock_guard l{ gLock };
 			gInUse.clear();

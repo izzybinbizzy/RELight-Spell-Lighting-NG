@@ -189,6 +189,8 @@ namespace Fade
 		// lock, held only while a few dozen bytes are copied - the render thread never waits on the per-frame pass (gLock)
 		std::mutex gHudLock;
 		HudState   gHud;
+		// where the HUD draws its charge meters and bars, for the gems: main thread only (HudHiddenNow writes, PublishHud copies)
+		Glow::HudBoxes gHudBoxes{};
 
 		[[nodiscard]] std::uint64_t Key(RE::ActorHandle a_actor, bool a_left)
 		{
@@ -922,6 +924,43 @@ namespace Fade
 			return menu && menu->uiMovie && menu->uiMovie->GetVariable(&alpha, "_root._alpha") && alpha.IsNumber() && alpha.GetNumber() < 1.0;
 		}
 
+		// where the HUD draws its own charge meters and its health / magicka / stamina bars, as shares of the screen: the game's
+		// HUD movie and the HUDs that replace it (SkyHUD, Vel'dun UI, Norden UI) keep these members on their HUD object, and HUD NG
+		// moves the parts themselves, so the gems follow both. Main thread, read when the gems appear and when a menu closes (HUD
+		// NG's editor among them), never every frame
+		[[nodiscard]] Glow::HudBoxes ReadHudBoxes()
+		{
+			Glow::HudBoxes out{};
+			auto*          ui = RE::UI::GetSingleton();
+			const auto     menu = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
+			auto*          movie = menu ? menu->uiMovie.get() : nullptr;
+			RE::GFxValue   root;
+			if (!movie || !movie->GetVariable(&root, "_root")) {
+				return out;
+			}
+			const auto frame = movie->GetVisibleFrameRect();
+			const auto box = [&](const char* a_path) {
+				RE::GFxValue clip;
+				RE::GFxValue bounds;
+				if (!movie->GetVariable(&clip, a_path) || !clip.IsDisplayObject() || !clip.Invoke("getBounds", &bounds, &root, 1) || !bounds.IsObject()) {
+					return Glow::HudBox{};
+				}
+				constexpr std::array<const char*, 4> kSides{ "xMin", "yMin", "xMax", "yMax" };
+				std::array<double, 4>                side{};
+				for (std::size_t i = 0; i < kSides.size(); ++i) {
+					RE::GFxValue v;
+					if (!bounds.GetMember(kSides[i], &v) || !v.IsNumber()) {
+						return Glow::HudBox{};
+					}
+					side[i] = v.GetNumber();
+				}
+				return Glow::BoxOnScreen(side[0], side[1], side[2], side[3], frame.left, frame.top, frame.right, frame.bottom);
+			};
+			out.meters = { box("_root.HUDMovieBaseInstance.LeftChargeMeterAnim"), box("_root.HUDMovieBaseInstance.RightChargeMeterAnim") };
+			out.bars = { box("_root.HUDMovieBaseInstance.Health"), box("_root.HUDMovieBaseInstance.Magica"), box("_root.HUDMovieBaseInstance.Stamina") };
+			return out;
+		}
+
 		void PublishHud(const Settings& a_s, bool a_hudHidden)
 		{
 			HudState hud;
@@ -931,6 +970,8 @@ namespace Fade
 			hud.gemOpacity = a_s.hudGemOpacity;
 			hud.gemPercent = a_s.hudGemPercent;
 			hud.gemFull = a_s.hudGemFull;
+			hud.gemPlace = a_s.hudGemPlace;
+			hud.boxes = gHudBoxes;
 			hud.low = a_s.tuning.sputterBelow;
 			auto*       player = RE::PlayerCharacter::GetSingleton();
 			const auto* state = player ? player->AsActorState() : nullptr;
@@ -1042,6 +1083,7 @@ namespace Fade
 		{
 			static bool          hudHiddenWas = false;
 			static bool          gemsWere = false;
+			static bool          menusWere = false;
 			static std::uint32_t hudLook = 0;
 			a_gems = a_s.enabled && a_s.hudGems && gGemsShown.load(std::memory_order_relaxed) && !HudGem::Live();
 			bool hudHidden = false;
@@ -1049,6 +1091,12 @@ namespace Fade
 				const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
 				hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
 			}
+			// the gems' place follows the HUD: read when they appear and when a menu closes (HUD NG may have moved its parts)
+			const bool menus = MenusHideHud();
+			if (a_gems && (!gemsWere || (menusWere && !menus))) {
+				gHudBoxes = ReadHudBoxes();
+			}
+			menusWere = menus;
 			gemsWere = a_gems;
 			hudHiddenWas = hudHidden;
 			return hudHidden;

@@ -22,6 +22,7 @@ namespace Fade::HudGem
 		float scale{ 1.0f };  // the HUD page's Gem size
 		float alpha{ 0.9f };  // Gem opacity, 0..1
 		bool  percent{ true };
+		int   place{ 0 };  // the HUD page's Gem place: 0 by the charge meters, 1 by the bars
 		bool  operator==(const Look&) const = default;
 	};
 

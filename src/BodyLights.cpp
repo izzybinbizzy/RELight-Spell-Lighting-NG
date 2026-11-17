@@ -22,6 +22,7 @@
 // node of the same name, a light cloned from one master light, marked, hung there and handed to the shadow scene node
 // (Held.cpp MakeOwnLight, the same code our held lights use).
 
+#include "EnbShaderLights.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -430,6 +431,10 @@ namespace Plugin
 				return;
 			}
 			if (!actor) {
+				return;
+			}
+			// its switch on: powerofthree's ENB Lights For Effect Shaders lights this body (an actor its ini names) and ours stands down
+			if (shader && EnbShadersGivenBack() && EnbShaderLights::Lit(shader->effectData) && EnbShaderActor(actor)) {
 				return;
 			}
 			// no event says when a far actor comes near: looked at again while it waits, as a glow past the cap

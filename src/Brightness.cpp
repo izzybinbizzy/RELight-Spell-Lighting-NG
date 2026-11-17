@@ -22,6 +22,7 @@
 // (NoteReachWrite), so its write is never taken for a new base here and the two never compound. Lock order: the fading
 // module's lock, then gSeenLock.
 
+#include "GroundElement.h"
 #include "Plugin.h"
 
 namespace Plugin
@@ -37,6 +38,7 @@ namespace Plugin
 			const RE::TESBoundObject* from{ nullptr };  // the object its tint was read for: an art pick changed in the menu reads it again
 			std::uint32_t             tintEpoch{ 0 };
 			Strength                  strength{ Strength::kNone };  // by its object; an enchantment light's is asked each frame
+			GroundElement::Element    element{};                    // a ground spell's element, by its hazard's model: [Ground Effects]
 			float                     base{ 0.0f };                 // the fade RE::Light last gave it
 			float                     peak{ 0.0f };                 // the most it gave: held while Dynamic Lighting is off, if it flickers
 			float                     rlPhase{ -1.0f };             // RE::Light's flicker phase (the point light's constAttenuation) last frame
@@ -147,14 +149,13 @@ namespace Plugin
 		// was taken away, a disabled caster's, and the light still lights the place he stood
 		[[nodiscard]] bool OnGoneBody(RE::NiLight* a_light)
 		{
-			const RE::NiAVObject* top = a_light;
-			for (; top->parent; top = top->parent) {
-				if (top->GetUserData()) {
-					return false;
-				}
-			}
-			if (top->GetUserData()) {
+			// ReferenceOf, not the user data alone: a wall on a plain NiNode root carries none and is no gone body (Options.cpp NotePlainRoot)
+			if (ReferenceOf(a_light)) {
 				return false;
+			}
+			const RE::NiAVObject* top = a_light;
+			while (top->parent) {
+				top = top->parent;
 			}
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			return !player || (top != player->Get3D(false) && top != player->Get3D(true));
@@ -174,7 +175,17 @@ namespace Plugin
 			if (a_base && a_base->Is(RE::FormType::Explosion)) {
 				return Strength::kExplosions;
 			}
+			if (a_base && a_base->Is(RE::FormType::Hazard)) {
+				return Strength::kGround;  // a spell left on the ground: a wall of fire, a storm, burning ground
+			}
 			return IsSprayProjectileLight(a_base) ? Strength::kStreams : Strength::kNone;
+		}
+
+		// a hazard's element, read off its model's name (GroundElement.h); any other object is other
+		[[nodiscard]] GroundElement::Element ElementOfBase(const RE::TESBoundObject* a_base)
+		{
+			const auto* hazard = a_base ? a_base->As<RE::BGSHazard>() : nullptr;
+			return hazard && hazard->GetModel() ? GroundElement::Of(hazard->GetModel()) : GroundElement::Element::kOther;
 		}
 
 		// RE::Light names every light it makes from a config "RL" + the node it hung it on. An enchantment light hangs on
@@ -449,7 +460,7 @@ namespace Plugin
 					niLight->fadeAmount = kMovingLightMark;
 				}
 				KeepLight(niLight);
-				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base), .from = base, .tintEpoch = epoch, .strength = StrengthOfBase(base) }).first;
+				it = gSeen.emplace(niLight, Seen{ .tint = TintOf(base), .from = base, .tintEpoch = epoch, .strength = StrengthOfBase(base), .element = ElementOfBase(base) }).first;
 			} else if (it->second.tintEpoch != epoch && it->second.from) {
 				it->second.tint = TintOf(it->second.from);
 				it->second.tintEpoch = epoch;
@@ -474,7 +485,11 @@ namespace Plugin
 			}
 			const bool enchant = IsEnchantLight(niLight);
 			const auto kind = enchant ? EnchantStrengthOf(niLight) : it->second.strength;
-			const bool again = Apply(niLight, it->second, scale * StrengthOf(kind), reach, dt, enchant ? FleshHueOf(niLight) : nullptr);
+			// a ground spell's light: its element's strength and reach on top ([Ground Effects], GroundElement.h)
+			const bool  ground = kind == Strength::kGround;
+			const float groundStrength = ground ? GroundElement::StrengthOf(it->second.element) : 1.0f;
+			const float groundReach = ground ? GroundElement::ReachOf(it->second.element) : 1.0f;
+			const bool  again = Apply(niLight, it->second, scale * StrengthOf(kind) * groundStrength, reach * groundReach, dt, enchant ? FleshHueOf(niLight) : nullptr);
 			// a hidden light keeps no walk awake (a casting light the game keeps culled while its spell stays selected):
 			// a draw or an art's start wakes the walk when it shows
 			ours = ours || (again && !niLight->GetAppCulled());

@@ -29,9 +29,6 @@ namespace Plugin
 	{
 		constexpr std::size_t kMostRowLights = 64;  // every row light in the scene together
 		constexpr std::size_t kMostPerRow = 20;
-		// off Community Shaders the game lets one piece of ground take only a few lights, so a row of 15 lit only the ground near
-		// her hands; fewer, wider lights reach the whole stream (BeamRow::Lay makes each stronger to keep the row's light)
-		constexpr std::size_t kMostPerRowPlain = 5;
 		constexpr float       kRowPlain = 0.5f;     // every row off Community Shaders
 		constexpr float       kRowHeight = 100.0f;  // a beam's usual height over the ground it lights
 		constexpr const char* kRowName = "RSARow";
@@ -83,8 +80,7 @@ namespace Plugin
 			std::uint32_t                    frames{ 0 };
 		};
 		std::vector<CloudWait>  gCloudWait;
-		constexpr std::uint32_t kCloudTries = 600;          // about ten seconds of frames: a cone's cast and its cloud's life
-		constexpr float         kCloudReachShaders = 3.0f;  // Illuminated's: a row's x1 left Ice Storm's cloud faint on Community Shaders
+		constexpr std::uint32_t kCloudTries = 600;  // about ten seconds of frames: a cone's cast and its cloud's life
 
 		// Illuminated's row, the same numbers (its 1.4: the row came off its cap, so Vanilla and ENB were trimmed to Community
 		// Shaders' lift)
@@ -92,9 +88,9 @@ namespace Plugin
 		{
 			switch (a_lighting) {
 			case Lighting::kVanilla:
-				return 1.1f;
+				return BeamRow::gTune.vanilla.load(std::memory_order_relaxed);
 			case Lighting::kEnb:
-				return 0.5f;  // the whole stream lit, not washed out
+				return BeamRow::gTune.enb.load(std::memory_order_relaxed);
 			default:
 				return 1.0f;
 			}
@@ -334,7 +330,7 @@ namespace Plugin
 			// a cone's cloud is a stream's light too: the streams' strength reaches it
 			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
-			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
+			const float reach = rec.reach * Reach() * (isl ? BeamRow::gTune.cloudReachShaders.load(std::memory_order_relaxed) : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
 			RE::NiColor color = rec.color;
 			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
@@ -389,7 +385,7 @@ namespace Plugin
 				return false;
 			}
 			const bool isl = InverseSquare();
-			const auto most = isl ? kMostPerRow : kMostPerRowPlain;
+			const auto most = isl ? kMostPerRow : static_cast<std::size_t>(BeamRow::PlainLights());
 			const auto want = BeamRow::Lay(proj->GetProjectileRuntimeData().range, static_cast<int>(most), recipe->second.reach, kRowHeight);
 			const auto n = (std::min)(want.size(), kMostRowLights - gLights);
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };

@@ -304,8 +304,9 @@ namespace Plugin
 				}
 				ImGuiMCP::PopID();
 			}
-			// a kind whose switch is not there (its option not installed) still applies, so its strength keeps a heading of its own
-			if (a_page == Page::kConfigs && std::ranges::find(strengthShown, false) != strengthShown.end()) {
+			// a kind whose switch is not there (its option not installed) still applies, so its strength keeps a heading of its own; no
+			// switch stands for the ground effects at all, so the heading always stands, their strength under it
+			if (a_page == Page::kConfigs) {
 				GlowHeading("Strength");
 				for (std::size_t i = 0; i < strengthShown.size(); ++i) {
 					if (!strengthShown[i]) {
@@ -314,6 +315,9 @@ namespace Plugin
 						ImGuiMCP::PopID();
 					}
 				}
+				ImGuiMCP::PushID(static_cast<int>(1000 + strengthShown.size()));
+				DrawStrength(Strength::kGround, false);
+				ImGuiMCP::PopID();
 			}
 			// no Wards row to sit beside: the color still applies, so it keeps a heading of its own
 			if (a_page == Page::kConfigs && !wardShown) {
@@ -426,6 +430,7 @@ namespace Plugin
 				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is as I set them." },
 				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as I set them." },
 				{ Strength::kGlows, "Glow strength", "How bright glows on people are (cloaks, flesh spells, FEC bodies), on top of Brightness." },
+				{ Strength::kGround, "Ground effect strength", "How bright spells left on the ground are, like walls of fire, on top of Brightness." },
 				{ Strength::kEnchanted, "Enchanted weapon strength", "How bright enchanted weapons' lights are, on top of Brightness. Bound weapons, staves and artifacts use Brightness only." },
 			};
 			const auto* look = std::ranges::find(kLooks, a_kind, &Look::kind);
@@ -646,9 +651,9 @@ namespace Plugin
 					if (p.hands >= 0) {
 						SetHandLightsFor(p.hands);
 					}
-					// Default is the mod as it ships: the four strengths back to 100 % too
+					// Default is the mod as it ships: the five strengths back to 100 % too
 					if (p.hands == 0) {
-						for (const auto kind : { Strength::kExplosions, Strength::kStreams, Strength::kGlows, Strength::kEnchanted }) {
+						for (const auto kind : { Strength::kExplosions, Strength::kStreams, Strength::kGlows, Strength::kEnchanted, Strength::kGround }) {
 							SetStrengthPercent(kind, 100);
 						}
 					}
@@ -719,7 +724,7 @@ namespace Plugin
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text; with Strange
 			// Runes loaded its switch hands the casting hands back to its runes
 			const auto* cs = CSLightLoaded();
-			if (cs || StrangeRunesLoaded()) {
+			if (cs || StrangeRunesLoaded() || EnbShaderLightsLoaded()) {
 				GlowHeading("Other Light Mods", Icon::kBulb);
 			}
 			if (cs) {
@@ -734,6 +739,17 @@ namespace Plugin
 					RehandSoon();
 				}
 				MenuStyle::Tip(T("On: Strange Runes' runes light casting hands in place of RELight's hand light."));
+			}
+			if (EnbShaderLightsLoaded()) {
+				bool enbShaders = EnbShaderLightsOn();
+				if (ImGuiMCP::Checkbox(T("ENB Lights For Effect Shaders"), &enbShaders)) {
+					SetEnbShaderLightsOn(enbShaders);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(
+					T("On: ENB Lights For Effect Shaders lights Frozen Electrocuted Combustion's burning, frozen, shocked and soul-trapped bodies "
+					  "in place of RELight's lights."));
 			}
 		}
 
@@ -885,9 +901,7 @@ namespace Plugin
 		if (auto* data = RE::TESDataHandler::GetSingleton()) {
 			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
 		}
-		// the old folder's file read only while the new one is not there (CodeRabbit on #29; never written)
-		SKSE::log::info("{}", Translation::Load(Fade::SettingsText::ReadFrom("Data/SKSE/Plugins/RELightSpellLightingNG/Translation.json",
-								  "Data/SKSE/Plugins/RelightSpellAddon/Translation.json")));
+		SKSE::log::info("{}", Translation::Load("RELightSpellLightingNG"));
 		if (!SKSEMenuFramework::IsInstalled()) {
 			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
 			return;

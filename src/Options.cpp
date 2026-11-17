@@ -56,9 +56,46 @@ namespace Plugin
 			const void*   parent{ nullptr };  // the node it hangs on
 			std::size_t   option{ kNone };    // kNone: not one of ours (or not RE::Light's)
 			std::uint32_t frame{ 0 };         // last seen; a light unseen for a while is forgotten
+			bool          owned{ true };      // false: RE::Light's light with no reference found yet - asked again next walk
 		};
 		std::unordered_map<const RE::NiLight*, Known> gKnown;
 		std::uint32_t                                 gFrame = 0;
+
+		// A hazard or explosion model whose root is a plain NiNode (Frost's and Storms' walls) is stored with no reference on its tree,
+		// so a light under it had no switch, twin net or slider. Its Load3D (Hooks.cpp) hands us the pair; any thread, locked
+		struct PlainRoot
+		{
+			RE::FormID                ref{ 0 };
+			const RE::TESBoundObject* base{ nullptr };
+		};
+		std::unordered_map<const RE::NiAVObject*, PlainRoot> gPlainRoots;
+		std::mutex                                           gPlainRootsLock;
+		constexpr std::size_t                                kPlainRootsPrune = 256;
+
+		// the noted reference still wears this tree: same base, and its 3D this node - or, while it loads, not stored yet (a_loading)
+		[[nodiscard]] bool StillOwns(const RE::TESObjectREFR* a_ref, const PlainRoot& a_root, const RE::NiAVObject* a_node, bool a_loading)
+		{
+			if (!a_ref || a_ref->GetBaseObject() != a_root.base) {
+				return false;
+			}
+			const auto* now = a_ref->Get3D();
+			return now == a_node || (a_loading && !now);
+		}
+
+		RE::TESObjectREFR* PlainRootOwner(const RE::NiAVObject* a_obj)
+		{
+			std::lock_guard l{ gPlainRootsLock };
+			if (gPlainRoots.empty()) {
+				return nullptr;
+			}
+			for (const auto* o = a_obj; o; o = o->parent) {
+				if (const auto it = gPlainRoots.find(o); it != gPlainRoots.end()) {
+					auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(it->second.ref);
+					return StillOwns(ref, it->second, o, true) ? ref : nullptr;
+				}
+			}
+			return nullptr;
+		}
 
 		// where RE::Light attached for this effect (GetReferenceAttachRoot, then the third-person node of the same name)
 		RE::NiAVObject* EnchantRootOf(RE::ShaderReferenceEffect* a_effect)
@@ -168,8 +205,9 @@ namespace Plugin
 			gFlesh.erase(fleshRepeats.begin(), fleshRepeats.end());
 		}
 
-		std::size_t LookUpOption(RE::NiLight* a_light)
+		std::size_t LookUpOption(RE::NiLight* a_light, bool& a_owned)
 		{
+			a_owned = true;
 			if (!IsReLightLight(a_light)) {
 				return kNone;
 			}
@@ -177,6 +215,8 @@ namespace Plugin
 				return EnchantOptionOf(a_light);
 			}
 			auto* ref = ReferenceOf(a_light);
+			// a walk can meet a hazard's light in the moment before its Load3D notes the plain root
+			a_owned = ref != nullptr;
 			return ref ? OptionOf(ref->GetBaseObject()) : kNone;
 		}
 
@@ -190,8 +230,10 @@ namespace Plugin
 			auto&       k = gKnown[a_light];
 			const void* name = a_light->name.c_str();
 			const void* parent = a_light->parent;
-			if (k.frame == 0 || k.name != name || k.parent != parent) {
-				k = { name, parent, LookUpOption(a_light), gFrame };
+			if (k.frame == 0 || k.name != name || k.parent != parent || !k.owned) {
+				bool       owned = true;
+				const auto option = LookUpOption(a_light, owned);
+				k = { name, parent, option, gFrame, owned };
 			}
 			k.frame = gFrame;
 			return k.option;
@@ -410,7 +452,32 @@ namespace Plugin
 				return ref;
 			}
 		}
-		return nullptr;
+		return a_obj ? PlainRootOwner(a_obj) : nullptr;
+	}
+
+	void NotePlainRoot(const RE::NiAVObject* a_root, const RE::TESObjectREFR* a_ref)
+	{
+		const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+		if (!a_root || !base) {
+			return;
+		}
+		std::lock_guard l{ gPlainRootsLock };
+		if (gPlainRoots.size() >= kPlainRootsPrune) {
+			std::erase_if(gPlainRoots, [](const auto& a_kv) {
+				return !StillOwns(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_kv.second.ref), a_kv.second, a_kv.first, false);
+			});
+		}
+		gPlainRoots.insert_or_assign(a_root, PlainRoot{ a_ref->GetFormID(), base });
+	}
+
+	void ForgetPlainRoots(const RE::TESObjectREFR* a_ref)
+	{
+		if (!a_ref) {
+			return;
+		}
+		const auto      id = a_ref->GetFormID();
+		std::lock_guard l{ gPlainRootsLock };
+		std::erase_if(gPlainRoots, [id](const auto& a_kv) { return a_kv.second.ref == id; });
 	}
 
 	bool HeldOutForOption(const RE::NiLight* a_light) { return gHeldSet.contains(a_light); }

@@ -16,8 +16,7 @@
 
 #include "Fade.h"
 #include "LightKit.h"
-
-#include <limits>
+#include "Po3Tweaks.h"
 
 namespace
 {
@@ -47,109 +46,10 @@ namespace
 		}
 	};
 
-	// ------------------------------------------------------------------ the HUD's enchantment charge bar
-	// HUDChargeMeter::Update hands the HUD movie its numbers in two calls to SetChargeMeterPercent(percent, force,
-	// leftHand, show) - the two calls TrueHUD also reads for its own bar (ersh1/TrueHUD, Hooks.h). With HideChargeBar on,
-	// both go out with show = false, which the vanilla HUD, SkyHUD and TrueHUD all take as "hide the bar". Installed at
-	// data load, after TrueHUD hooked the same calls at plugin load, so TrueHUD is handed what we pass on.
-	// SE/AE only: the call sites are known for those two. Update compares its numbers with the last and makes these calls only on a
-	// change; this reads the two lock-free switches only.
-	template <int N>
-	struct ChargeBar
-	{
-		static bool thunk(RE::GFxValue::ObjectInterface* a_this, void* a_data, RE::GFxValue* a_result, const char* a_name,
-			const RE::GFxValue* a_args, RE::UPInt a_count, bool a_isDisplayObject)
-		{
-			const bool hide = Fade::HideChargeBarOn();
-			if (Fade::DebugLogOn() && a_args && a_count == 4 && a_args[0].IsNumber() && a_args[2].IsBool() && a_args[3].IsBool()) {
-				LightKit::Guarded("charge bar log", [&]() {
-					// the debug log: each change of what the game hands the HUD
-					static std::array<std::tuple<int, bool, bool>, 2> last{ { { -1, false, false }, { -1, false, false } } };
-					const double                                      percent = a_args[0].GetNumber();
-					const int                                         shown = std::isfinite(percent) ? static_cast<int>(std::clamp(percent, -1.0e6, 1.0e6)) : -1;
-					const std::tuple<int, bool, bool>                 now{ shown, a_args[2].GetBool(), a_args[3].GetBool() };
-					if (std::exchange(last[N], now) != now) {
-						SKSE::log::info("charge bar ({}): {}% {} hand, show {}{}{}", N, std::get<0>(now), std::get<1>(now) ? "left" : "right",
-							std::get<2>(now), hide ? " - hidden by " : "", hide ? Fade::Mod::kName : "");
-					}
-				});
-			}
-			if (a_args && a_count == 4 && hide) {
-				RE::GFxValue args[4]{ a_args[0], a_args[1], a_args[2], a_args[3] };
-				args[3].SetBoolean(false);
-				return func(a_this, a_data, a_result, a_name, args, a_count, a_isDisplayObject);
-			}
-			return func(a_this, a_data, a_result, a_name, a_args, a_count, a_isDisplayObject);
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-		[[nodiscard]] static bool                      Present(std::ptrdiff_t a_offset)
-		{
-			const REL::Relocation<std::uintptr_t> target{ RELOCATION_ID(50771, 51666), a_offset };  // HUDChargeMeter::Update
-			return LightKit::IsCallAt(target.address());
-		}
-		static void Install(std::ptrdiff_t a_offset)
-		{
-			const REL::Relocation<std::uintptr_t> target{ RELOCATION_ID(50771, 51666), a_offset };
-			// trampoline sites: 2 (ChargeBar<0> and ChargeBar<1>, the charge meter's two calls)
-			func = SKSE::GetTrampoline().write_call<5>(target.address(), thunk);
-		}
-	};
-
-	std::atomic<bool> gChargeBarHooked{ false };
-
-	void InstallChargeBar()
-	{
-		if (REL::Module::IsVR()) {
-			SKSE::log::info("VR: the charge bar cannot be hidden");
-			return;
-		}
-		// both calls are checked before either is written: never half the bar hooked
-		constexpr std::ptrdiff_t kFirst = 0x168, kSecond = 0x2B3;
-		if (!ChargeBar<0>::Present(kFirst) || !ChargeBar<1>::Present(kSecond)) {
-			SKSE::log::info("the charge bar's updates are not where expected (another plugin rewrote them?); it cannot be hidden");
-			return;
-		}
-		ChargeBar<0>::Install(kFirst);
-		ChargeBar<1>::Install(kSecond);
-		gChargeBarHooked.store(true, std::memory_order_relaxed);
-		SKSE::log::info("the charge bar's two updates hooked");
-	}
 }
 
 namespace Fade
 {
-	bool ChargeBarHooked() noexcept
-	{
-		return gChargeBarHooked.load(std::memory_order_relaxed);
-	}
-
-	// the meter sends its numbers only when they differ from its last two (read in the 1.6.1170 exe): a number no charge equals makes its next
-	// update send them through our thunk, with the switch as it is now. The game's force flag reaches only a hand with no charge. On the UI thread
-	void RefreshChargeBar() noexcept
-	{
-		LightKit::Guarded("charge bar refresh", []() {
-			auto* tasks = ChargeBarHooked() ? SKSE::GetTaskInterface() : nullptr;
-			if (!tasks) {
-				return;
-			}
-			tasks->AddUITask([]() {
-				LightKit::Guarded("charge bar refresh task", []() {
-					auto*      ui = RE::UI::GetSingleton();
-					const auto hud = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
-					if (!hud) {
-						return;
-					}
-					for (auto* object : hud->GetRuntimeData().objects) {
-						if (auto* meter = object ? skyrim_cast<RE::HUDChargeMeter*>(object) : nullptr) {
-							meter->unk28 = std::numeric_limits<float>::quiet_NaN();
-							meter->unk2C = std::numeric_limits<float>::quiet_NaN();
-						}
-					}
-				});
-			});
-		});
-	}
-
 	namespace
 	{
 		// Reticle Arcs is loaded: the module's bars are offered to it (FadeArcs.cpp) - since his order of 2026-10-19 the only
@@ -161,8 +61,6 @@ namespace Fade
 
 	void OnPluginLoad()
 	{
-		// the trampoline for the two charge-bar calls is the plugin's (SKSE::Init, made once)
-		InstallEditorIDHooks();  // before the game reads its plugins: the rule files may name forms by editor ID
 		// every SKSE plugin is loaded by now, so another mod's DLL is either here or not coming
 		gOtherReticle.store(REX::W32::GetModuleHandleA("ReticleArcs.dll") != nullptr, std::memory_order_relaxed);
 		if (OtherReticleLoaded()) {
@@ -178,18 +76,25 @@ namespace Fade
 
 	void OnDataLoaded()
 	{
+		Po3Tweaks::Judge(Mod::kName);  // powerofthree's Tweaks is required for every editor ID: the log line, and one box without it
 		LoadSettings();
-		// the advanced settings file (his rule): the fading module's own values, then the file read and written back
-		// whole (the mod registered its own values before this - its main.cpp)
+		// the advanced settings file (his rule): the fading module's own values, then the file and the player's Custom file read
+		// (the mod registered its own values before this - its main.cpp)
 		using namespace Tuning;
-		Register("Fading", "MinReach", 0.35f, 0.0f, 1.0f, "the least share of its reach a fading light keeps at empty", gMinReach);
-		Register("Fading", "PulseSeconds", 0.30f, 0.05f, 2.0f, "how long the flash of a hit that spends charge lasts, in seconds", gPulseSeconds);
-		Register("Fading", "FlareSeconds", 0.70f, 0.1f, 3.0f, "how long the swell of a recharge lasts, in seconds", gFlareSeconds);
-		Register("Fading", "FallSeconds", 0.15f, 0.0f, 2.0f, "how quickly the light follows a falling charge, in seconds", gFallSeconds);
-		Register("Fading", "RiseSeconds", 0.35f, 0.0f, 3.0f, "how quickly the light follows a rising charge, in seconds", gRiseSeconds);
-		Register("HUD", "GemDistance", 215.0f, 40.0f, 900.0f, "how far each charge gem sits from the middle of the screen, in pixels at 1080p", gGemDistance);
-		Register("HUD", "GemHeight", 62.0f, 0.0f, 1000.0f, "how far above the bottom of the screen the charge gems sit, in pixels at 1080p", gGemHeight);
+		Register("Fading with Magicka", "MinReach", 0.35f, 0.0f, 1.0f, "How much of its reach a fading light keeps at empty charge or magicka, as a share (0.35 is about a third).", gMinReach);
+		Register("Fading with Magicka", "PulseSeconds", 0.30f, 0.05f, 2.0f, "How long the flash lasts when a hit spends a weapon's charge, in seconds.", gPulseSeconds);
+		Register("Fading with Magicka", "FlareSeconds", 0.70f, 0.1f, 3.0f, "How long the light swells when a soul gem recharges a weapon, in seconds.", gFlareSeconds);
+		Register("Fading with Magicka", "FallSeconds", 0.15f, 0.0f, 2.0f, "How quickly a light dims as the charge or magicka drops, in seconds.", gFallSeconds);
+		Register("Fading with Magicka", "RiseSeconds", 0.35f, 0.0f, 3.0f, "How quickly a light comes back as the charge or magicka returns, in seconds.", gRiseSeconds);
+		Register("HUD", "GemDistance", 215.0f, 40.0f, 900.0f, "How far each charge gem sits from the middle of the screen when the HUD shows no charge meters or bars to sit by, in pixels at 1080p.", gGemDistance);
+		Register("HUD", "GemHeight", 62.0f, 0.0f, 1000.0f, "How high above the bottom of the screen the charge gems sit when the HUD shows no charge meters or bars to sit by, in pixels at 1080p.", gGemHeight);
+		// the log's level, so a player can send a detailed log (spdlog's order: 0 trace, 1 debug, 2 info, 3 warn, 4 error)
+		static std::atomic<float> logLevel{ 2.0f };
+		Register("General", "LogLevel", 2.0f, 0.0f, 4.0f,
+			"How much the log file writes: 0 every detail, 1 more detail, 2 the usual, 3 warnings only, 4 errors only. Set 0 or 1 to send a detailed log with a bug report.",
+			logLevel);
 		Tuning::Load();
+		spdlog::set_level(static_cast<spdlog::level::level_enum>(std::clamp(static_cast<int>(std::lround(Get(logLevel))), 0, 4)));
 		{
 			auto s = Config();
 			s.tuning.minReach = Get(gMinReach);
@@ -203,7 +108,6 @@ namespace Fade
 		Items::BuildCatalog();
 		Items::Load();
 		ShaderUpdate::Install();
-		InstallChargeBar();
 		WatchHands();
 		SKSE::log::info("fading: hooked effect shaders; the player update, effect updates and cell animations are the plugin's wrappers");
 		RegisterMenu();

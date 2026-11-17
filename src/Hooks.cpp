@@ -445,6 +445,10 @@ namespace
 				return root;
 			}
 			LightKit::Guarded("3D load", [&]() {
+				if constexpr (std::is_same_v<T, RE::Hazard> || std::is_same_v<T, RE::Explosion>) {
+					// before the cull asks: a plain NiNode root (Frost's and Storms' walls) is stored with no reference on its tree
+					Plugin::NotePlainRoot(root, a_this);
+				}
 				// may be a loader thread: the lights are put out now (never a frame lit) and our lists take them on the main thread.
 				// RE::Light has already hung its light here; a switched-off option's goes out before its first frame
 				std::size_t option = Plugin::kNone;
@@ -469,6 +473,9 @@ namespace
 			set(a_this, a_object, a_queue3DTasks);
 			if (!a_object && had) {
 				Plugin::NoteSweep(Plugin::SweepWhy::kMagicDrop);
+				if constexpr (std::is_same_v<T, RE::Hazard> || std::is_same_v<T, RE::Explosion>) {
+					Plugin::ForgetPlainRoots(a_this);
+				}
 			}
 		}
 		static inline REL::Relocation<decltype(thunk)>    func;

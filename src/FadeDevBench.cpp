@@ -74,7 +74,7 @@ namespace Fade
 			for (const auto& [base, now] : ArtNow()) {
 				out["art"].push_back({ { "base", base }, { "now", now } });
 			}
-			out["hideChargeBar"] = s.hideChargeBar;
+			out["gemPlace"] = static_cast<int>(s.hudGemPlace);
 			out["handsAsleep"] = HandsAsleep();
 			DevBenchGlue::Reply(a_sink, a_write, out);
 		}

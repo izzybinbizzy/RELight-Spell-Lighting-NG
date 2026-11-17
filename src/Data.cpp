@@ -34,6 +34,7 @@
 #include "FadeFormText.h"
 #include "CreatureBases.h"
 #include "Plugin.h"
+#include "Po3Tweaks.h"
 
 namespace Plugin
 {
@@ -365,17 +366,8 @@ namespace Plugin
 		}
 
 		// RE::Light reads an effect shader's editor ID through powerofthree's Tweaks (clib_util::editorID) - the game keeps
-		// none for this form type - and so does this
-		[[nodiscard]] std::string EditorIdOf(const RE::TESForm* a_form)
-		{
-			using GetFormEditorID = const char* (*)(std::uint32_t);
-			static const auto fn = [] {
-				const auto tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks");
-				return tweaks ? reinterpret_cast<GetFormEditorID>(REX::W32::GetProcAddress(tweaks, "GetFormEditorID")) : nullptr;
-			}();
-			const char* id = fn ? fn(a_form->GetFormID()) : a_form->GetFormEditorID();
-			return id ? std::string(id) : std::string{};
-		}
+		// none for this form type - and so does this, through the shared Po3Tweaks.h (Tweaks first, then the form's own)
+		[[nodiscard]] std::string EditorIdOf(const RE::TESForm* a_form) { return Po3Tweaks::EditorID(a_form); }
 
 		// RE::Light's enchantment light (ShaderReferenceEffect::Init): a config by the shader's form, else by its
 		// lower-cased editor ID as an EXACT `meshPath` key (findConfigsForMeshPath is a plain lookup, no substring)
@@ -400,11 +392,8 @@ namespace Plugin
 					gShaderOwner.emplace(shader->GetFormID(), it->second);
 				}
 			}
-			const bool tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks") != nullptr;
-			SKSE::log::info("enchantment lights: {} effect shader(s) are ours, {} of {} had an editor ID (powerofthree's Tweaks {})",
-				gShaderOwner.size(), named, dh->GetFormArray<RE::TESEffectShader>().size(),
-				!tweaks ? "NOT loaded" : named ? "loaded" :
-												 "loaded, but it keeps no editor IDs - its Load EditorIDs setting may be off");
+			SKSE::log::info("enchantment lights: {} effect shader(s) are ours, {} of {} had an editor ID ({})", gShaderOwner.size(), named,
+				dh->GetFormArray<RE::TESEffectShader>().size(), Po3TweaksText::Describe(Po3Tweaks::StateNow()));
 		}
 
 		// a per-form answer, worked out once and cached. A form made while the game runs (its ID starts FF) is never cached:
@@ -884,6 +873,17 @@ namespace Plugin
 	{
 		const auto it = a_shader ? gBodyBase.find(a_shader->GetFormID()) : gBodyBase.end();
 		return it != gBodyBase.end() ? &it->second : nullptr;
+	}
+
+	std::vector<RE::TESEffectShader*> BodyShaders()
+	{
+		std::vector<RE::TESEffectShader*> out;
+		for (const auto& entry : gBodyBase) {
+			if (auto* shader = RE::TESForm::LookupByID<RE::TESEffectShader>(entry.first)) {
+				out.push_back(shader);
+			}
+		}
+		return out;
 	}
 
 	const Stream* CloudOf(const RE::BGSProjectile* a_projectile)

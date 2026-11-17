@@ -132,9 +132,9 @@ namespace Fade::HudGem
 		if (!sent.any || a_look != sent.look) {
 			const Look l = a_look;
 			tasks->AddUITask([l] {
-				Call<5>("setLook", { RE::GFxValue(static_cast<double>(std::clamp(l.scale, 0.5f, 2.0f))),
+				Call<6>("setLook", { RE::GFxValue(static_cast<double>(std::clamp(l.scale, 0.5f, 2.0f))),
 									   RE::GFxValue(static_cast<double>(std::clamp(l.alpha, 0.1f, 1.0f) * 100.0f)),
-									   RE::GFxValue(l.percent ? 1.0 : 0.0), RE::GFxValue(0.0), RE::GFxValue(0.0) });
+									   RE::GFxValue(l.percent ? 1.0 : 0.0), RE::GFxValue(0.0), RE::GFxValue(0.0), RE::GFxValue(l.place == 1 ? 1.0 : 0.0) });
 			});
 		}
 		if (!sent.any || a_hide != sent.hide) {

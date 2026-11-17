@@ -19,16 +19,11 @@ namespace Fade
 	{
 		std::mutex        gLock;
 		Settings          gSettings;
-		std::atomic<bool> gDebugLog{ false }, gHideChargeBar{ false };
+		std::atomic<bool> gDebugLog{ false };
 
 		void Mirror(const Settings& a_s) noexcept
 		{
 			gDebugLog.store(a_s.debugLog, std::memory_order_relaxed);
-			// with Fading off nothing else shows a weapon's charge, so the HUD's bar comes back (his answer 2026-10-13)
-			const bool hide = a_s.hideChargeBar && a_s.enabled;
-			if (gHideChargeBar.exchange(hide, std::memory_order_relaxed) != hide) {
-				RefreshChargeBar();
-			}
 		}
 	}
 
@@ -57,8 +52,6 @@ namespace Fade
 
 	bool DebugLogOn() noexcept { return gDebugLog.load(std::memory_order_relaxed); }
 
-	bool HideChargeBarOn() noexcept { return gHideChargeBar.load(std::memory_order_relaxed); }
-
 	Preview& PreviewState()
 	{
 		static Preview preview;
@@ -84,10 +77,10 @@ namespace Fade
 		const auto& t = s.tuning;
 		SKSE::log::info(
 			"settings: {} line(s) read from {}; enabled {}, empty brightness {}%, curve {}, reach follows {}%, "
-			"sputter {} below {}%, pulse {}, flare {}, cooling {}, staves {}, bound {} ({} s), who {}, dim glow {}, hide charge bar {}",
+			"sputter {} below {}%, pulse {}, flare {}, cooling {}, staves {}, bound {} ({} s), who {}, dim glow {}",
 			read.taken, from, s.enabled, SettingsText::ToPct(t.floor), static_cast<int>(t.curve), SettingsText::ToPct(t.reachFollows),
 			t.sputter, SettingsText::ToPct(t.sputterBelow), t.pulse, t.flare, t.cool, s.staves, s.bound, s.boundFadeSeconds,
-			static_cast<int>(s.who), s.dimShader, s.hideChargeBar);
+			static_cast<int>(s.who), s.dimShader);
 	}
 
 	void SaveSettings()

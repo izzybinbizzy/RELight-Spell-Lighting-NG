@@ -17,7 +17,9 @@ namespace Fade::Mod
 	inline constexpr const char* kRulesDirText = "Data\\SKSE\\Plugins\\RELightSpellLightingNG\\Fading";                                           // the same, as a player reads it
 	inline constexpr const char* kItemsPath = "Data/SKSE/Plugins/RELightSpellLightingNG/Lights by Item.ini";                                      // FadeItems.cpp (his order)
 	inline constexpr const char* kAdvancedPath = "Data/SKSE/Plugins/RELightSpellLightingNG/RELight - Spell Lighting NG - Advanced Settings.ini";  // FadeTuning.cpp (his rule)
-	inline constexpr const char* kHudArtDir = "Data/SKSE/Plugins/RELightSpellLightingNG/HUD/";                                                    // FadeMenu.cpp's soul gem sheets
+	// the player's own lines, in no download: they win over the file and an update never replaces them
+	inline constexpr const char* kAdvancedCustomPath = "Data/SKSE/Plugins/RELightSpellLightingNG/RELight - Spell Lighting NG - Advanced Settings - Custom.ini";
+	inline constexpr const char* kHudArtDir = "Data/SKSE/Plugins/RELightSpellLightingNG/HUD/";  // FadeMenu.cpp's soul gem sheets
 	// the same three files under the old name, read only while the new one is not there yet (SettingsText::ReadFrom; HIS ORDER
 	// 2026-10-20: "i want relight update to not affect old settings files") - never written, moved or deleted
 	inline constexpr const char* kOldSettingsPath = "Data/SKSE/Plugins/RelightSpellAddon/Fading.ini";

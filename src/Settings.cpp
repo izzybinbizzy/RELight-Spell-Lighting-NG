@@ -11,6 +11,7 @@
 //   StreamStrength=100          percent, 25 to 200 - the rows along streams, sprays and bolts and their own lights (Rows.cpp)
 //   GlowStrength=100            percent, 25 to 200 - glows on people: cloaks, flesh spells, FEC's bodies (BodyLights.cpp)
 //   EnchantedStrength=100       percent, 25 to 200 - enchanted weapons' lights, as the Enchanted weapons switch counts them
+//   GroundStrength=100          percent, 25 to 200 - spells left on the ground: a hazard's light (Brightness.cpp)
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
@@ -35,6 +36,7 @@
 #include "DataText.h"
 #include "Fade.h"
 #include "FadeSettingsText.h"
+#include "EnbShaderLights.h"
 #include "Plugin.h"
 #include "StrangeRunes.h"
 
@@ -51,24 +53,26 @@ namespace Plugin
 		constexpr int         kReachMin = 50, kReachMax = 150;
 		constexpr int         kStrengthMin = 25, kStrengthMax = 200;
 
-		// explosions, streams, glows on people, enchanted weapons (Strength, one slot each after kNone)
-		std::array<std::atomic<int>, 4> gStrength{ 100, 100, 100, 100 };
-		std::atomic<int>                gBrightness{ 100 };
-		std::atomic<int>                gReach{ 100 };
-		std::atomic<bool>               gFecFrozenFades{ true };
-		std::atomic<bool>               gFecBurningFades{ true };
-		std::atomic<bool>               gHands{ true };
-		std::atomic<bool>               gWeapons{ true };
-		std::atomic<bool>               gEnchantedWeapons{ true };
-		std::atomic<bool>               gStrangeRunes{ false };  // 1 = Strange Runes' runes light the casting hands
-		std::atomic<int>                gWard{ 0 };
-		std::atomic<int>                gHandsFor{ 0 };
-		std::atomic<bool>               gAuto{ true };
-		std::atomic<bool>               gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
-		std::array<std::atomic<int>, 4> gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
-		std::atomic<bool>               gDynamic{ true };
-		std::atomic<bool>               gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
-		std::atomic<bool>               gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
+		// explosions, streams, glows on people, enchanted weapons, ground effects (Strength, one slot each after kNone)
+		std::array<std::atomic<int>, 5>   gStrength{ 100, 100, 100, 100, 100 };
+		std::atomic<int>                  gBrightness{ 100 };
+		std::atomic<int>                  gReach{ 100 };
+		std::atomic<bool>                 gFecFrozenFades{ true };
+		std::atomic<bool>                 gFecBurningFades{ true };
+		std::atomic<bool>                 gHands{ true };
+		std::atomic<bool>                 gWeapons{ true };
+		std::atomic<bool>                 gEnchantedWeapons{ true };
+		std::atomic<bool>                 gStrangeRunes{ false };     // 1 = Strange Runes' runes light the casting hands
+		std::atomic<bool>                 gEnbShaderLights{ false };  // 1 = ENB Lights For Effect Shaders lights FEC's bodies
+		std::vector<RE::TESEffectShader*> gEnbOurs;                   // our body shaders it lit when the first game loaded (main thread)
+		std::atomic<int>                  gWard{ 0 };
+		std::atomic<int>                  gHandsFor{ 0 };
+		std::atomic<bool>                 gAuto{ true };
+		std::atomic<bool>                 gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
+		std::array<std::atomic<int>, 4>   gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
+		std::atomic<bool>                 gDynamic{ true };
+		std::atomic<bool>                 gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		std::atomic<bool>                 gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
 
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
@@ -113,12 +117,14 @@ namespace Plugin
 			{ "StreamStrength", [] { return gStrength[1].load(); }, [](int v) { gStrength[1] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "GlowStrength", [] { return gStrength[2].load(); }, [](int v) { gStrength[2] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "EnchantedStrength", [] { return gStrength[3].load(); }, [](int v) { gStrength[3] = std::clamp(v, kStrengthMin, kStrengthMax); } },
+			{ "GroundStrength", [] { return gStrength[4].load(); }, [](int v) { gStrength[4] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
 			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
+			{ "ENBShaderLights", [] { return gEnbShaderLights ? 1 : 0; }, [](int v) { gEnbShaderLights = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
@@ -457,6 +463,59 @@ namespace Plugin
 	bool StrangeRunesLoaded() { return StrangeRunes::Loaded(); }
 
 	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
+
+	bool EnbShaderLightsOn() { return gEnbShaderLights; }
+
+	void SetEnbShaderLightsOn(bool a_on)
+	{
+		if (gEnbShaderLights.exchange(a_on) != a_on) {
+			BumpSettings();  // the body lights look again: ours on its shaders off, or back
+			SKSE::log::info("ENB Lights For Effect Shaders lights FEC's bodies: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool EnbShaderLightsLoaded()
+	{
+		static const bool here = EnbShaderLights::Installed();  // asked after every SKSE plugin has loaded
+		return here;
+	}
+
+	bool EnbShadersGivenBack() { return gEnbShaderLights && EnbShaderLightsLoaded(); }
+
+	bool EnbShaderActor(const RE::Actor* a_actor)
+	{
+		// its own ini: 0 the player, 1 and followers, 2 everyone (its default)
+		static const int valid = EnbShaderLights::ValidActors();
+		return a_actor && (valid >= 2 || a_actor->IsPlayerRef() || (valid == 1 && a_actor->IsPlayerTeammate()));
+	}
+
+	void ApplyEnbShaderLights()
+	{
+		const bool giveBack = EnbShadersGivenBack() || AllLightsOff();
+		for (auto* shader : gEnbOurs) {
+			if (giveBack) {
+				EnbShaderLights::GiveBack(shader);
+			} else {
+				EnbShaderLights::TakeOff(shader);
+			}
+		}
+	}
+
+	void TakeEnbShaderLights()
+	{
+		static bool done = false;
+		if (done || !EnbShaderLightsLoaded()) {
+			return;
+		}
+		done = true;
+		for (auto* shader : BodyShaders()) {
+			if (EnbShaderLights::Lit(shader)) {
+				gEnbOurs.push_back(shader);
+			}
+		}
+		ApplyEnbShaderLights();
+		SKSE::log::info("ENB Lights For Effect Shaders lights {} body shader(s) RELight lights too: ours is the default there", gEnbOurs.size());
+	}
 
 	int WardColor() { return gWard; }
 
