@@ -57,7 +57,9 @@ namespace Plugin
 			std::size_t   option{ kNone };    // kNone: not one of ours (or not RE::Light's)
 			std::uint32_t frame{ 0 };         // last seen; a light unseen for a while is forgotten
 			bool          owned{ true };      // false: RE::Light's light with no reference found yet - asked again next walk
+			std::uint8_t  tries{ 0 };         // how often an unowned light was asked: a true orphan stops being asked
 		};
+		constexpr std::uint8_t                        kOwnerTries = 30;
 		std::unordered_map<const RE::NiLight*, Known> gKnown;
 		std::uint32_t                                 gFrame = 0;
 
@@ -72,14 +74,11 @@ namespace Plugin
 		std::mutex                                           gPlainRootsLock;
 		constexpr std::size_t                                kPlainRootsPrune = 256;
 
-		// the noted reference still wears this tree: same base, and its 3D this node - or, while it loads, not stored yet (a_loading)
-		[[nodiscard]] bool StillOwns(const RE::TESObjectREFR* a_ref, const PlainRoot& a_root, const RE::NiAVObject* a_node, bool a_loading)
+		// the noted reference still stands with the same base. Not its stored 3D: RE::Light's twin may hang on an earlier root, and a
+		// root still loading has none; a node reused for another piece of the same base answers the same option, strength and tint
+		[[nodiscard]] bool StillOwns(const RE::TESObjectREFR* a_ref, const PlainRoot& a_root)
 		{
-			if (!a_ref || a_ref->GetBaseObject() != a_root.base) {
-				return false;
-			}
-			const auto* now = a_ref->Get3D();
-			return now == a_node || (a_loading && !now);
+			return a_ref && a_ref->GetBaseObject() == a_root.base;
 		}
 
 		RE::TESObjectREFR* PlainRootOwner(const RE::NiAVObject* a_obj)
@@ -91,7 +90,7 @@ namespace Plugin
 			for (const auto* o = a_obj; o; o = o->parent) {
 				if (const auto it = gPlainRoots.find(o); it != gPlainRoots.end()) {
 					auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(it->second.ref);
-					return StillOwns(ref, it->second, o, true) ? ref : nullptr;
+					return StillOwns(ref, it->second) ? ref : nullptr;
 				}
 			}
 			return nullptr;
@@ -230,10 +229,12 @@ namespace Plugin
 			auto&       k = gKnown[a_light];
 			const void* name = a_light->name.c_str();
 			const void* parent = a_light->parent;
-			if (k.frame == 0 || k.name != name || k.parent != parent || !k.owned) {
-				bool       owned = true;
-				const auto option = LookUpOption(a_light, owned);
-				k = { name, parent, option, gFrame, owned };
+			const bool  same = k.frame != 0 && k.name == name && k.parent == parent;
+			if (!same || (!k.owned && k.tries < kOwnerTries)) {
+				bool               owned = true;
+				const auto         option = LookUpOption(a_light, owned);
+				const std::uint8_t tries = same ? static_cast<std::uint8_t>(k.tries + 1) : std::uint8_t{ 0 };
+				k = { name, parent, option, gFrame, owned, tries };
 			}
 			k.frame = gFrame;
 			return k.option;
@@ -464,7 +465,7 @@ namespace Plugin
 		std::lock_guard l{ gPlainRootsLock };
 		if (gPlainRoots.size() >= kPlainRootsPrune) {
 			std::erase_if(gPlainRoots, [](const auto& a_kv) {
-				return !StillOwns(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_kv.second.ref), a_kv.second, a_kv.first, false);
+				return !StillOwns(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_kv.second.ref), a_kv.second);
 			});
 		}
 		gPlainRoots.insert_or_assign(a_root, PlainRoot{ a_ref->GetFormID(), base });
