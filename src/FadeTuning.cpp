@@ -8,8 +8,8 @@
 // category, holding the values worth tuning that the menu does NOT show - the menu's settings stay in the menu and its own files.
 // The main download ships the file, every line explained (the generators write it from the Register calls). At data load it is
 // read, then the player's own file beside it (Mod::kAdvancedCustomPath, in no download) whose lines win; a value out of range is
-// clamped and said in the log. The file is written only when it is missing or older than this layout (its values kept), so a
-// shipped or edited file is never rewritten. Read once: a change takes effect the next time the game starts.
+// clamped and said in the log. The file is written only when it is missing, older than this layout or lacks a value (its values
+// kept); a file saved as UTF-16 is neither read nor rewritten. Read once: a change takes effect the next time the game starts.
 
 #include "Fade.h"
 #include "FadeTuningText.h"
@@ -137,17 +137,27 @@ namespace Fade::Tuning
 
 	void Load()
 	{
-		auto&                         knobs = Knobs();
-		const auto                    from = SettingsText::ReadFrom(Mod::kAdvancedPath, Mod::kOldAdvancedPath);
-		const std::string             mainText = ReadWhole(from);
-		auto                          found = TuningText::Parse(mainText);
-		auto                          mine = TuningText::Parse(ReadWhole(Mod::kAdvancedCustomPath));
+		auto&             knobs = Knobs();
+		const auto        from = SettingsText::ReadFrom(Mod::kAdvancedPath, Mod::kOldAdvancedPath);
+		const std::string mainText = ReadWhole(from);
+		const std::string mineText = ReadWhole(Mod::kAdvancedCustomPath);
+		// a file saved as UTF-16 would read as nothing but noise: it is not read, never rewritten, and its defaults hold
+		const bool mainWide = TuningText::Utf16(mainText), mineWide = TuningText::Utf16(mineText);
+		if (mainWide) {
+			SKSE::log::warn("advanced settings: {} is saved as UTF-16 (Unicode); it is not read and left as it is - save it as UTF-8 to use its values", from);
+		}
+		if (mineWide) {
+			SKSE::log::warn("advanced settings: {} is saved as UTF-16 (Unicode); it is not read - save it as UTF-8 to use its values", Mod::kAdvancedCustomPath);
+		}
+		auto                          found = mainWide ? TuningText::Entries{} : TuningText::Parse(mainText);
+		auto                          mine = mineWide ? TuningText::Entries{} : TuningText::Parse(mineText);
 		std::vector<float>            fileValues;
 		std::size_t                   taken = 0, takenMine = 0;
 		std::vector<TuningText::Knob> texts;
 		for (const auto& k : knobs) {
 			texts.push_back(k.text);
 		}
+		const bool lacks = TuningText::LacksAny(found, texts);
 		for (auto& k : knobs) {
 			float v = k.text.def;
 			if (auto* e = EntryOf(found, k, texts); e && Take(*e, k, "the file:", v)) {
@@ -162,10 +172,17 @@ namespace Fade::Tuning
 		WarnUnused(found, "the file:", texts);
 		WarnUnused(mine, "Custom:", texts);
 		SKSE::log::info("advanced settings: {} value(s) of {} read from {}, {} from {}", taken, knobs.size(), from, takenMine, Mod::kAdvancedCustomPath);
-		// written only when there is no file, or one older than this layout (its own values kept, never the Custom file's)
+		// written only when there is no file, one older than this layout or one that lacks a value (its own values kept, never the
+		// Custom file's); a UTF-16 file is left alone
 		std::error_code ec;
 		const bool      haveNew = std::filesystem::exists(Mod::kAdvancedPath, ec);
-		if (haveNew && TuningText::FileVersion(mainText) >= TuningText::kFileVersion) {
+		const bool      older = TuningText::FileVersion(mainText) < TuningText::kFileVersion;
+		if (mainWide || (haveNew && !older && !lacks)) {
+			return;
+		}
+		// a file the player made read-only stays as it is: its defaults hold for what it lacks
+		if (haveNew && (std::filesystem::status(Mod::kAdvancedPath, ec).permissions() & std::filesystem::perms::owner_write) == std::filesystem::perms::none) {
+			SKSE::log::info("advanced settings: {} is read-only, so it is not written again", Mod::kAdvancedPath);
 			return;
 		}
 		const auto customName = std::filesystem::path(Mod::kAdvancedCustomPath).filename().string();
@@ -184,6 +201,9 @@ namespace Fade::Tuning
 			std::filesystem::remove(tmp, ec);
 			return;
 		}
-		SKSE::log::info("advanced settings: {} written ({}), its values kept", Mod::kAdvancedPath, haveNew ? "an older layout" : "there was none");
+		SKSE::log::info("advanced settings: {} written ({}), its values kept", Mod::kAdvancedPath,
+			!haveNew ? "there was none" :
+			older    ? "an older layout" :
+					   "it lacked a value");
 	}
 }

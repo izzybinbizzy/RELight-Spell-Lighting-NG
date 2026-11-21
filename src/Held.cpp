@@ -20,6 +20,7 @@
 #include "Plugin.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace Plugin
 {
@@ -38,6 +39,7 @@ namespace Plugin
 			RE::NiPointer<RE::BSLight>      bs;
 			RE::NiPointer<RE::NiPointLight> light;
 			float                           written{ -1.0f }, wroteReach{ -1.0f };
+			int                             glowLooks{ 0 };  // above 0: at the grip until its weapon's mesh hangs on the node
 		};
 
 		std::vector<Live>        gLive;
@@ -101,6 +103,55 @@ namespace Plugin
 				gDrawn.push_back(a_id);
 			}
 		}
+
+		// the weapon's own mesh under its hand node: the biggest visible triangle shape at its drawn size, never the swirls'
+		// particles or a hidden shape (a blood overlay, a swirl's emitter source scaled four times) - Illuminated's HerShadow.cpp
+		[[nodiscard]] const RE::BSGeometry* WeaponModel(RE::NiAVObject* a_hand)
+		{
+			const RE::BSGeometry* model = nullptr;
+			float                 biggest = 0.0f;
+			RE::BSVisit::TraverseScenegraphGeometries(a_hand, [a_hand, &model, &biggest](RE::BSGeometry* a_geometry) {
+				const auto type = a_geometry->GetType().get();
+				if (type != RE::BSGeometry::Type::kTriShape && type != RE::BSGeometry::Type::kDynamicTriShape) {
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				float radius = a_geometry->modelBound.radius;
+				for (const RE::NiAVObject* object = a_geometry; object && object != a_hand; object = object->parent) {
+					if (object->GetAppCulled()) {
+						return RE::BSVisit::BSVisitControl::kContinue;
+					}
+					radius *= object->local.scale;
+				}
+				if (radius > biggest) {
+					model = a_geometry;
+					biggest = radius;
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+			return model;
+		}
+
+		// a held line that names no point of its own sits at the grip: such a light glows from the middle of the weapon instead (a light
+		// in the fist throws the fingers' shadow across the floor). A measured point (a staff's tip) is kept
+		[[nodiscard]] bool AtGrip(const Stream& a_held) { return a_held.at.x == 0.0f && a_held.at.y == 0.0f && a_held.at.z == 0.0f; }
+
+		// the weapon mesh's bound centre in the hand node's frame; none while no mesh hangs there yet
+		[[nodiscard]] std::optional<RE::NiPoint3> BladeCentre(RE::NiNode* a_hand)
+		{
+			const auto* model = a_hand ? WeaponModel(a_hand) : nullptr;
+			if (!model || model->modelBound.radius <= 0.0f) {
+				return std::nullopt;
+			}
+			RE::NiPoint3 point = model->modelBound.center;
+			for (const RE::NiAVObject* object = model; object && object != a_hand; object = object->parent) {
+				point = object->local * point;
+			}
+			return point;
+		}
+
+		// a weapon's mesh can hang on its hand node a few frames after the draw that made its light (a first-person model loading)
+		constexpr int kGlowLooks = 60;
+		bool          gGlowWaiting = false;  // a light still waits for its weapon's mesh (main thread)
 
 		[[nodiscard]] bool WeaponOut(RE::Actor* a_actor) { return a_actor->AsActorState()->GetWeaponState() != RE::WEAPON_STATE::kSheathed; }
 
@@ -376,7 +427,7 @@ namespace Plugin
 		const auto           gen = SettingsGeneration();
 		const bool           changed = gen != genWas;
 		genWas = gen;
-		if (!changed && !looked && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
+		if (!changed && !looked && !gGlowWaiting && !SweepWindowOpen() && gFailed.empty() && !BudgetByDistance() && !FarChanged()) {
 			return;
 		}
 		static std::vector<Want> want;  // main thread; kept between frames so its storage is not made again each one
@@ -438,7 +489,14 @@ namespace Plugin
 			const float       fade = w.held->fade * scale;
 			const float       reach = w.held->radius * reachScale;
 			RE::NiPointLight* light = nullptr;
-			auto*             bs = MakeOwnLight(*w.held, fade, reach, w.node, scene, kLightName, light);
+			// placed before it is hung, so its first frame already lights from the blade
+			Stream     placed = *w.held;
+			const bool grip = AtGrip(placed);
+			const auto centre = grip ? BladeCentre(w.node) : std::nullopt;
+			if (centre) {
+				placed.at = *centre;
+			}
+			auto* bs = MakeOwnLight(placed, fade, reach, w.node, scene, kLightName, light);
 			if (!bs) {
 				if (const auto failed = std::ranges::find_if(gFailed, [&w](const Failed& f) { return f.Is(w); }); failed != gFailed.end()) {
 					failed->retryAt = gUpdate + kRetryUpdates;
@@ -451,7 +509,7 @@ namespace Plugin
 			}
 			std::erase_if(gFailed, [&w](const Failed& f) { return f.Is(w); });  // made at last: a later failure warns again
 			gLive.push_back({ w.actor->GetFormID(), w.left, w.firstPerson, w.held, RE::NiPointer<RE::NiNode>(w.node),
-				RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach });
+				RE::NiPointer<RE::BSLight>(bs), RE::NiPointer<RE::NiPointLight>(light), fade, reach, grip && !centre ? kGlowLooks : 0 });
 			if (gTold < 16) {
 				++gTold;
 				SKSE::log::info("[HELD] {} | {:08X} {} hand, {} person | fade {:.2f} | radius {:.0f}", w.held->key, w.actor->GetFormID(),
@@ -467,6 +525,20 @@ namespace Plugin
 				v.written = fade;
 				v.wroteReach = reach;
 			}
+		}
+		// a light made before its weapon's mesh hung on the node goes to the blade once the mesh is there (a few frames at most)
+		gGlowWaiting = false;
+		for (auto& v : gLive) {
+			if (v.glowLooks <= 0) {
+				continue;
+			}
+			if (const auto centre = BladeCentre(v.node.get())) {
+				v.light->local.translate = *centre;
+				v.glowLooks = 0;
+			} else {
+				--v.glowLooks;
+			}
+			gGlowWaiting = gGlowWaiting || v.glowLooks > 0;
 		}
 		gLiveCount = gLive.size();
 	}

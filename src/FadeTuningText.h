@@ -113,7 +113,7 @@ namespace Fade::TuningText
 	// the "(file version N)" a file says in its first five lines; 0 for a file without one (written before versions, or by hand)
 	[[nodiscard]] inline int FileVersion(std::string_view a_text)
 	{
-		if (a_text.starts_with("ï»¿")) {
+		if (a_text.starts_with("\xEF\xBB\xBF")) {
 			a_text.remove_prefix(3);
 		}
 		constexpr std::string_view kMark = "(file version ";
@@ -131,6 +131,15 @@ namespace Fade::TuningText
 			return ec == std::errc{} && end != from ? v : 0;
 		}
 		return 0;
+	}
+
+	// a file saved as UTF-16 (Notepad's "Unicode"), its byte order mark either way round: its lines cannot be read here
+	[[nodiscard]] inline bool Utf16(std::string_view a_text) { return a_text.starts_with("\xFF\xFE") || a_text.starts_with("\xFE\xFF"); }
+
+	// a knob whose own line ([Section] Key) the file does not hold: the file is written again, every value it has kept
+	[[nodiscard]] inline bool LacksAny(const Entries& a_found, const std::vector<Knob>& a_knobs)
+	{
+		return std::ranges::any_of(a_knobs, [&a_found](const Knob& a_k) { return !a_found.contains(KeyOf(a_k.section, a_k.key)); });
 	}
 
 	// letters apart: one added, removed or changed counts one; case is ignored

@@ -184,8 +184,9 @@ namespace Fade
 
 	// ------------------------------------------------------------------ FadeTuning.cpp: the all-in-one advanced settings file
 	// (his rule: every value worth tuning that the menu does not show, one file, a section per category). A value is
-	// registered with its default and range before Load (data load); Load reads the file, then writes it back whole. A key
-	// that was renamed names its old name (a_was): a file that still carries the old line keeps its value, written back under
+	// registered with its default and range before Load (data load); Load reads the file, then the player's Custom file, and writes
+	// the file again only when it is missing, older than this layout or lacks a value (its values kept; never the Custom file). A
+	// key that was renamed names its old name (a_was): a file that still carries the old line keeps its value, written again under
 	// the new name (the rule for any renamed setting: write the new, read both).
 	namespace Tuning
 	{

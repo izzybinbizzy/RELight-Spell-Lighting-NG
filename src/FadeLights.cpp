@@ -33,6 +33,9 @@
 #include "FadeHudGem.h"
 #include "Plugin.h"
 
+#include <atomic>
+#include <mutex>
+
 namespace Fade
 {
 	namespace
@@ -189,8 +192,10 @@ namespace Fade
 		// lock, held only while a few dozen bytes are copied - the render thread never waits on the per-frame pass (gLock)
 		std::mutex gHudLock;
 		HudState   gHud;
-		// where the HUD draws its charge meters and bars, for the gems: main thread only (HudHiddenNow writes, PublishHud copies)
-		Glow::HudBoxes gHudBoxes{};
+		// where the HUD draws its charge meters and bars, for the gems: a UI task writes it (AskHudBoxes), PublishHud copies it
+		std::mutex        gBoxLock;
+		Glow::HudBoxes    gHudBoxes{};
+		std::atomic<bool> gBoxesAsked{ false };  // a read is queued and has not run yet
 
 		[[nodiscard]] std::uint64_t Key(RE::ActorHandle a_actor, bool a_left)
 		{
@@ -926,8 +931,8 @@ namespace Fade
 
 		// where the HUD draws its own charge meters and its health / magicka / stamina bars, as shares of the screen: the game's
 		// HUD movie and the HUDs that replace it (SkyHUD, Vel'dun UI, Norden UI) keep these members on their HUD object, and HUD NG
-		// moves the parts themselves, so the gems follow both. Main thread, read when the gems appear and when a menu closes (HUD
-		// NG's editor among them), never every frame
+		// moves the parts themselves, so the gems follow both. UI thread (AskHudBoxes), asked when the gems appear and when a menu
+		// closes (HUD NG's editor among them), never every frame
 		[[nodiscard]] Glow::HudBoxes ReadHudBoxes()
 		{
 			Glow::HudBoxes out{};
@@ -961,6 +966,27 @@ namespace Fade
 			return out;
 		}
 
+		// the HUD movie is the UI thread's: its read runs as one UI task, at most one queued at a time
+		void AskHudBoxes()
+		{
+			if (gBoxesAsked.exchange(true, std::memory_order_relaxed)) {
+				return;
+			}
+			auto* tasks = SKSE::GetTaskInterface();
+			if (!tasks) {
+				gBoxesAsked.store(false, std::memory_order_relaxed);
+				return;
+			}
+			tasks->AddUITask([] {
+				const auto boxes = ReadHudBoxes();
+				{
+					const std::scoped_lock lock{ gBoxLock };
+					gHudBoxes = boxes;
+				}
+				gBoxesAsked.store(false, std::memory_order_relaxed);
+			});
+		}
+
 		void PublishHud(const Settings& a_s, bool a_hudHidden)
 		{
 			HudState hud;
@@ -971,7 +997,10 @@ namespace Fade
 			hud.gemPercent = a_s.hudGemPercent;
 			hud.gemFull = a_s.hudGemFull;
 			hud.gemPlace = a_s.hudGemPlace;
-			hud.boxes = gHudBoxes;
+			{
+				const std::scoped_lock lock{ gBoxLock };
+				hud.boxes = gHudBoxes;
+			}
 			hud.low = a_s.tuning.sputterBelow;
 			auto*       player = RE::PlayerCharacter::GetSingleton();
 			const auto* state = player ? player->AsActorState() : nullptr;
@@ -1094,7 +1123,7 @@ namespace Fade
 			// the gems' place follows the HUD: read when they appear and when a menu closes (HUD NG may have moved its parts)
 			const bool menus = MenusHideHud();
 			if (a_gems && (!gemsWere || (menusWere && !menus))) {
-				gHudBoxes = ReadHudBoxes();
+				AskHudBoxes();
 			}
 			menusWere = menus;
 			gemsWere = a_gems;
@@ -1510,6 +1539,7 @@ namespace Fade
 		RestoreAll();
 		Items::Release();
 		WakeHands();
+		gBoxesAsked.store(false, std::memory_order_relaxed);  // a HUD read queued as the old game ended may never run
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();

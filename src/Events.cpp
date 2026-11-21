@@ -181,10 +181,12 @@ namespace Plugin
 		};
 	}
 
-	// a save that did not load leaves the old game: what kPreLoadGame let go is made again, as after a loading screen (main thread)
+	// a save that did not load leaves the old game: what kPreLoadGame let go is made again, as after a loading screen, and the fading
+	// hands' pass, which waits for the game's next event, looks now (main thread)
 	void RenewAfterFailedLoad()
 	{
 		AfterLoadingScreen();
+		Fade::WakeHands();
 	}
 
 	void WatchEvents()
