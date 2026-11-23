@@ -64,6 +64,7 @@ namespace Plugin
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<bool>               gEnchantedWeapons{ true };
 		std::atomic<bool>               gStrangeRunes{ false };  // 1 = Strange Runes' runes light the casting hands
+		std::atomic<bool>               gHandShadows{ true };    // 1 = both hands lit: each hand casts its own shadow
 		// frost, earth and stone, water, wind, plants (NatureKind::kSettingKeys): false leaves that kind of spell unlit
 		std::array<std::atomic<bool>, 5>  gNature{ true, true, true, true, true };
 		std::atomic<bool>                 gEnbShaderLights{ false };  // 1 = ENB Lights For Effect Shaders lights FEC's bodies
@@ -127,6 +128,7 @@ namespace Plugin
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
 			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
+			{ "HandShadows", [] { return gHandShadows ? 1 : 0; }, [](int v) { gHandShadows = v != 0; } },
 			{ "FrostLights", [] { return gNature[0] ? 1 : 0; }, [](int v) { gNature[0] = v != 0; } },
 			{ "EarthLights", [] { return gNature[1] ? 1 : 0; }, [](int v) { gNature[1] = v != 0; } },
 			{ "WaterLights", [] { return gNature[2] ? 1 : 0; }, [](int v) { gNature[2] = v != 0; } },
@@ -204,6 +206,21 @@ namespace Plugin
 				old.art[0], old.art[1], old.art[2], old.art[3], old.dynamic ? "on" : "off");
 		}
 
+		// the Bottled Shaders Shadows installer's pick (his 668): its one-shadow option's marker carries OneShadow=1, where a player
+		// who never saved "A shadow from each hand" starts
+		[[nodiscard]] bool ShadowInstallerPicksOne()
+		{
+			std::ifstream in("Data/SKSE/Plugins/RELightSpellLightingNG/Bottled Shaders Shadows.ini");
+			std::string   line;
+			while (std::getline(in, line)) {
+				std::erase_if(line, [](unsigned char a_c) { return std::isspace(a_c) != 0; });
+				if (SameText(line, "OneShadow=1")) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// the file itself: written beside itself and moved over, on the thread that calls it (the main thread - SaveSettings)
 		void WriteSettingsFile()
 		{
@@ -249,7 +266,7 @@ namespace Plugin
 		std::size_t              read = 0;
 		std::vector<std::string> problems;
 		std::vector<std::string> unknown;  // each unknown section named once
-		bool                     picksRead = false, pulseRead = false, dynamicRead = false;
+		bool                     picksRead = false, pulseRead = false, dynamicRead = false, handShadowsRead = false;
 		for (bool first = true; in && std::getline(in, line); first = false) {
 			if (first && line.starts_with("\xEF\xBB\xBF")) {
 				line.erase(0, 3);  // a file saved "UTF-8 with BOM" would lose its first section
@@ -289,6 +306,7 @@ namespace Plugin
 			if (settings) {
 				picksRead = picksRead || IsPickKey(key);
 				pulseRead = pulseRead || SameText(key, "PulseShapes");
+				handShadowsRead = handShadowsRead || SameText(key, "HandShadows");
 				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
 				// the glow limit's switch and count and Dim in daylight left the menu in 3.1: an older file's keys pass quietly
 				if (!SameText(key, "GlowLimit") && !SameText(key, "GlowLimitCount") && !SameText(key, "DimInDaylight") && !ApplySetting(key, *v)) {
@@ -309,6 +327,9 @@ namespace Plugin
 		}
 		if (!picksRead) {
 			CarryOldPicks(a_log);
+		}
+		if (!handShadowsRead) {
+			gHandShadows = !ShadowInstallerPicksOne();  // never saved: the shadow installer's pick
 		}
 		if (!pulseRead) {
 			gPulse = !dynamicRead;  // a new player starts on Realistic; one who saved Dynamic Lighting keeps it (On = Regular)
@@ -495,6 +516,15 @@ namespace Plugin
 	bool NatureKindOff(std::string_view a_path) { return !NatureLightsOn(NatureKind::IndexOf(NatureKind::KindOf(a_path))); }
 
 	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
+
+	bool ShadowFromEachHand() { return gHandShadows; }
+
+	void SetShadowFromEachHand(bool a_on)
+	{
+		if (gHandShadows.exchange(a_on) != a_on) {
+			SKSE::log::info("a shadow from each hand: {}", a_on ? "on" : "off");
+		}
+	}
 
 	bool EnbShaderLightsOn() { return gEnbShaderLights; }
 

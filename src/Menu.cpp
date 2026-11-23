@@ -721,6 +721,14 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
 
+			// Illuminated's same setting (his 646): with both hands lit each hand casts its own shadow; off, one from between them
+			bool eachHand = ShadowFromEachHand();
+			if (ImGuiMCP::Checkbox(T("A shadow from each hand"), &eachHand)) {
+				SetShadowFromEachHand(eachHand);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("With both hands lit and shadows on, each hand casts its own shadow. Off: one shadow from between the hands."));
+
 			// the five nature switches (his answer 2026-11-22, Illuminated's same five): each kind of spell lit, or left unlit
 			const auto nature = [](int a_index, const char* a_label) {
 				bool lit = NatureLightsOn(a_index);

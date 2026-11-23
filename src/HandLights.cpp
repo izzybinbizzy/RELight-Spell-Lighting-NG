@@ -119,8 +119,11 @@ namespace Plugin
 		// says; its Blue pick keeps the layer's blue
 		const Hand* Picked(const Hand* a_hand)
 		{
-			if (!a_hand || WardsSteppedDown() || MeshKey(a_hand->key) != "wardinhandfx") {
+			if (!a_hand || MeshKey(a_hand->key) != "wardinhandfx") {
 				return a_hand;
+			}
+			if (WardsSteppedDown()) {
+				return nullptr;  // every ward is Dynamic Wards' when it loads: no hand light of ours beside its own
 			}
 			if (const auto other = Other360Color()) {
 				static std::unordered_map<const Hand*, Hand> recolored;

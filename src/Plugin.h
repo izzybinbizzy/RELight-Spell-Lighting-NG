@@ -241,6 +241,8 @@ namespace Plugin
 	void                      SetStrangeRunesLightOn(bool a_on);
 	[[nodiscard]] bool        StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
 	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
+	[[nodiscard]] bool        ShadowFromEachHand();  // both hands lit: each casts its own shadow (Illuminated's same setting)
+	void                      SetShadowFromEachHand(bool a_on);
 	// the five nature switches (Settings.cpp, NatureKind.h): index 0 frost ... 4 plants; -1 = no kind, always on
 	[[nodiscard]] bool NatureLightsOn(int a_index);
 	void               SetNatureLightsOn(int a_index, bool a_on);

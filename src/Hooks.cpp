@@ -208,8 +208,8 @@ namespace
 		a_light->world.translate = a_point;
 	}
 
-	// main thread, each frame: with both her hands lit their shadow casters sit at one point between them, so she throws one
-	// shadow; a hand lit alone casts from out of its own palm (OutOfThePalm's place)
+	// main thread, each frame: with both her hands lit and "A shadow from each hand" off, their shadow casters sit at one point
+	// between them, so she throws one shadow; otherwise each casts from out of its own palm (OutOfThePalm's place)
 	void PlaceHerShadow()
 	{
 		if (!gHerShadowsAny.load(std::memory_order_relaxed)) {
@@ -243,7 +243,7 @@ namespace
 			const bool  left = std::string_view(node->name.c_str()).contains("L MagicNode");
 			const auto* strings = RE::FixedStrings::GetSingleton();
 			auto*       other = strings ? rootOf(node)->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode) : nullptr;
-			const bool  both = other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
+			const bool  both = !Plugin::ShadowFromEachHand() && other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
 				return MagicNodeOf(a_l) == other && Shows(a_l);
 			});
 			if (both) {
@@ -284,8 +284,8 @@ namespace
 
 	std::vector<RE::NiPointLight*> gPromotedBetween;  // main thread only; a light is read only while gMagicLights holds it
 
-	// main thread, each frame, with Promote on and no Bottled shadow download: while both her hands are lit their lights sit at
-	// one point between them, so she throws one shadow (the same lights, the same brightness)
+	// main thread, each frame, with Promote on and no Bottled shadow download: while both her hands are lit and "A shadow from
+	// each hand" is off, their lights sit at one point between them, so she throws one shadow (the same lights, the same brightness)
 	void PlacePromotedHands()
 	{
 		static const bool on = Plugin::InverseSquare() && !REL::Module::IsVR() && !Plugin::ShadowPatch() && PromoteOn();
@@ -304,7 +304,7 @@ namespace
 			auto* root = player->Get3D(first);
 			auto* left = root ? root->GetObjectByName(strings->npcLMagicNode) : nullptr;
 			auto* right = root ? root->GetObjectByName(strings->npcRMagicNode) : nullptr;
-			if (!left || !right || !HasHandLight(left) || !HasHandLight(right)) {
+			if (Plugin::ShadowFromEachHand() || !left || !right || !HasHandLight(left) || !HasHandLight(right)) {
 				continue;
 			}
 			const auto point = (left->world * LightKit::kHandPoint + right->world * LightKit::kHandPoint) * 0.5f;
