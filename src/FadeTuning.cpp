@@ -14,7 +14,8 @@
 #include "Fade.h"
 #include "FadeTuningText.h"
 
-#include <sstream>
+#include <filesystem>
+#include <fstream>
 
 namespace Fade::Tuning
 {
@@ -48,10 +49,20 @@ namespace Fade::Tuning
 			if (!in.is_open()) {
 				return {};
 			}
-			std::ostringstream s;
-			s << in.rdbuf();
-			a_failed = in.bad();
-			return s.str();
+			// read to the size the file system gives, so a read that stops early is a failure, never a shorter file (an empty one reads fine)
+			const auto size = std::filesystem::file_size(a_path, ec);
+			if (ec) {
+				a_failed = true;
+				return {};
+			}
+			std::string text(static_cast<std::size_t>(size), '\0');
+			in.read(text.data(), static_cast<std::streamsize>(text.size()));
+			if (in.gcount() != static_cast<std::streamsize>(text.size())) {
+				a_failed = true;
+				return {};
+			}
+			a_failed = false;
+			return text;
 		}
 
 		// sections renamed for the player-ordered layout: a file written before still reads under its old name

@@ -148,7 +148,13 @@ namespace Fade::HudGem
 		}
 		if (!sent.any || a_hide != sent.hide) {
 			const bool h = a_hide;
-			tasks->AddUITask([h] { Call<1>("setHidden", { RE::GFxValue(h ? 1.0 : 0.0) }); });
+			tasks->AddUITask([h] {
+				// a show queued just before StandDown would run after its last hide: HUD NG has the gems now, the movie stays hidden
+				if (!h && off.load(std::memory_order_relaxed)) {
+					return;
+				}
+				Call<1>("setHidden", { RE::GFxValue(h ? 1.0 : 0.0) });
+			});
 		}
 		for (std::size_t i = 0; i < a_gems.size(); ++i) {
 			auto g = a_gems[i];

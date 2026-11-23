@@ -422,10 +422,18 @@ namespace Plugin
 
 	void DropBurningBanners()
 	{
-		gDarkened.clear();  // a load or a loading screen: their lights are the old 3D's
 		while (!gLit.empty()) {
 			PutOut(gLit.begin()->first);
 		}
+		// a load or a loading screen: the old 3D's Light Placer lights get their color back first (a save that fails to load keeps them)
+		for (auto& [id, kept] : gDarkened) {
+			for (auto& [light, color] : kept) {
+				if (light) {
+					light->GetLightRuntimeData().diffuse = color;
+				}
+			}
+		}
+		gDarkened.clear();
 		gBurning.clear();
 		gRetries.clear();
 		const std::lock_guard l(gNotedLock);

@@ -201,6 +201,7 @@ namespace Fade
 		Glow::HudBoxes             gHudBoxes{};
 		std::atomic<bool>          gBoxesAsked{ false };  // a read is queued and has not run yet
 		std::atomic<std::uint32_t> gHudSession{ 0 };      // a game load starts a new one: a read queued for the old HUD is dropped
+		std::atomic<bool>          gHudNew{ false };      // a new session's boxes are not read yet: the next frame with gems asks once
 
 		[[nodiscard]] std::uint64_t Key(RE::ActorHandle a_actor, bool a_left)
 		{
@@ -1236,9 +1237,11 @@ namespace Fade
 				const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
 				hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
 			}
-			// the gems' place follows the HUD: read when they appear and when a menu closes (HUD NG may have moved its parts)
+			// the gems' place follows the HUD: read when they appear, when a menu closes (HUD NG may have moved its parts) and once
+			// after a load, which left the gems showing and no menu seen closing
 			const bool menus = MenusHideHud();
-			if (a_gems && (!gemsWere || (menusWere && !menus))) {
+			const bool fresh = a_gems && gHudNew.exchange(false, std::memory_order_relaxed);
+			if (a_gems && (fresh || !gemsWere || (menusWere && !menus))) {
 				AskHudBoxes();
 			}
 			menusWere = menus;
@@ -1688,6 +1691,7 @@ namespace Fade
 			gHudBoxes = {};
 			gHudSession.fetch_add(1, std::memory_order_relaxed);
 			gBoxesAsked.store(false, std::memory_order_relaxed);  // a HUD read queued as the old game ended may never run
+			gHudNew.store(true, std::memory_order_relaxed);
 		}
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
