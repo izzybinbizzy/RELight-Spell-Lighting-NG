@@ -66,12 +66,18 @@ namespace TranslationText
 		const bool format = a_english.find("%%") != std::string_view::npos ||
 		                    std::ranges::any_of(lenient, [](const std::string& a_p) { return a_p.starts_with('%'); });
 		if (!format) {
-			// a plain line is shown as text, never printed through printf: only its {} fields must match
+			// a plain line is shown as text, never printed through printf: only its {} fields must match. A translation that brings
+			// a conversion of its own (%s, %d) is refused all the same: its English may be a printf line this scan reads as plain
+			// ("% d", a space flag), and a conversion with no argument behind it reads garbage
+			const auto translated = Placeholders(a_translated);
+			if (std::ranges::any_of(translated, [](const std::string& a_p) { return a_p.starts_with('%'); })) {
+				return false;
+			}
 			const auto fields = [](std::vector<std::string> a_all) {
 				std::erase_if(a_all, [](const std::string& a_p) { return a_p.starts_with('%'); });
 				return a_all;
 			};
-			return fields(lenient) == fields(Placeholders(a_translated));
+			return fields(lenient) == fields(translated);
 		}
 		return Placeholders(a_english, format) == Placeholders(a_translated, format);
 	}

@@ -548,8 +548,13 @@ namespace Fade::Items
 				continue;
 			}
 			// the shield and its spell come from one mod: another mod's or the game's shield that only shares the spell's name is not that spell's
+			// its own file's spell first; a spell of a file it masters (or that masters it) only when its own file has none
 			const auto* file = armor->GetFile(0);
-			if (const auto own = std::ranges::find_if(it->second, [file](const auto& a_spell) { return SameMod(a_spell.second, file); }); own != it->second.end()) {
+			auto        own = std::ranges::find_if(it->second, [file](const auto& a_spell) { return a_spell.second == file; });
+			if (own == it->second.end()) {
+				own = std::ranges::find_if(it->second, [file](const auto& a_spell) { return SameMod(a_spell.second, file); });
+			}
+			if (own != it->second.end()) {
 				gShieldSpell.emplace(armor->GetFormID(), own->first);
 			}
 		}

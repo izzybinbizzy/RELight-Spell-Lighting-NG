@@ -926,6 +926,11 @@ namespace Fade
 				}
 				HudGem::Publish(g, { hud.gemSize, hud.gemOpacity, hud.gemPercent, static_cast<int>(hud.gemPlace) }, !(hud.gems && hud.drawn && !hud.hudHidden));
 				if (HudGem::Live()) {
+					// the HUD's layer draws them: the fallback's own fade follows what is there now, so a gem put away meanwhile is
+					// never drawn again from an old fade when the layer goes
+					for (std::size_t i = 0; i < 2; ++i) {
+						shown[i] = here[i] ? 1.0f : 0.0f;
+					}
 					return;
 				}
 			}

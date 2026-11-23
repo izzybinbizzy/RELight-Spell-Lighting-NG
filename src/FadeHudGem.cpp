@@ -1,5 +1,7 @@
 #include "FadeHudGem.h"
 
+#include "Fade.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -18,8 +20,9 @@ namespace Fade::HudGem
 		std::atomic<bool> live{ false };
 		std::atomic<int>  clip{ -1 };  // which of kClips answered
 		std::atomic<bool> asking{ false };
-		std::atomic<int>  asksLeft{ 0 };  // armed by the HUD opening, spent by Publish
-		std::atomic<bool> off{ false };   // HUD NG places the gems (StandDown): the movie is never asked again
+		std::atomic<int>  asksLeft{ 0 };    // armed by the HUD opening, spent by Publish
+		std::atomic<bool> off{ false };     // HUD NG places the gems (StandDown): the movie is never asked again
+		std::atomic<bool> resend{ false };  // a new HUD movie (its menu opened, or our clip lost): the next Publish sends everything
 
 		// render thread only
 		struct Sent
@@ -88,6 +91,8 @@ namespace Fade::HudGem
 			if (!view || i < 0 || !view->GetVariable(&c, kClips[i]) || !c.IsDisplayObject() || !c.Invoke(a_fn, nullptr, a_args.data(), N)) {
 				if (live.exchange(false, std::memory_order_relaxed)) {
 					asksLeft.store(1, std::memory_order_relaxed);
+					resend.store(true, std::memory_order_relaxed);
+					WakeHands();  // the ImGui gems take over: the hand pass reads the HUD again, even while it slept
 				}
 			}
 		}
@@ -98,6 +103,7 @@ namespace Fade::HudGem
 			{
 				if (a_event && a_event->menuName == RE::HUDMenu::MENU_NAME && !off.load(std::memory_order_relaxed)) {
 					live.store(false, std::memory_order_relaxed);
+					resend.store(true, std::memory_order_relaxed);  // a new movie holds no gem state, whatever live reads by the next Publish
 					asksLeft.store(a_event->opening ? kAsksAtOpen : 0, std::memory_order_relaxed);
 					if (a_event->opening) {
 						AskSoon();
@@ -124,6 +130,9 @@ namespace Fade::HudGem
 				AskSoon();
 			}
 			return;
+		}
+		if (resend.exchange(false, std::memory_order_relaxed)) {
+			sent.any = false;
 		}
 		auto* tasks = SKSE::GetTaskInterface();
 		if (!tasks) {
@@ -173,15 +182,17 @@ namespace Fade::HudGem
 			return;
 		}
 		asksLeft.store(0, std::memory_order_relaxed);
-		if (live.load(std::memory_order_relaxed)) {
-			if (auto* tasks = SKSE::GetTaskInterface()) {
-				tasks->AddUITask([] {
+		// queued whatever live reads now: an Ask already running can still set it, and UI tasks run in order, so this hide runs
+		// after it and clears it
+		if (auto* tasks = SKSE::GetTaskInterface()) {
+			tasks->AddUITask([] {
+				if (live.load(std::memory_order_relaxed)) {
 					Call<1>("setHidden", { RE::GFxValue(1.0) });
-					live.store(false, std::memory_order_relaxed);
-				});
-			} else {
+				}
 				live.store(false, std::memory_order_relaxed);
-			}
+			});
+		} else {
+			live.store(false, std::memory_order_relaxed);
 		}
 		SKSE::log::info("HUD soul gem: HUD NG places the gems, the HUD-layer movie stands down");
 	}

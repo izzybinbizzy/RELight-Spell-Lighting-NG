@@ -222,7 +222,7 @@ namespace Fade
 
 		// keys an older version wrote: read past without a warning, never written again (Glow::TintFor decides the cooling tint)
 		inline constexpr std::string_view kRetired[]{ "OwnLight", "OwnLightReach", "ColorCoolingTint", "Reticle", "ReticleStyle", "ReticleSize",
-			"ReticleOpacity", "ReticleDotSize", "ReticleDotClear" };
+			"ReticleOpacity", "ReticleDotSize", "ReticleDotClear", "HideChargeBar" };
 
 		using LightKit::SameText;  // LightMath.h: the one case-blind compare
 

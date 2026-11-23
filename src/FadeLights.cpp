@@ -283,7 +283,10 @@ namespace Fade
 		void ApplyLight(RE::NiPointLight* a_light, const HandTrack& a_hand, bool a_found = true)
 		{
 			if (const auto shared = gShared.find(a_light); shared != gShared.end()) {
-				UnShare(a_light, shared->second);
+				// an entry unseen a while may be another light that lived at this address: forgotten, never restored from
+				if (gFrame - shared->second.frame <= kSharedStale) {
+					UnShare(a_light, shared->second);
+				}
 				gShared.erase(shared);
 			}
 			auto [it, added] = gLights.try_emplace(a_light);
@@ -833,6 +836,11 @@ namespace Fade
 					return RE::BSVisit::BSVisitControl::kContinue;
 				}
 				auto it = gShared.find(a_light);
+				// unseen a while: possibly another light at a reused address - its record is dropped, never read
+				if (it != gShared.end() && gFrame - it->second.frame > kSharedStale) {
+					gShared.erase(it);
+					it = gShared.end();
+				}
 				if (a_share >= 1.0f) {
 					if (it != gShared.end()) {
 						UnShare(a_light, it->second);
@@ -1671,6 +1679,7 @@ namespace Fade
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();
+		gShared.clear();  // the old game's lights by address: never read again, so a light made later at one of them starts clean
 	}
 
 	// a plugin's light for a hand that hangs away from the hand's 3D: the fading pass and Lights by Item take it as the hand's

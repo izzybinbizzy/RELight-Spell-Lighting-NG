@@ -176,8 +176,19 @@ namespace Glow
 			const float x = u.x1 * a_w + gap + a_gemW * 0.5f, y = (u.y0 + u.y1) * 0.5f * a_h - a_below * 0.5f;
 			out = { GemSpot{ x, y }, GemSpot{ x + step, y } };
 		}
+		// whole on the screen, the pair moved together so one never covers the other: shifted in as a unit
+		// when it fits side by side, else the second stacked above the first
+		const float lo = a_gemW * 0.5f, hi = a_w - a_gemW * 0.5f;
+		const float left = std::min(out[0].x, out[1].x), right = std::max(out[0].x, out[1].x);
+		if (right - left <= hi - lo) {
+			const float shift = left < lo ? lo - left : (right > hi ? hi - right : 0.0f);
+			out[0].x += shift;
+			out[1].x += shift;
+		} else {
+			out[0].x = out[1].x = std::clamp(out[0].x, lo, hi);
+			out[1].y = out[0].y - a_gemH - a_below - gap;
+		}
 		for (auto& s : out) {
-			s.x = std::clamp(s.x, a_gemW * 0.5f, a_w - a_gemW * 0.5f);
 			s.y = std::clamp(s.y, a_gemH * 0.5f, a_h - a_gemH * 0.5f - a_below);
 		}
 		a_out = out;

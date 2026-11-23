@@ -37,11 +37,20 @@ namespace Fade::Tuning
 		constexpr std::string_view kRetired[]{ "hud|reticlegap", "hud|reticlelength", "hud|crosshairbarwidth", "hud|crossfirebarwidth",
 			"hud|crosshairbardrop", "hud|crossfirebardrop", "hud|emptypulsespeed", "hud|fullpulseseconds", "hud|reticleholdseconds" };
 
-		[[nodiscard]] std::string ReadWhole(const std::string& a_path)
+		// a_failed: the file is there but could not be opened or read (locked, no read right) - told apart from a missing file, so
+		// a file that only failed to read is never taken for an empty one and written over
+		[[nodiscard]] std::string ReadWhole(const std::string& a_path, bool& a_failed)
 		{
-			std::ifstream      in(a_path, std::ios::binary);
+			std::error_code ec;
+			const bool      there = std::filesystem::exists(a_path, ec);
+			std::ifstream   in(a_path, std::ios::binary);
+			a_failed = there && !in.is_open();
+			if (!in.is_open()) {
+				return {};
+			}
 			std::ostringstream s;
 			s << in.rdbuf();
+			a_failed = in.bad();
 			return s.str();
 		}
 
@@ -139,8 +148,15 @@ namespace Fade::Tuning
 	{
 		auto&             knobs = Knobs();
 		const auto        from = SettingsText::ReadFrom(Mod::kAdvancedPath, Mod::kOldAdvancedPath);
-		const std::string mainText = ReadWhole(from);
-		const std::string mineText = ReadWhole(Mod::kAdvancedCustomPath);
+		bool              mainFailed = false, mineFailed = false;
+		const std::string mainText = ReadWhole(from, mainFailed);
+		const std::string mineText = ReadWhole(Mod::kAdvancedCustomPath, mineFailed);
+		if (mainFailed) {
+			SKSE::log::warn("advanced settings: {} is there but could not be read; its defaults hold and it is not written again", from);
+		}
+		if (mineFailed) {
+			SKSE::log::warn("advanced settings: {} is there but could not be read; it is not used", Mod::kAdvancedCustomPath);
+		}
 		// a file saved as UTF-16 would read as nothing but noise: it is not read, never rewritten, and its defaults hold
 		const bool mainWide = TuningText::Utf16(mainText), mineWide = TuningText::Utf16(mineText);
 		if (mainWide) {
@@ -177,7 +193,7 @@ namespace Fade::Tuning
 		std::error_code ec;
 		const bool      haveNew = std::filesystem::exists(Mod::kAdvancedPath, ec);
 		const bool      older = TuningText::FileVersion(mainText) < TuningText::kFileVersion;
-		if (mainWide || (haveNew && !older && !lacks)) {
+		if (mainWide || mainFailed || (haveNew && !older && !lacks)) {
 			return;
 		}
 		// a file the player made read-only stays as it is: its defaults hold for what it lacks
