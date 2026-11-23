@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace CreatureSpells
 {
@@ -38,11 +39,24 @@ namespace CreatureSpells
 			for (std::uint32_t i = 0; a_list->spells && i < a_list->numSpells; ++i) {
 				into.insert(a_list->spells[i]);
 			}
+			// a leveled list may hold further leveled lists: every spell at any depth counts, each list read once
+			std::vector<const RE::TESLevSpell*>        open;
+			std::unordered_set<const RE::TESLevSpell*> seen;
 			for (std::uint32_t i = 0; a_list->levSpells && i < a_list->numlevSpells; ++i) {
-				auto* lev = a_list->levSpells[i];
-				for (std::uint8_t k = 0; lev && k < lev->numEntries; ++k) {
-					if (auto* spell = lev->entries[k].form ? lev->entries[k].form->As<RE::SpellItem>() : nullptr) {
+				open.push_back(a_list->levSpells[i]);
+			}
+			while (!open.empty()) {
+				const auto* lev = open.back();
+				open.pop_back();
+				if (!lev || !seen.insert(lev).second) {
+					continue;
+				}
+				for (std::uint8_t k = 0; k < lev->numEntries; ++k) {
+					auto* form = lev->entries[k].form;
+					if (auto* spell = form ? form->As<RE::SpellItem>() : nullptr) {
 						into.insert(spell);
+					} else if (auto* inner = form ? form->As<RE::TESLevSpell>() : nullptr) {
+						open.push_back(inner);
 					}
 				}
 			}
@@ -55,6 +69,17 @@ namespace CreatureSpells
 		for (auto* npc : LightKit::FormsOf<RE::TESNPC>()) {
 			if (npc) {
 				note(npc->actorEffects, isCreature(npc) || isCreature(npc->GetRace()));
+			}
+		}
+		// a spell a perk gives (an ability entry) is a person's: perks are the player's
+		for (const auto* perk : LightKit::FormsOf<RE::BGSPerk>()) {
+			if (!perk) {
+				continue;
+			}
+			for (const auto* entry : perk->perkEntries) {
+				if (entry && entry->GetType() == RE::PERK_ENTRY_TYPE::kAbility) {
+					byPerson.insert(static_cast<const RE::BGSAbilityPerkEntry*>(entry)->ability);
+				}
 			}
 		}
 		for (auto* book : LightKit::FormsOf<RE::TESObjectBOOK>()) {

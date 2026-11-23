@@ -10,6 +10,7 @@
 
 #include "GroundElement.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <span>
@@ -54,10 +55,16 @@ namespace NatureKind
 	// a model path, any case -> its kind
 	[[nodiscard]] inline Kind KindOf(std::string_view a_path)
 	{
-		std::string low(a_path);
-		for (auto& c : low) {
-			c = static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c);
+		// lowered into a buffer on the stack: called on the option walk and the hand dress, so no allocation (a longer path is cut,
+		// its kind words sit in the file name at the end, so the end is kept)
+		std::array<char, 260> buffer{};
+		const auto            keep = (std::min)(a_path.size(), buffer.size());
+		const auto            tail = a_path.substr(a_path.size() - keep);
+		for (std::size_t i = 0; i < keep; ++i) {
+			const char c = tail[i];
+			buffer[i] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 		}
+		const std::string_view low(buffer.data(), keep);
 		if (HoldsAny(low, GroundElement::kFireWords)) {
 			return Kind::kNone;
 		}

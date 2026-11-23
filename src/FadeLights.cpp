@@ -259,10 +259,12 @@ namespace Fade
 		// light found live under a hand (or handed to ApplyLight) is ever read through its key
 		struct ShareSeen
 		{
-			float base{ 0.0f }, written{ -1.0f };
+			float         base{ 0.0f }, written{ -1.0f };
+			std::uint32_t frame{ 0 };  // the last frame it was found under a hand
 		};
 		std::unordered_map<const RE::NiPointLight*, ShareSeen> gShared;
-		constexpr std::size_t                                  kMostShared = 256;  // past this many (lights long gone) the list starts again
+		constexpr std::size_t                                  kMostShared = 256;   // past this many, entries unseen a while are dropped
+		constexpr std::uint32_t                                kSharedStale = 600;  // frames unseen before an entry may be dropped
 
 		// a live light of gShared back as we found it, unless someone wrote it since (under gLock)
 		void UnShare(RE::NiPointLight* a_light, const ShareSeen& a_seen)
@@ -839,12 +841,18 @@ namespace Fade
 					return RE::BSVisit::BSVisitControl::kContinue;
 				}
 				if (it == gShared.end()) {
+					// never a clear: a live light still dimmed would be read back as its own value and dimmed again. Only entries
+					// unseen for a while go (never read through, only forgotten); with none such, this light is left as it is
 					if (gShared.size() >= kMostShared) {
-						gShared.clear();
+						std::erase_if(gShared, [](const auto& a_entry) { return gFrame - a_entry.second.frame > kSharedStale; });
+						if (gShared.size() >= kMostShared) {
+							return RE::BSVisit::BSVisitControl::kContinue;
+						}
 					}
 					it = gShared.emplace(a_light, ShareSeen{}).first;
 				}
-				auto&      seen = it->second;
+				auto& seen = it->second;
+				seen.frame = gFrame;
 				const auto turn = LightKit::Turn();
 				auto&      fade = a_light->GetLightRuntimeData().fade;
 				if (fade != seen.written) {

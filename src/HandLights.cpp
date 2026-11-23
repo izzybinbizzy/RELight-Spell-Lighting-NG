@@ -428,8 +428,12 @@ namespace Plugin
 				const auto& copies = t.automatic ? gAutoCopies : gCopies;
 				const auto  found = copies.find(t.key);
 				auto*       copy = found != copies.end() ? found->second : nullptr;
-				// a hand of a nature kind switched off gives the spell back its own light (his answer 2026-11-22)
-				auto* want = copy && gInUse.contains(copy) && !(AnyNatureOff() && NatureKindOff(t.key)) ? copy : t.own;
+				// a hand of a nature kind switched off gives the spell back its own light; the kind comes off the casting art, since an
+				// automatic hand's key names only its color
+				const auto* art = t.effect->data.castingArt;
+				const char* artPath = art ? art->GetModel() : nullptr;
+				const bool  natureOff = AnyNatureOff() && NatureKindOff(artPath ? std::string_view(artPath) : std::string_view(t.key));
+				auto*       want = copy && gInUse.contains(copy) && !natureOff ? copy : t.own;
 				if (t.effect->data.light != want) {
 					t.effect->data.light = want;
 				}

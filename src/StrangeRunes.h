@@ -13,6 +13,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace StrangeRunes
@@ -94,9 +95,16 @@ namespace StrangeRunes
 	// on a hand keeps the light it had until it ends
 	inline void Apply(bool a_theirs)
 	{
+		static bool told = false;
 		if (auto* theirs = RE::TESForm::LookupByEditorID<RE::TESGlobal>(kTheirSwitch)) {
+			if (!std::exchange(told, true)) {
+				SKSE::log::info("Strange Runes has its own hand-light switch ({}): ours sets it, its records are left alone", kTheirSwitch);
+			}
 			theirs->value = a_theirs ? 1.0f : 0.0f;
 			return;
+		}
+		if (!std::exchange(told, true)) {
+			SKSE::log::info("Strange Runes has no hand-light switch of its own ({} not found): its hand runes wear our dark copies", kTheirSwitch);
 		}
 		for (const auto& rune : Runes()) {
 			rune.effect->data.associatedForm = a_theirs ? rune.light : rune.dark;
