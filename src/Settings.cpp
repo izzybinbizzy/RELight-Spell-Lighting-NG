@@ -364,18 +364,20 @@ namespace Plugin
 		if (queued.exchange(true)) {
 			return;
 		}
-		const auto write = [] {
-			queued = false;
-			LightKit::Guarded("settings save", []() {
-				WriteSettingsFile();
-				SyncBurnEmGlobal();
-				RetuneBurningBanners();  // the burning banners' fire lights under the values just saved (BurningBanners.cpp)
-			});
-		};
 		if (auto* tasks = SKSE::GetTaskInterface()) {
-			tasks->AddTask(write);
+			tasks->AddTask([] {
+				queued = false;
+				LightKit::Guarded("settings save", []() {
+					WriteSettingsFile();
+					SyncBurnEmGlobal();
+					RetuneBurningBanners();  // the burning banners' fire lights under the values just saved (BurningBanners.cpp)
+				});
+			});
 		} else {
-			write();
+			// no way to reach the main thread: only the file is written here; the global and the banners touch game objects
+			queued = false;
+			LightKit::Guarded("settings save", []() { WriteSettingsFile(); });
+			SKSE::log::warn("settings: no SKSE task interface - Burn'em Banners follows the saved value at the next start");
 		}
 	}
 

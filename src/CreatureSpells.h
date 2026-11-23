@@ -3,7 +3,8 @@
 //
 // All creature lighting is Creatures' (Illuminated - Creature Lighting NG): a spell only creatures cast - the Spriggan Matron's
 // swarm, the Ice Wraith's bite - gets no automatic hand light from us. An effect counts as a creature's when every magic item
-// that carries it is a spell held only by creatures (a race or an NPC with the Creature or Animal keyword): no person carries
+// that carries it is a spell held only by creatures (a race or an NPC with the Creature or Animal keyword, in its spell list or
+// cast by one of its attacks): no person carries
 // it, no book teaches it, no shout, scroll, staff, enchantment or potion holds it. A spell nothing carries (a quest's, a
 // script's, a perk's) stays the player's. Read once at data load from the records: no hook and no pass.
 
@@ -61,14 +62,30 @@ namespace CreatureSpells
 				}
 			}
 		};
+		// an attack can cast a spell of its own (ATKD): the Ice Wraith's bite lives in its race's attack data, not in its spell list
+		const auto noteAttacks = [&](const RE::BGSAttackDataForm* a_form, bool a_creature) {
+			const auto* map = a_form ? a_form->attackDataMap.get() : nullptr;
+			if (!map) {
+				return;
+			}
+			auto& into = a_creature ? byCreature : byPerson;
+			for (const auto& entry : map->attackDataMap) {
+				if (const auto& attack = entry.second; attack && attack->data.attackSpell) {
+					into.insert(attack->data.attackSpell);
+				}
+			}
+		};
 		for (const auto* race : LightKit::FormsOf<RE::TESRace>()) {
 			if (race) {
 				note(race->actorEffects, isCreature(race));
+				noteAttacks(race, isCreature(race));
 			}
 		}
 		for (auto* npc : LightKit::FormsOf<RE::TESNPC>()) {
 			if (npc) {
-				note(npc->actorEffects, isCreature(npc) || isCreature(npc->GetRace()));
+				const bool creatureNpc = isCreature(npc) || isCreature(npc->GetRace());
+				note(npc->actorEffects, creatureNpc);
+				noteAttacks(npc, creatureNpc);
 			}
 		}
 		// a spell a perk gives (an ability entry) is a person's: perks are the player's
