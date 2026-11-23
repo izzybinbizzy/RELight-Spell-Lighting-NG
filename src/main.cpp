@@ -98,7 +98,7 @@ namespace
 		Fade::Tuning::Register("Ground Effects", "FireReach", 1.0f, 0.25f, 3.0f,
 			"How far fire left on the ground reaches, on top of GroundReach.", GroundElement::gTune.elementReach[1]);
 		Fade::Tuning::Register("Ground Effects", "FrostStrength", 1.0f, 0.0f, 3.0f,
-			"How bright frost left on the ground is (walls of frost, ice storms), on top of the Ground effects strength; 0 puts it out.", GroundElement::gTune.strength[2]);
+			"How bright frost left on the ground is (walls of frost), on top of the Ground effects strength; 0 puts it out.", GroundElement::gTune.strength[2]);
 		Fade::Tuning::Register("Ground Effects", "FrostReach", 1.0f, 0.25f, 3.0f,
 			"How far frost left on the ground reaches, on top of GroundReach.", GroundElement::gTune.elementReach[2]);
 		Fade::Tuning::Register("Ground Effects", "ShockStrength", 1.0f, 0.0f, 3.0f,
@@ -122,6 +122,8 @@ namespace
 		LightKit::FleshFx::Find();  // which flesh spells wear FleshFX's look: their lights take its hue (Brightness.cpp)
 		Plugin::InstallLateHooks();
 		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
+		Plugin::MakeBurnEmGlobal();
+		Plugin::WatchBurningBanners();  // Burn'em Banners: a burning banner wears our fire light (BurningBanners.cpp)
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
@@ -149,6 +151,7 @@ namespace
 	{
 		Plugin::TakeEnbShaderLights();  // once: every mod's data load has run by now, ENB Lights For Effect Shaders' among them
 		Plugin::DropGroundLights();
+		Plugin::DropBurningBanners();
 		Plugin::DropBodyLights();
 		Plugin::DropHeldLights();
 		Plugin::DropRows();

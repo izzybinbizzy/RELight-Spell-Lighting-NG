@@ -20,7 +20,7 @@
 
 namespace EnbShaderLightsText
 {
-	// its ini, [Settings] Valid Actors: 0 the player, 1 and followers, 2 everyone (its default, so a missing file or key is everyone)
+	// its ini, [Settings] Valid Actors: 0 the player (its default: a missing file or key is the player only), 1 and followers, 2 everyone
 	[[nodiscard]] inline int ValidActors(std::istream& a_ini)
 	{
 		std::optional<int> value;
@@ -42,7 +42,7 @@ namespace EnbShaderLightsText
 				}
 			}
 		}
-		return value.value_or(2);
+		return value.value_or(0);
 	}
 
 	// its own test for a shader it lights: the particle shader on, with persistent particles

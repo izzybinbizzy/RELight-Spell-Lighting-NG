@@ -53,7 +53,8 @@ namespace Fade
 	[[nodiscard]] Preview& PreviewState();
 
 	// ------------------------------------------------------------------ FadeEditorIDs.cpp: names from powerofthree's Tweaks (REQUIRED)
-	// Tweaks keeps every form's editor ID (its Load EditorIDs, on by default) and exports GetFormEditorID; no recorder of ours (rule
+	// Tweaks keeps every form's editor ID (its Load EditorIDs, on by default) and exports GetFormEditorID; a working Native EditorID Fix
+	// is taken in its place (Po3Tweaks::Judge), so it is never a missing dependency; no recorder of ours (rule
 	// file 2 rule 19c, requirements over rebuilds). RememberEditorID names only our own in-memory copies
 	void                      RememberEditorID(const RE::TESForm* a_form, const char* a_id) noexcept;
 	void                      ForgetPassEditorIDs();                // after data load: our copies' names the passes needed are let go

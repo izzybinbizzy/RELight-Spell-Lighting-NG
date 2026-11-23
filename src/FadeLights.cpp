@@ -197,9 +197,10 @@ namespace Fade
 		std::mutex gHudLock;
 		HudState   gHud;
 		// where the HUD draws its charge meters and bars, for the gems: a UI task writes it (AskHudBoxes), PublishHud copies it
-		std::mutex        gBoxLock;
-		Glow::HudBoxes    gHudBoxes{};
-		std::atomic<bool> gBoxesAsked{ false };  // a read is queued and has not run yet
+		std::mutex                 gBoxLock;
+		Glow::HudBoxes             gHudBoxes{};
+		std::atomic<bool>          gBoxesAsked{ false };  // a read is queued and has not run yet
+		std::atomic<std::uint32_t> gHudSession{ 0 };      // a game load starts a new one: a read queued for the old HUD is dropped
 
 		[[nodiscard]] std::uint64_t Key(RE::ActorHandle a_actor, bool a_left)
 		{
@@ -263,8 +264,9 @@ namespace Fade
 			std::uint32_t frame{ 0 };  // the last frame it was found under a hand
 		};
 		std::unordered_map<const RE::NiPointLight*, ShareSeen> gShared;
-		constexpr std::size_t                                  kMostShared = 256;   // past this many, entries unseen a while are dropped
-		constexpr std::uint32_t                                kSharedStale = 600;  // frames unseen before an entry may be dropped
+		constexpr std::size_t                                  kMostShared = 256;    // past this many, entries unseen a while are dropped
+		constexpr std::uint32_t                                kSharedStale = 600;   // frames unseen before an entry may be dropped
+		std::atomic<bool>                                      gAnyShared{ false };  // gShared holds a light: the caster hook reads it without gLock
 
 		// a live light of gShared back as we found it, unless someone wrote it since (under gLock)
 		void UnShare(RE::NiPointLight* a_light, const ShareSeen& a_seen)
@@ -288,6 +290,7 @@ namespace Fade
 					UnShare(a_light, shared->second);
 				}
 				gShared.erase(shared);
+				gAnyShared.store(!gShared.empty(), std::memory_order_relaxed);
 			}
 			auto [it, added] = gLights.try_emplace(a_light);
 			auto& seen = it->second;
@@ -872,6 +875,7 @@ namespace Fade
 				Plugin::NoteFadeWrite(a_light, before, fade);
 				return RE::BSVisit::BSVisitControl::kContinue;
 			});
+			gAnyShared.store(!gShared.empty(), std::memory_order_relaxed);
 		}
 
 		// one spell hand, one frame (from UpdateHands, under the lock)
@@ -1088,12 +1092,13 @@ namespace Fade
 				gBoxesAsked.store(false, std::memory_order_relaxed);
 				return;
 			}
-			tasks->AddUITask([] {
-				const auto boxes = ReadHudBoxes();
-				{
-					const std::scoped_lock lock{ gBoxLock };
-					gHudBoxes = boxes;
+			tasks->AddUITask([session = gHudSession.load(std::memory_order_relaxed)] {
+				const auto             boxes = ReadHudBoxes();
+				const std::scoped_lock lock{ gBoxLock };
+				if (session != gHudSession.load(std::memory_order_relaxed)) {
+					return;  // the old game's HUD: its boxes and its pending flag are not the new one's
 				}
+				gHudBoxes = boxes;
 				gBoxesAsked.store(false, std::memory_order_relaxed);
 			});
 		}
@@ -1519,12 +1524,14 @@ namespace Fade
 		// another mod's dim on this casting light (Baked Goods): asleep, a dimmer starting wakes the hands (a light with no controller is
 		// one read); a hand the pass does not follow takes the share here. Light Placer has just animated this hand's lights
 		auto* const cast = a_caster->light ? netimmerse_cast<RE::NiPointLight*>(a_caster->light->light.get()) : nullptr;
-		if (cast && cast->controllers && gHandsAsleep.load(std::memory_order_relaxed) && Followed(a_caster->GetCasterAsActor()) &&
-			LightKit::ForeignDimShare(cast) < 1.0f) {
+		// a light with no controller dimmed to 0 (a spell drawn while sneaking) wakes them too; a full, unchanged hand stays asleep
+		if (cast && gHandsAsleep.load(std::memory_order_relaxed) && Followed(a_caster->GetCasterAsActor()) &&
+			(cast->controllers ? LightKit::ForeignDimShare(cast) < 1.0f : !(cast->GetLightRuntimeData().fade > 0.0f))) {
 			WakeHands();
 		}
 		// a dimmer stays on its light after it ran (Baked Goods reuses it), so the share is read again as it comes back up
-		if (cast && (cast->controllers || !(cast->GetLightRuntimeData().fade > 0.0f))) {
+		// lit again with no controller, a hand whose siblings we dimmed still runs it once: ShareUnder at full gives their fade back
+		if (cast && (cast->controllers || !(cast->GetLightRuntimeData().fade > 0.0f) || gAnyShared.load(std::memory_order_relaxed))) {
 			auto* const     actor = a_caster->GetCasterAsActor();
 			const bool      left = a_caster->castingSource == Source::kLeftHand;
 			std::lock_guard lock(gLock);
@@ -1675,11 +1682,18 @@ namespace Fade
 		RestoreAll();
 		Items::Release();
 		WakeHands();
-		gBoxesAsked.store(false, std::memory_order_relaxed);  // a HUD read queued as the old game ended may never run
+		{
+			// the old HUD's boxes go with it (the gems take the fixed place until the new HUD is read); a read queued for it is dropped
+			const std::scoped_lock boxLock{ gBoxLock };
+			gHudBoxes = {};
+			gHudSession.fetch_add(1, std::memory_order_relaxed);
+			gBoxesAsked.store(false, std::memory_order_relaxed);  // a HUD read queued as the old game ended may never run
+		}
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();
 		gShared.clear();  // the old game's lights by address: never read again, so a light made later at one of them starts clean
+		gAnyShared.store(false, std::memory_order_relaxed);
 	}
 
 	// a plugin's light for a hand that hangs away from the hand's 3D: the fading pass and Lights by Item take it as the hand's

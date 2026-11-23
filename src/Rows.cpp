@@ -68,6 +68,7 @@ namespace Plugin
 			RE::NiPoint3                     launch;
 			RE::NiPoint3                     spot;
 			float                            sinceEnd{ -1.0f };  // seconds since the cone ended; below 0 while it flies
+			int                              nature{ -1 };       // its nature kind (NatureKind.h index), -1 for none
 		};
 		std::vector<Cloud>    gClouds;
 		constexpr std::size_t kMostClouds = 8;
@@ -303,7 +304,8 @@ namespace Plugin
 			const auto* proj = a_ref->As<RE::Projectile>();
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			gClouds.push_back({ RE::NiPointer<RE::NiAVObject>(root), RE::NiPointer<RE::TESObjectREFR>(a_ref), RE::NiPointer<RE::NiNode>(holder),
-				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f });
+				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f,
+				NatureIndexOf(a_ref->GetBaseObject()) });
 			return true;
 		}
 
@@ -337,7 +339,9 @@ namespace Plugin
 				color = *own;  // the spell's Lights by Item color
 			}
 			color = VanillaLook(color);  // after the override, as the caster light (Brightness.cpp)
-			Dress(light, color, steady * left, reach, isl);
+			// its nature kind switched off: dark, still tracked, so it lights again if the kind comes back on before it fades
+			const bool natureOff = a_c.nature >= 0 && AnyNatureOff() && !NatureLightsOn(a_c.nature);
+			Dress(light, color, natureOff ? 0.0f : steady * left, reach, isl);
 			light->local.translate = a_c.holder->world.Invert() * a_c.spot;
 			RE::NiUpdateData update{};
 			light->Update(update);

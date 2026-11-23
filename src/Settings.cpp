@@ -63,8 +63,10 @@ namespace Plugin
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<bool>               gEnchantedWeapons{ true };
-		std::atomic<bool>               gStrangeRunes{ false };  // 1 = Strange Runes' runes light the casting hands
-		std::atomic<bool>               gHandShadows{ true };    // 1 = both hands lit: each hand casts its own shadow
+		std::atomic<bool>               gStrangeRunes{ false };   // 1 = Strange Runes' runes light the casting hands
+		std::atomic<bool>               gHandShadows{ true };     // 1 = both hands lit: each hand casts its own shadow
+		std::atomic<bool>               gBurnEm{ false };         // 1 = Burn'em Banners lights its own banners, ours stands down
+		RE::TESGlobal*                  gBurnEmGlobal = nullptr;  // RELightBurnEmBannersLight: Burn'em's Light Placer rows wait on it == 1
 		// frost, earth and stone, water, wind, plants (NatureKind::kSettingKeys): false leaves that kind of spell unlit
 		std::array<std::atomic<bool>, 5>  gNature{ true, true, true, true, true };
 		std::atomic<bool>                 gEnbShaderLights{ false };  // 1 = ENB Lights For Effect Shaders lights FEC's bodies
@@ -129,6 +131,8 @@ namespace Plugin
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
 			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
 			{ "HandShadows", [] { return gHandShadows ? 1 : 0; }, [](int v) { gHandShadows = v != 0; } },
+			{ "VAERSwirls", [] { return VaerEffectsPercent(); }, [](int v) { SetVaerEffectsPercent(v); } },
+			{ "BurnEmBannersLight", [] { return gBurnEm ? 1 : 0; }, [](int v) { gBurnEm = v != 0; } },
 			{ "FrostLights", [] { return gNature[0] ? 1 : 0; }, [](int v) { gNature[0] = v != 0; } },
 			{ "EarthLights", [] { return gNature[1] ? 1 : 0; }, [](int v) { gNature[1] = v != 0; } },
 			{ "WaterLights", [] { return gNature[2] ? 1 : 0; }, [](int v) { gNature[2] = v != 0; } },
@@ -362,7 +366,11 @@ namespace Plugin
 		}
 		const auto write = [] {
 			queued = false;
-			LightKit::Guarded("settings save", []() { WriteSettingsFile(); });
+			LightKit::Guarded("settings save", []() {
+				WriteSettingsFile();
+				SyncBurnEmGlobal();
+				RetuneBurningBanners();  // the burning banners' fire lights under the values just saved (BurningBanners.cpp)
+			});
 		};
 		if (auto* tasks = SKSE::GetTaskInterface()) {
 			tasks->AddTask(write);
@@ -517,12 +525,68 @@ namespace Plugin
 
 	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
 
+	// it starts at the Advanced Settings file's VAERebornEffects (read before the settings file) until the settings are first saved;
+	// from then on the saved slider wins
+	int VaerEffectsPercent() { return static_cast<int>(std::lround(gVaeEffects.load(std::memory_order_relaxed) * 100.0f)); }
+
+	void SetVaerEffectsPercent(int a_percent)
+	{
+		a_percent = std::clamp(a_percent, 0, 400);
+		if (VaerEffectsPercent() != a_percent) {
+			gVaeEffects.store(static_cast<float>(a_percent) / 100.0f, std::memory_order_relaxed);
+			SKSE::log::info("VAER Reborn's enchantment effects set to {}%", a_percent);
+		}
+	}
+
 	bool ShadowFromEachHand() { return gHandShadows; }
 
 	void SetShadowFromEachHand(bool a_on)
 	{
 		if (gHandShadows.exchange(a_on) != a_on) {
 			SKSE::log::info("a shadow from each hand: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool BurnEmBannersLoaded()
+	{
+		auto* dh = RE::TESDataHandler::GetSingleton();
+		return dh && (dh->LookupLoadedModByName("BurnEmBanners.esp") || dh->LookupLoadedLightModByName("BurnEmBanners.esp"));
+	}
+
+	bool BurnEmBannersLightsItself() { return gBurnEm; }
+
+	void SetBurnEmBannersLightsItself(bool a_on)
+	{
+		if (gBurnEm.exchange(a_on) != a_on) {
+			SKSE::log::info("Burn'em Banners lights its banners: {}", a_on ? "on" : "off");
+		}
+	}
+
+	// Illuminated's way (its Settings.cpp MakeGlobal): a global made by the game's own factory, its editor ID put into the game's
+	// table so Light Placer's condition finds it by name, read back by that name
+	void MakeBurnEmGlobal()
+	{
+		constexpr const char* kId = "RELightBurnEmBannersLight";
+		auto*                 g = LightKit::NewForm<RE::TESGlobal>();
+		if (!g) {
+			SKSE::log::warn("{}: the game made no global", kId);
+			return;
+		}
+		g->SetFormEditorID(kId);
+		const auto& [map, lock] = RE::TESForm::GetAllFormsByEditorID();
+		if (map) {
+			RE::BSWriteLockGuard guard{ lock };
+			map->insert({ RE::BSFixedString(kId), g });
+		}
+		gBurnEmGlobal = RE::TESForm::LookupByEditorID<RE::TESGlobal>(kId) == g ? g : nullptr;
+		SyncBurnEmGlobal();
+		SKSE::log::info("{}: {}", kId, gBurnEmGlobal ? "made" : "not found by its name");
+	}
+
+	void SyncBurnEmGlobal()
+	{
+		if (gBurnEmGlobal) {
+			gBurnEmGlobal->value = gBurnEm ? 1.0f : 0.0f;
 		}
 	}
 

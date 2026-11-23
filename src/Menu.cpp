@@ -298,6 +298,16 @@ namespace Plugin
 					DrawWardPick(true);
 					wardShown = true;
 				}
+				if (a_page == Page::kConfigs && o.name == "VAER Reborn") {
+					ImGuiMCP::SameLine(0.0f, 24.0f);
+					ImGuiMCP::SetNextItemWidth(180.0f);
+					int vae = VaerEffectsPercent();
+					if (ImGuiMCP::SliderInt(T("Enchantment effects"), &vae, 0, 400, "%d%%")) {
+						SetVaerEffectsPercent(vae / 25 * 25);
+						SaveSettings();
+					}
+					MenuStyle::Tip(T("How bright VAER Reborn's enchantment effects are; 100 is VAER's own. A drawn weapon changes when drawn again."));
+				}
 				if (const auto kind = a_page == Page::kConfigs ? StrengthBeside(o.name) : Strength::kNone; kind != Strength::kNone) {
 					DrawStrength(kind, true);
 					strengthShown[static_cast<std::size_t>(kind) - 1] = true;
@@ -748,7 +758,7 @@ namespace Plugin
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text; with Strange
 			// Runes loaded its switch hands the casting hands back to its runes
 			const auto* cs = CSLightLoaded();
-			if (cs || StrangeRunesLoaded() || EnbShaderLightsLoaded()) {
+			if (cs || StrangeRunesLoaded() || EnbShaderLightsLoaded() || BurnEmBannersLoaded()) {
 				GlowHeading("Other Light Mods", Icon::kBulb);
 			}
 			if (cs) {
@@ -774,6 +784,14 @@ namespace Plugin
 				MenuStyle::Tip(
 					T("On: ENB Lights For Effect Shaders lights Frozen Electrocuted Combustion's burning, frozen, shocked and soul-trapped bodies "
 					  "in place of RELight's lights."));
+			}
+			if (BurnEmBannersLoaded()) {
+				bool theirs = BurnEmBannersLightsItself();
+				if (ImGuiMCP::Checkbox(T("Burn'em Banners lights its banners"), &theirs)) {
+					SetBurnEmBannersLightsItself(theirs);
+					SaveSettings();
+				}
+				MenuStyle::Tip(T("On: Burn'em Banners lights its burning banners in place of RELight's fire light."));
 			}
 		}
 

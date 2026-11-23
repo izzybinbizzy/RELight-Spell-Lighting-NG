@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <sstream>
@@ -54,16 +55,16 @@ namespace AdvancedLayout
 
 	inline constexpr std::size_t kWidth = 78;  // a line of the boxes, its "; " included
 
-	// a number as the file shows it: 6 significant digits, no trailing zeros (2800, 0.35, 1.1); a count with no point
+	// a number as the file shows it: the shortest text that reads back as the same float (2800, 0.35, 1.1), so a value written back
+	// never changes on the next start; a count with no point
 	[[nodiscard]] inline std::string Number(float a_v, bool a_whole)
 	{
-		std::ostringstream s;
 		if (a_whole) {
-			s << std::lround(a_v);
-		} else {
-			s << a_v;
+			return std::to_string(std::lround(a_v));
 		}
-		return s.str();
+		std::array<char, 32> buf{};
+		const auto [end, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), a_v);
+		return ec == std::errc{} ? std::string(buf.data(), end) : std::string("0");
 	}
 
 	[[nodiscard]] inline std::string Upper(std::string_view a_s)

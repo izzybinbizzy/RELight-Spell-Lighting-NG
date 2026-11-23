@@ -20,8 +20,11 @@
 
 #include "Fade.h"
 #include "CreatureSpells.h"
+#include "NatureKind.h"
 #include "Plugin.h"
 #include "StrangeRunes.h"
+
+#include <unordered_set>
 
 namespace Plugin
 {
@@ -47,6 +50,7 @@ namespace Plugin
 			RE::NiLight* light{ nullptr };  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
 			std::string  key;
 			bool         heldOut{ false };  // put out because nothing lights its key any more
+			int          nature{ -1 };      // the nature kind of the spell it was made for (NatureKind.h index), -1 for none
 		};
 
 		std::mutex                                                       gLock;
@@ -427,6 +431,8 @@ namespace Plugin
 				}
 			}
 			std::size_t autoLit = 0;
+			// the keys of spells of a nature kind switched off, and of the rest: a hand's light whose key only the first hold goes out now
+			std::unordered_set<std::string> natureOffKeys, natureOnKeys;
 			for (auto& t : gTargets) {
 				const auto& copies = t.automatic ? gAutoCopies : gCopies;
 				const auto  found = copies.find(t.key);
@@ -436,7 +442,9 @@ namespace Plugin
 				const auto* art = t.effect->data.castingArt;
 				const char* artPath = art ? art->GetModel() : nullptr;
 				const bool  natureOff = AnyNatureOff() && NatureKindOff(artPath ? std::string_view(artPath) : std::string_view(t.key));
-				auto*       want = copy && gInUse.contains(copy) && !natureOff ? copy : t.own;
+				// a nature kind switched off is unlit: not its own light either
+				auto* want = copy && gInUse.contains(copy) && !natureOff ? copy : (natureOff && !AllLightsOff() ? nullptr : t.own);
+				(natureOff ? natureOffKeys : natureOnKeys).insert(t.key);
 				if (t.effect->data.light != want) {
 					t.effect->data.light = want;
 				}
@@ -455,6 +463,13 @@ namespace Plugin
 				const auto  autoIt = AutoKey(live.key) ? gAutoHands.find(live.key) : gAutoHands.end();
 				const Hand* h = autoIt != gAutoHands.end() ? (autoOn ? &autoIt->second : nullptr) : on ? Picked(Winner(live.key)) :
 				                                                                                         nullptr;
+				if (h && natureOffKeys.contains(live.key) && !natureOnKeys.contains(live.key)) {
+					h = nullptr;  // a nature kind switched off: its light in the hand goes out now, not at the next cast
+				}
+				// its own spell's kind switched off, even when another kind's spell shares its key (an automatic light's color key)
+				if (h && live.nature >= 0 && AnyNatureOff() && !NatureLightsOn(live.nature)) {
+					h = nullptr;
+				}
 				if (h) {
 					if (live.heldOut) {
 						if (!KeptOutByBudget(live.light)) {
@@ -548,15 +563,33 @@ namespace Plugin
 		return { data.fade, data.radius.x };
 	}
 
+	// the nature kind of the spell in an actor's hand: its first effect whose casting art names one (main thread)
+	int NatureOfHand(const RE::Actor* a_actor, bool a_left)
+	{
+		auto* actor = const_cast<RE::Actor*>(a_actor);
+		auto* spell = actor ? actor->GetActorRuntimeData().selectedSpells[a_left ? RE::Actor::SlotTypes::kLeftHand : RE::Actor::SlotTypes::kRightHand] : nullptr;
+		if (!spell) {
+			return -1;
+		}
+		for (const auto* effect : spell->effects) {
+			const auto* art = effect && effect->baseEffect ? effect->baseEffect->data.castingArt : nullptr;
+			const char* path = art ? art->GetModel() : nullptr;
+			if (const int kind = path ? NatureKind::IndexOf(NatureKind::KindOf(path)) : -1; kind >= 0) {
+				return kind;
+			}
+		}
+		return -1;
+	}
+
 	// main thread (main.cpp NoteMagicLight)
-	void NoteHandLight(RE::NiLight* a_light, const std::string& a_key)
+	void NoteHandLight(RE::NiLight* a_light, const std::string& a_key, int a_nature)
 	{
 		if (!a_light) {
 			return;
 		}
 		KeepLight(a_light);
 		std::lock_guard l{ gLock };
-		gLive.push_back({ a_light, a_key });
+		gLive.push_back({ a_light, a_key, false, a_nature });
 	}
 
 	void ForgetHandLights(const GoneLights& a_gone)

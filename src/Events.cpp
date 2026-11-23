@@ -20,6 +20,7 @@ namespace Plugin
 			RenewHeldLights();
 			RenewBodyLights();
 			RenewGroundLights();
+			DropBurningBanners();  // a banner lights again at its next stage
 		}
 
 		class LoadingWatch final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>

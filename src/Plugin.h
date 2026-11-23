@@ -210,13 +210,14 @@ namespace Plugin
 		float radius{ -1.0f };
 		float cutoff{ -1.0f };  // -1: not an inverse-square light
 	};
-	void                      MakeHandLights();                                               // once, after the data and the settings are read
-	void                      RefindHandLights();                                             // when a save loads: casting art may have changed
-	void                      ApplyHandLights(bool a_log);                                    // after any switch that decides who lights a hand
-	[[nodiscard]] const Hand* HandOfLight(const RE::TESObjectLIGH* a_light);                  // nullptr unless it is one of ours, in use
-	Dressed                   DressHandLight(RE::NiLight* a_light, const Hand& a_hand);       // -> what it wrote (fade -1: no light)
-	void                      NoteHandLight(RE::NiLight* a_light, const std::string& a_key);  // a lit hand light, so a menu change reaches it (main thread)
-	[[nodiscard]] bool        HandLightHeldOut(const RE::NiLight* a_light);                   // put out by a switch until the next cast
+	void                      MakeHandLights();                                                             // once, after the data and the settings are read
+	void                      RefindHandLights();                                                           // when a save loads: casting art may have changed
+	void                      ApplyHandLights(bool a_log);                                                  // after any switch that decides who lights a hand
+	[[nodiscard]] const Hand* HandOfLight(const RE::TESObjectLIGH* a_light);                                // nullptr unless it is one of ours, in use
+	Dressed                   DressHandLight(RE::NiLight* a_light, const Hand& a_hand);                     // -> what it wrote (fade -1: no light)
+	void                      NoteHandLight(RE::NiLight* a_light, const std::string& a_key, int a_nature);  // a lit hand light, so a menu change reaches it (main thread)
+	[[nodiscard]] int         NatureOfHand(const RE::Actor* a_actor, bool a_left);                          // the kind of the spell in that hand (NatureKind.h index), -1 for none
+	[[nodiscard]] bool        HandLightHeldOut(const RE::NiLight* a_light);                                 // put out by a switch until the next cast
 	[[nodiscard]] std::size_t HandLightsMade();
 	[[nodiscard]] std::size_t HandEffects();
 	[[nodiscard]] std::size_t AutoHandEffects();  // spells lit by an automatic hand light now
@@ -243,6 +244,17 @@ namespace Plugin
 	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
 	[[nodiscard]] bool        ShadowFromEachHand();  // both hands lit: each casts its own shadow (Illuminated's same setting)
 	void                      SetShadowFromEachHand(bool a_on);
+	[[nodiscard]] int         VaerEffectsPercent();  // VAE Reborn's swirls, percent of its own (gVaeEffects x100)
+	void                      SetVaerEffectsPercent(int a_percent);
+	[[nodiscard]] bool        BurnEmBannersLoaded();        // BurnEmBanners.esp is loaded
+	[[nodiscard]] bool        BurnEmBannersLightsItself();  // its switch on: Burn'em Banners' own banner light, not ours
+	void                      SetBurnEmBannersLightsItself(bool a_on);
+	void                      MakeBurnEmGlobal();      // data load: RELightBurnEmBannersLight, made in memory (Burn'em's Light Placer file waits on it)
+	void                      SyncBurnEmGlobal();      // main thread: the global at the switch's value
+	void                      WatchBurningBanners();   // data load: a burning banner's fire light (BurningBanners.cpp)
+	void                      TickBurningBanners();    // the player update: the banners the game said started or stopped burning (main thread)
+	void                      RetuneBurningBanners();  // a setting changed: the burning banners' lights under the new values (main thread)
+	void                      DropBurningBanners();    // a load or a loading screen: every banner light let go (main thread)
 	// the five nature switches (Settings.cpp, NatureKind.h): index 0 frost ... 4 plants; -1 = no kind, always on
 	[[nodiscard]] bool NatureLightsOn(int a_index);
 	void               SetNatureLightsOn(int a_index, bool a_on);

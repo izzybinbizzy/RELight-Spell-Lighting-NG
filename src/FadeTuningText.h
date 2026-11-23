@@ -101,6 +101,9 @@ namespace Fade::TuningText
 		float v = 0.0f;
 		if (a_s.starts_with('+')) {
 			a_s.remove_prefix(1);
+			if (a_s.starts_with('+') || a_s.starts_with('-')) {
+				return false;  // "+-1" is not a number: the main file's value stays
+			}
 		}
 		const auto [end, ec] = std::from_chars(a_s.data(), a_s.data() + a_s.size(), v);
 		if (a_s.empty() || ec != std::errc{} || end != a_s.data() + a_s.size() || !std::isfinite(v)) {
