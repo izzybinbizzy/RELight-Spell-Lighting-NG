@@ -394,6 +394,7 @@ namespace Plugin
 	[[nodiscard]] std::size_t LiveHeldLights();
 	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
 	void                      WatchWeaponLights();              // her cell changed, she drew or equipped: her weapon lights checked a while (any thread)
+	void                      NoteHerEquip(RE::FormID a_base);  // she equipped or unequipped something (any thread; judged on the main thread)
 	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
 	void                      RenewAfterFailedLoad();           // a save that did not load: the lights kPreLoadGame let go made again
 	enum class SweepWhy : std::uint8_t

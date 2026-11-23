@@ -385,6 +385,23 @@ namespace Plugin
 		// a new equip makes a new light. For four seconds after her cell changes, she draws or equips (Events.cpp), twice a second, her
 		// drawn weapons' RE::Light lights missing from both lists are added back; nothing is walked the rest of the time.
 		std::atomic<int> gWeaponChecks{ 0 };
+		// her last equip's base id from the event sink (any thread), and whether more than one came before the main thread looked
+		std::atomic<RE::FormID> gHerEquip{ 0 };
+		std::atomic<bool>       gHerEquips{ false };
+
+		// only a weapon or a shield changes what hangs an enchantment light on her WEAPON / SHIELD node. Main thread
+		[[nodiscard]] bool WeaponOrShield(RE::FormID a_base)
+		{
+			const auto* form = RE::TESForm::LookupByID(a_base);
+			if (!form) {
+				return false;
+			}
+			if (form->IsWeapon()) {
+				return true;
+			}
+			const auto* armor = form->As<RE::TESObjectARMO>();
+			return armor && armor->IsShield();
+		}
 		// the option-lights walk is wanted (NoteOptionsLook - any thread)
 		std::atomic<bool> gOptionsLook{ true };
 		constexpr int     kWeaponChecks = 8;
@@ -525,9 +542,24 @@ namespace Plugin
 
 	void NoteOptionsLook() { gOptionsLook.store(true, std::memory_order_relaxed); }
 
+	void NoteHerEquip(RE::FormID a_base)
+	{
+		if (gHerEquip.exchange(a_base, std::memory_order_relaxed) != 0) {
+			gHerEquips.store(true, std::memory_order_relaxed);
+		}
+	}
+
 	void UpdateOptionLights()
 	{
 		++gFrame;
+		// her equip, judged here on the main thread: a weapon or shield (or several equips at once, any of which may be one) arms the look
+		if (gHerEquip.load(std::memory_order_relaxed) != 0) {
+			const auto base = gHerEquip.exchange(0, std::memory_order_relaxed);
+			if (gHerEquips.exchange(false, std::memory_order_relaxed) || WeaponOrShield(base)) {
+				WatchWeaponLights();
+				gOptionsLook.store(true, std::memory_order_relaxed);
+			}
+		}
 		auto& opts = Options();
 		// a switch off holds its lights out as they come, so then the walk runs every frame: RE::Light hangs them in its own load hooks and
 		// names none of them (its source, CommonLib's and SKSE's events searched). Otherwise only when something it depends on happened
