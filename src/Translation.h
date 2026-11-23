@@ -15,7 +15,11 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace Translation
 {
@@ -33,7 +37,10 @@ namespace Translation
 		{
 			std::mutex                                                          lock;
 			std::string                                                         name;
-			std::unordered_map<std::string, std::string, Hash, std::equal_to<>> lines;  // English -> what the menu shows
+			std::unordered_map<std::string, std::string, Hash, std::equal_to<>> lines;   // English -> what the menu shows
+			std::thread::id                                                     main{};  // Load's thread: the game's main thread
+			std::unordered_set<std::string>                                     asked;   // lines asked for off it (copied: a caller's text may not outlive the call)
+			bool                                                                queued{ false };
 		};
 
 		[[nodiscard]] inline State& Get()
@@ -51,13 +58,21 @@ namespace Translation
 			std::lock_guard l{ state.lock };
 			state.name = a_name;
 			state.lines.clear();
+			state.main = std::this_thread::get_id();
 		}
 		SKSE::Translation::ParseTranslation(std::string(a_name));
 		return "translation: the menu's lines come from Interface\\Translations\\" + std::string(a_name) +
 		       "_<the game's language>.txt; a missing file or line stays English";
 	}
 
-	// the line in the reader's language, or the English itself. Each line is asked of the game's translator once
+	namespace Detail
+	{
+		// under state.lock, on the main thread only: the game's translator read for one line, kept
+		inline const char* Resolve(State& a_state, const char* a_english);
+	}
+
+	// the line in the reader's language, or the English itself. Each line is asked of the game's translator once, on the main
+	// thread: asked first from another thread (the menu draws on the render thread) it shows its English until one task has read it
 	inline const char* T(const char* a_english)
 	{
 		auto&           state = Detail::Get();
@@ -65,6 +80,32 @@ namespace Translation
 		if (state.name.empty()) {
 			return a_english;
 		}
+		if (const auto it = state.lines.find(std::string_view(a_english)); it != state.lines.end()) {
+			return it->second.c_str();
+		}
+		if (std::this_thread::get_id() == state.main) {
+			return Detail::Resolve(state, a_english);
+		}
+		state.asked.insert(a_english);
+		if (!state.queued) {
+			if (auto* tasks = SKSE::GetTaskInterface()) {
+				state.queued = true;
+				tasks->AddTask([]() {
+					auto&           s = Detail::Get();
+					std::lock_guard g{ s.lock };
+					for (const auto& english : std::exchange(s.asked, {})) {
+						static_cast<void>(Detail::Resolve(s, english.c_str()));
+					}
+					s.queued = false;
+				});
+			}
+		}
+		return a_english;
+	}
+
+	inline const char* Detail::Resolve(State& a_state, const char* a_english)
+	{
+		auto& state = a_state;
 		if (const auto it = state.lines.find(std::string_view(a_english)); it != state.lines.end()) {
 			return it->second.c_str();
 		}

@@ -241,18 +241,24 @@ namespace Plugin
 	void                      SetStrangeRunesLightOn(bool a_on);
 	[[nodiscard]] bool        StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
 	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
-	[[nodiscard]] bool        EnbShaderLightsOn();   // the ENB Lights For Effect Shaders switch (Settings.cpp)
-	void                      SetEnbShaderLightsOn(bool a_on);
-	[[nodiscard]] bool        EnbShaderLightsLoaded();                   // its DLL is loaded
-	[[nodiscard]] bool        EnbShadersGivenBack();                     // its switch on and it loaded: its lights glow on FEC's bodies, ours stand down
-	[[nodiscard]] bool        EnbShaderActor(const RE::Actor* a_actor);  // an actor its own ini lets it light
-	void                      ApplyEnbShaderLights();                    // its light on our shaders: back with its switch on, else off (main thread)
-	void                      TakeEnbShaderLights();                     // once, before a game loads: the body shaders we light that it lit
-	void                      FindStrangeRunes();                        // data load, before the hand lights (HandLights.cpp)
-	[[nodiscard]] bool        WeaponLightsOn();
-	void                      SetWeaponLightsOn(bool a_on);
-	[[nodiscard]] bool        EnchantedWeaponsOn();
-	void                      SetEnchantedWeaponsOn(bool a_on);
+	// the five nature switches (Settings.cpp, NatureKind.h): index 0 frost ... 4 plants; -1 = no kind, always on
+	[[nodiscard]] bool NatureLightsOn(int a_index);
+	void               SetNatureLightsOn(int a_index, bool a_on);
+	[[nodiscard]] bool AnyNatureOff();
+	[[nodiscard]] int  NatureIndexOf(const RE::TESForm* a_form);  // the kind of a form's model, -1 for none
+	[[nodiscard]] bool NatureKindOff(std::string_view a_path);    // a model of a kind whose switch is off
+	[[nodiscard]] bool EnbShaderLightsOn();                       // the ENB Lights For Effect Shaders switch (Settings.cpp)
+	void               SetEnbShaderLightsOn(bool a_on);
+	[[nodiscard]] bool EnbShaderLightsLoaded();                   // its DLL is loaded
+	[[nodiscard]] bool EnbShadersGivenBack();                     // its switch on and it loaded: its lights glow on FEC's bodies, ours stand down
+	[[nodiscard]] bool EnbShaderActor(const RE::Actor* a_actor);  // an actor its own ini lets it light
+	void               ApplyEnbShaderLights();                    // its light on our shaders: back with its switch on, else off (main thread)
+	void               TakeEnbShaderLights();                     // once, before a game loads: the body shaders we light that it lit
+	void               FindStrangeRunes();                        // data load, before the hand lights (HandLights.cpp)
+	[[nodiscard]] bool WeaponLightsOn();
+	void               SetWeaponLightsOn(bool a_on);
+	[[nodiscard]] bool EnchantedWeaponsOn();
+	void               SetEnchantedWeaponsOn(bool a_on);
 	// a strength per kind of light beside the two main sliders, 25 to 200 % (his "All four"), each beside its kind's switch
 	enum class Strength
 	{

@@ -48,6 +48,8 @@ namespace StrangeRunes
 			dark->data = a_light->data;
 			dark->data.radius = 1;
 			dark->fade = 0.0f;
+			// a light that lights nothing must not take one of the scene's few shadow slots either
+			dark->data.flags.reset(RE::TES_LIGHT_FLAGS::kSpotShadow, RE::TES_LIGHT_FLAGS::kHemiShadow, RE::TES_LIGHT_FLAGS::kOmniShadow);
 		}
 		return dark;
 	}
@@ -84,10 +86,18 @@ namespace StrangeRunes
 
 	[[nodiscard]] inline bool Loaded() { return !Runes().empty(); }
 
+	// the switch for its hand rune lights asked of Strange Runes' author (no public repo, so asked through the mod page): once a
+	// release has it, the global is set and his records are left alone - the dark copies are only the stopgap until then
+	inline constexpr const char* kTheirSwitch = "po3_RUNE_HandLightsToggle";
+
 	// main thread: a_theirs = the runes light the hands as Strange Runes made them; false = their dark copies. A rune already
 	// on a hand keeps the light it had until it ends
 	inline void Apply(bool a_theirs)
 	{
+		if (auto* theirs = RE::TESForm::LookupByEditorID<RE::TESGlobal>(kTheirSwitch)) {
+			theirs->value = a_theirs ? 1.0f : 0.0f;
+			return;
+		}
 		for (const auto& rune : Runes()) {
 			rune.effect->data.associatedForm = a_theirs ? rune.light : rune.dark;
 		}

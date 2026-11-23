@@ -421,7 +421,8 @@ namespace Plugin
 				body = BodyOf(shader->effectData);
 			}
 			// a faded-out FEC body is not seen: its light comes off and leaves the glow cap
-			if (!body || !OptionLit(body->option) || FecBodyFade(art) <= 0.0f) {
+			// a body glow on art of a nature kind switched off is let go too (his answer 2026-11-22)
+			if (!body || !OptionLit(body->option) || FecBodyFade(art) <= 0.0f || (model && AnyNatureOff() && !NatureLightsOn(NatureIndexOf(model->artObject)))) {
 				return;
 			}
 			const auto ref = art->target.get();

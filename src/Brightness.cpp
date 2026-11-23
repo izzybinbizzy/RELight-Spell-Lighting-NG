@@ -236,7 +236,9 @@ namespace Plugin
 			const bool  dynamic = DynamicLightingThisSession();
 			const float held = dynamic || !a_s.flickers ? a_s.base : a_s.peak;
 			const bool  pulses = dynamic && (a_s.fx || (a_s.kind != Pulse::Kind::kNone && PulseRealistic()));
-			const float fade = held * a_scale * (pulses ? Oscillate(a_s, a_dt) : 1.0f);
+			// a hand light of ours is the game's casting light: another mod's dimmer on it (Baked Goods) keeps its share
+			const float share = a_s.ours ? LightKit::ForeignDimShare(a_light) : 1.0f;
+			const float fade = held * a_scale * (pulses ? Oscillate(a_s, a_dt) : 1.0f) * share;
 			data.fade = fade;
 			a_s.written = fade;
 			const float radius = a_s.baseRadius * a_reach;

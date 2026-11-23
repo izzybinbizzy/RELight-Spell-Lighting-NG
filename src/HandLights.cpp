@@ -19,6 +19,7 @@
 // A spell with none of them keeps what it has: no color is guessed.
 
 #include "Fade.h"
+#include "CreatureSpells.h"
 #include "Plugin.h"
 #include "StrangeRunes.h"
 
@@ -238,6 +239,9 @@ namespace Plugin
 					}
 				}
 			}
+			// a spell only creatures cast is Creatures' to light (the paired drop): it gets no automatic hand light here
+			const auto  creatures = CreatureSpells::CreatureOnlyEffects();
+			std::size_t creature = 0;
 			for (auto* effect : uncovered) {
 				// a ward (its effect raises Ward Power) and any spell on a ward's hand art (named wardinhandfx - the game's, Dynamic
 				// Wards' per rank, ours) are the wards' own: Dynamic Wards dresses every ward when it is installed, Wards.cpp when it
@@ -245,6 +249,13 @@ namespace Plugin
 				if (tuned.empty() || effect->data.castingType == RE::MagicSystem::CastingType::kConstantEffect ||
 					effect->data.archetype == RE::EffectArchetypes::ArchetypeID::kLight || SkippedPrefix(effect) ||
 					effect->data.primaryAV == RE::ActorValue::kWardPower || MeshKey(effect->data.castingArt->GetModel()).contains("wardinhandfx")) {
+					continue;
+				}
+				if (creatures.contains(effect)) {
+					if (a_loadArt) {
+						SKSE::log::info("[HAND-CREATURE] {:08X} {} | only creatures cast it: left to Creatures", effect->GetFormID(), effect->GetFullName());
+					}
+					++creature;
 					continue;
 				}
 				std::uint32_t rgb = 0;
@@ -287,6 +298,9 @@ namespace Plugin
 					gAutoHands.emplace(key, std::move(h));
 				}
 				gTargets.push_back({ effect, ownOf(effect), std::move(key), true });
+			}
+			if (a_loadArt) {
+				SKSE::log::info("automatic hand lights: {} spell(s) only creatures cast, left to Creatures", creature);
 			}
 			// an effect whose casting art moved to a mesh no layer lights is no target now: it gets its own light back,
 			// or it would keep our light for the art it no longer wears
@@ -414,7 +428,8 @@ namespace Plugin
 				const auto& copies = t.automatic ? gAutoCopies : gCopies;
 				const auto  found = copies.find(t.key);
 				auto*       copy = found != copies.end() ? found->second : nullptr;
-				auto*       want = copy && gInUse.contains(copy) ? copy : t.own;
+				// a hand of a nature kind switched off gives the spell back its own light (his answer 2026-11-22)
+				auto* want = copy && gInUse.contains(copy) && !(AnyNatureOff() && NatureKindOff(t.key)) ? copy : t.own;
 				if (t.effect->data.light != want) {
 					t.effect->data.light = want;
 				}

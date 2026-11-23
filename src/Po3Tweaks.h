@@ -137,7 +137,8 @@ namespace Po3Tweaks
 				return dh ? dh->LookupForm(a_key.local, a_key.plugin) : nullptr;
 			}
 		case Po3TweaksText::Key::kEditorID:
-			return RE::TESForm::LookupByEditorID(a_key.editorID);
+			// its own copy: a trimmed key is a view into a longer line, and the lookup reads to a NUL
+			return RE::TESForm::LookupByEditorID(std::string(a_key.editorID));
 		case Po3TweaksText::Key::kBad:
 		default:
 			return nullptr;

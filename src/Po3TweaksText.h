@@ -93,10 +93,11 @@ namespace Po3TweaksText
 	}
 
 	// its ini, [Fixes] bLoadEditorIDs ("Load EditorIDs" in older files): on unless it says off, read as its ini reader reads a switch
-	// (f, n, of or 0 is off); the current key wins over the old one wherever each stands
+	// (f, n, of or 0 is off); only under [Fixes], where Tweaks keeps it (its Settings.h); the current key wins over the old one
 	[[nodiscard]] inline bool LoadsEditorIDs(std::istream& a_ini)
 	{
 		std::optional<bool> current, legacy;
+		bool                fixes = false;
 		const auto          off = [](std::string_view a_v) { return a_v.starts_with('f') || a_v.starts_with('n') || a_v.starts_with("of") || a_v.starts_with('0'); };
 		for (std::string line; std::getline(a_ini, line);) {
 			std::string key;
@@ -107,6 +108,13 @@ namespace Po3TweaksText
 				if (!std::isspace(static_cast<unsigned char>(c))) {
 					key += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 				}
+			}
+			if (key.starts_with('[')) {
+				fixes = key.starts_with("[fixes]");
+				continue;
+			}
+			if (!fixes) {
+				continue;
 			}
 			if (key.starts_with("bloadeditorids=")) {
 				current = !off(std::string_view(key).substr(15));

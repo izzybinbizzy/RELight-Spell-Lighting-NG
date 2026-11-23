@@ -46,6 +46,9 @@ namespace Po3TweaksChecks
 		PO3_CHECK(ini("[Fixes]\nbLoadEditorIDs = true\n") && ini("[Fixes]\nbLoadEditorIDs = 1 ; off\n"));
 		PO3_CHECK(!ini("[Fixes]\nLoad EditorIDs = false\n") && ini("[Fixes]\nLoad EditorIDs = false\nbLoadEditorIDs = true\n"));
 		PO3_CHECK(!ini("[Fixes]\nbLoadEditorIDs = true\n;bLoadEditorIDs = false\nbLoadEditorIDs = no\n"));
+		// only under [Fixes]: the same key in another section changes nothing
+		PO3_CHECK(ini("[Fixes]\nbLoadEditorIDs = true\n[Other]\nbLoadEditorIDs = false\n") && ini("bLoadEditorIDs = false\n"));
+		PO3_CHECK(!ini("[Other]\nbLoadEditorIDs = true\n[FIXES]\nbLoadEditorIDs = false\n"));
 		// the proof: the player's base form named "Player", any case; nothing else
 		PO3_CHECK(ProofHolds("Player") && ProofHolds("PLAYER") && !ProofHolds("") && !ProofHolds(nullptr) && !ProofHolds("PlayerRef"));
 		// the verdict, each step that can stop it

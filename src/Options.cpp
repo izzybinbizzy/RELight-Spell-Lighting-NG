@@ -58,6 +58,7 @@ namespace Plugin
 			std::uint32_t frame{ 0 };         // last seen; a light unseen for a while is forgotten
 			bool          owned{ true };      // false: RE::Light's light with no reference found yet - asked again next walk
 			std::uint8_t  tries{ 0 };         // how often an unowned light was asked: a true orphan stops being asked
+			int           nature{ -1 };       // the nature kind of its object's model (NatureKind.h index), -1 for none
 		};
 		constexpr std::uint8_t                        kOwnerTries = 30;
 		std::unordered_map<const RE::NiLight*, Known> gKnown;
@@ -204,9 +205,10 @@ namespace Plugin
 			gFlesh.erase(fleshRepeats.begin(), fleshRepeats.end());
 		}
 
-		std::size_t LookUpOption(RE::NiLight* a_light, bool& a_owned)
+		std::size_t LookUpOption(RE::NiLight* a_light, bool& a_owned, int& a_nature)
 		{
 			a_owned = true;
+			a_nature = -1;
 			if (!IsReLightLight(a_light)) {
 				return kNone;
 			}
@@ -216,6 +218,7 @@ namespace Plugin
 			auto* ref = ReferenceOf(a_light);
 			// a walk can meet a hazard's light in the moment before its Load3D notes the plain root
 			a_owned = ref != nullptr;
+			a_nature = ref ? NatureIndexOf(ref->GetBaseObject()) : -1;
 			return ref ? OptionOf(ref->GetBaseObject()) : kNone;
 		}
 
@@ -232,9 +235,10 @@ namespace Plugin
 			const bool  same = k.frame != 0 && k.name == name && k.parent == parent;
 			if (!same || (!k.owned && k.tries < kOwnerTries)) {
 				bool               owned = true;
-				const auto         option = LookUpOption(a_light, owned);
+				int                nature = -1;
+				const auto         option = LookUpOption(a_light, owned, nature);
 				const std::uint8_t tries = same ? static_cast<std::uint8_t>(k.tries + 1) : std::uint8_t{ 0 };
-				k = { name, parent, option, gFrame, owned, tries };
+				k = { name, parent, option, gFrame, owned, tries, nature };
 			}
 			k.frame = gFrame;
 			return k.option;
@@ -276,7 +280,24 @@ namespace Plugin
 			return weapon && !weapon->IsStaff() && !weapon->IsBound() && !weapon->HasKeywordID(kDaedricArtifact);
 		}
 
-		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
+		// the five nature switches (his answer 2026-11-22): a light of ours on an object whose model is of a kind switched off goes out
+		// like a switched-off option's - its kind read with its option (gKnown), else off its reference now; enchantment lights are no kind
+		bool NatureOut(RE::NiLight* a_light)
+		{
+			if (!AnyNatureOff() || IsEnchantLight(a_light)) {
+				return false;
+			}
+			if (const auto it = gKnown.find(a_light); it != gKnown.end() && it->second.frame != 0) {
+				return !NatureLightsOn(it->second.nature);
+			}
+			auto* ref = ReferenceOf(a_light);
+			return ref && !NatureLightsOn(NatureIndexOf(ref->GetBaseObject()));
+		}
+
+		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
+		{
+			return Off(a_option) || (a_option != kNone && NatureOut(a_light)) || (a_enchant && EnchantedOut(a_light, a_option));
+		}
 
 		void HoldOut(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
 		{
@@ -509,7 +530,7 @@ namespace Plugin
 		static bool          anyOff = false;
 		if (const auto gen = SettingsGeneration(); gen != lastGen) {
 			lastGen = gen;
-			anyOff = AllLightsOff() || !EnchantedWeaponsOn();
+			anyOff = AllLightsOff() || !EnchantedWeaponsOn() || AnyNatureOff();
 			for (std::size_t i = 0; i < opts.size() && !anyOff; ++i) {
 				anyOff = !OptionLit(i);
 			}
@@ -599,7 +620,7 @@ namespace Plugin
 		// the lights are touched here)
 		auto*      ref = ReferenceOf(a_root);
 		const auto opt = ref ? OptionOf(ref->GetBaseObject()) : kNone;
-		if (!Off(opt)) {
+		if (!Off(opt) && (opt == kNone || !AnyNatureOff() || NatureLightsOn(NatureIndexOf(ref->GetBaseObject())))) {
 			return out;
 		}
 		a_option = opt;

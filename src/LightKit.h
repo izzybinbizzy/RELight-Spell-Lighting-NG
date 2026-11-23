@@ -171,6 +171,31 @@ namespace LightKit
 		return factory ? factory->Create() : nullptr;
 	}
 
+	// Another mod's dimmer on a light - Baked Goods dims the game's casting light with one, two linear keys: the share of full it
+	// holds now (LightMath.h DimmerShare), 1 with none. A dimmer of another shape (the light's own model) is left alone, as Baked
+	// Goods leaves it. One read when the light carries no controller (nearly every light)
+	[[nodiscard]] inline float ForeignDimShare(const RE::NiLight* a_light)
+	{
+		if (!a_light || !a_light->controllers) {
+			return 1.0f;
+		}
+		static REL::Relocation<const RE::NiRTTI*> rtti{ RE::NiRTTI_NiLightDimmerController };
+		auto*                                     ctrl = static_cast<RE::NiInterpController*>(a_light->GetController(rtti.get()));
+		auto*                                     interp = ctrl ? netimmerse_cast<RE::NiFloatInterpolator*>(ctrl->GetInterpolator(0)) : nullptr;
+		auto*                                     data = interp ? interp->floatData.get() : nullptr;
+		if (!data || !data->keys || data->numKeys != 2 || data->type != RE::NiFloatData::KeyType::kLink) {
+			return 1.0f;
+		}
+		auto* const k0 = data->keys->GetKeyAt(0, data->keySize);
+		auto* const k1 = data->keys->GetKeyAt(1, data->keySize);
+		if (!k0 || !k1) {
+			return 1.0f;
+		}
+		// Start marks a fresh run with lastTime at the lowest float; its run time is summed afresh only at the next update
+		const bool fresh = ctrl->lastTime < -1.0e30f;
+		return DimmerShare(k0->GetTime(), k0->GetValue(), k1->GetTime(), k1->GetValue(), ctrl->weightedLastTime, fresh);
+	}
+
 	// Every form of type T the game loaded, or an empty list when the data handler is not there (never a null read)
 	template <class T>
 	[[nodiscard]] RE::BSTArray<T*>& FormsOf()

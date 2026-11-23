@@ -74,7 +74,7 @@ namespace Fade
 		// here, as HoldsOurWrite skips a light only when all of them match
 		struct LightInputs
 		{
-			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f };
+			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f }, share{ 1.0f };
 			bool  fire{ false }, reachFollows{ false };
 
 			[[nodiscard]] bool operator==(const LightInputs&) const = default;
@@ -137,8 +137,12 @@ namespace Fade
 			const void*          instance{ nullptr };
 			Glow::Hand           glow{};
 			Glow::Output         out{};
-			Verdict              verdict{};
-			Reading              reading{};
+			// another mod's dimmer on the hand's casting light (LightKit::ForeignDimShare): the hand's other lights take the same share;
+			// the casting light itself, already dimmed by it, is shareSkip
+			float                   share{ 1.0f };
+			const RE::NiPointLight* shareSkip{ nullptr };
+			Verdict                 verdict{};
+			Reading                 reading{};
 			// what the verdict was worked out for (it is kept until one of these changes)
 			bool          verdictKnown{ false };
 			const void*   verdictWeapon{ nullptr };
@@ -223,7 +227,7 @@ namespace Fade
 
 		[[nodiscard]] LightInputs InputsOf(const HandTrack& a_hand)
 		{
-			return { a_hand.out.brightness, a_hand.out.reach, a_hand.out.cool, a_hand.fire, a_hand.verdict.tuning.reachFollows > 0.0f };
+			return { a_hand.out.brightness, a_hand.out.reach, a_hand.out.cool, a_hand.share, a_hand.fire, a_hand.verdict.tuning.reachFollows > 0.0f };
 		}
 
 		// the light still holds every value ApplyLight last wrote, with the hand's numbers it has now: ApplyLight would write the
@@ -248,10 +252,38 @@ namespace Fade
 			return !(cutoff > 0.0f && std::isfinite(cutoff)) || (a_seen.cutoff.Written() && cutoff == a_seen.cutoff.written);
 		}
 
+		// a hand the fading pass does not follow (Fading or Spells off, its kind off, an actor outside Whose): another mod's dim on its
+		// casting light still reaches its lights, here, from the caster's update (AfterCaster). Each light by the value not ours and
+		// what we wrote, under gLock; one the pass takes up is handed back first (ApplyLight), so the two never compound
+		// keyed by address only, never held: a light kept alive by us would stay lit on what it lit after its owner let go, so only a
+		// light found live under a hand (or handed to ApplyLight) is ever read through its key
+		struct ShareSeen
+		{
+			float base{ 0.0f }, written{ -1.0f };
+		};
+		std::unordered_map<const RE::NiPointLight*, ShareSeen> gShared;
+		constexpr std::size_t                                  kMostShared = 256;  // past this many (lights long gone) the list starts again
+
+		// a live light of gShared back as we found it, unless someone wrote it since (under gLock)
+		void UnShare(RE::NiPointLight* a_light, const ShareSeen& a_seen)
+		{
+			const auto turn = LightKit::Turn();
+			auto&      fade = a_light->GetLightRuntimeData().fade;
+			if (fade == a_seen.written) {
+				const float before = fade;
+				fade = a_seen.base;
+				Plugin::NoteFadeWrite(a_light, before, fade);
+			}
+		}
+
 		// a_found: the light was found under the hand this frame (a re-apply of this frame's numbers does not count, or a
 		// light that has left the weapon would never be let go)
 		void ApplyLight(RE::NiPointLight* a_light, const HandTrack& a_hand, bool a_found = true)
 		{
+			if (const auto shared = gShared.find(a_light); shared != gShared.end()) {
+				UnShare(a_light, shared->second);
+				gShared.erase(shared);
+			}
 			auto [it, added] = gLights.try_emplace(a_light);
 			auto& seen = it->second;
 			if (added) {
@@ -264,8 +296,9 @@ namespace Fade
 			const auto  turn = LightKit::Turn();  // its fields and the handshakes below in one turn (LightKit.h)
 			auto&       data = a_light->GetLightRuntimeData();
 			const auto& t = a_hand.verdict.tuning;
+			const float brightness = a_hand.out.brightness * (a_light == a_hand.shareSkip ? 1.0f : a_hand.share);
 			const float before = data.fade;
-			data.fade = seen.fade.Apply(before, a_hand.out.brightness);
+			data.fade = seen.fade.Apply(before, brightness);
 			Plugin::NoteFadeWrite(a_light, before, data.fade);
 			if (t.reachFollows > 0.0f || seen.radius.Written()) {
 				const float reachBefore = data.radius.x;
@@ -278,7 +311,7 @@ namespace Fade
 			// fade (LightKit::ReachCutoffFactor) so the light reaches what "Reach follows" asks
 			if (const float cutoffBefore = Plugin::InverseSquare() && LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
 				const float q = (std::max)(a_hand.out.reach, 0.05f);
-				const float factor = LightKit::ReachCutoffFactor(a_hand.out.brightness, q, seen.fade.base, seen.cutoff.BaseFor(cutoffBefore), data.radius.z);
+				const float factor = LightKit::ReachCutoffFactor(brightness, q, seen.fade.base, seen.cutoff.BaseFor(cutoffBefore), data.radius.z);
 				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, factor));
 				seen.cutoff.written = LightKit::Isl::Cutoff(a_light);  // as clamped: our own write, never read back as another's
 				Plugin::NoteCutoffWrite(a_light, cutoffBefore, seen.cutoff.written);
@@ -483,7 +516,8 @@ namespace Fade
 		[[nodiscard]] bool AtRest(const HandTrack& a_hand) noexcept
 		{
 			const auto* weapon = a_hand.reading.weapon;
-			return Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
+			// a hand another mod dims is not at rest: Light Placer writes its flickering lights again every frame
+			return a_hand.share >= 1.0f && Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
 		}
 
 		// what can put something of ours in a hand: an equip, a draw, sheathe or cast (SKSE's action events), an actor loading, her cell
@@ -768,6 +802,62 @@ namespace Fade
 			gActiveSpellHands = 0;
 		}
 
+		// the share of full another mod holds a hand's casting light at: its dimmer's (LightKit::ForeignDimShare), else 0 when the light's
+		// own value (our last write taken off) is 0 - Baked Goods lights a spell drawn while sneaking at fade 0 with no dimmer. Under gLock
+		[[nodiscard]] float CasterShareNow(RE::NiPointLight* a_light)
+		{
+			if (!a_light) {
+				return 1.0f;
+			}
+			if (a_light->controllers) {
+				return LightKit::ForeignDimShare(a_light);
+			}
+			float own = a_light->GetLightRuntimeData().fade;
+			if (const auto it = gLights.find(a_light); it != gLights.end() && it->second.fade.Written() && own == it->second.fade.written) {
+				own = it->second.fade.base;
+			}
+			return own > 0.0f ? 1.0f : 0.0f;
+		}
+
+		// the lights under a hand's magic node that the pass does not hold take a_share of their own value; at full they are given
+		// back and forgotten (under gLock)
+		void ShareUnder(RE::NiAVObject* a_root, const RE::NiPointLight* a_skip, float a_share)
+		{
+			if (!a_root) {
+				return;
+			}
+			RE::BSVisit::TraverseScenegraphLights(a_root, [&](RE::NiPointLight* a_light) {
+				if (!a_light || a_light == a_skip || gLights.contains(a_light)) {
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				auto it = gShared.find(a_light);
+				if (a_share >= 1.0f) {
+					if (it != gShared.end()) {
+						UnShare(a_light, it->second);
+						gShared.erase(it);
+					}
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				if (it == gShared.end()) {
+					if (gShared.size() >= kMostShared) {
+						gShared.clear();
+					}
+					it = gShared.emplace(a_light, ShareSeen{}).first;
+				}
+				auto&      seen = it->second;
+				const auto turn = LightKit::Turn();
+				auto&      fade = a_light->GetLightRuntimeData().fade;
+				if (fade != seen.written) {
+					seen.base = fade;  // Light Placer's (or the Brightness pass's) value this frame, not ours
+				}
+				const float before = fade;
+				fade = seen.base * a_share;
+				seen.written = fade;
+				Plugin::NoteFadeWrite(a_light, before, fade);
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+		}
+
 		// one spell hand, one frame (from UpdateHands, under the lock)
 		void UpdateSpellHand(RE::Actor* a_actor, bool a_left, const Settings& a_s, float a_delta, bool a_previewOn, bool a_previewToggled,
 			float a_previewFraction)
@@ -779,6 +869,8 @@ namespace Fade
 			h.left = a_left;
 			h.spell = true;
 			h.frame = gFrame;
+			h.share = 1.0f;
+			h.shareSkip = nullptr;
 			SpellHand sp;
 			if (!ReadSpellHand(a_actor, a_left, sp)) {
 				h.active = false;
@@ -832,6 +924,9 @@ namespace Fade
 			h.active = true;
 			// magicka spent on a cast is not a hit, nor magicka coming back a soul gem: no pulse, no flare
 			h.out = Glow::Step(a_s.tuning, h.glow, h.fraction, a_delta, true);
+			// another mod dims the game's casting light (Baked Goods): the hand's lights of ours follow it by the same share
+			h.share = CasterShareNow(sp.casterLight);
+			h.shareSkip = sp.casterLight;
 			h.lights = h.roots = 0;
 			for (auto* node : sp.nodes) {
 				if (!node) {
@@ -1402,7 +1497,32 @@ namespace Fade
 	void AfterCaster(RE::ActorMagicCaster* a_caster)
 	{
 		using Source = RE::MagicSystem::CastingSource;
-		if (!a_caster || !Items::Holding() || (a_caster->castingSource != Source::kLeftHand && a_caster->castingSource != Source::kRightHand)) {
+		if (!a_caster || (a_caster->castingSource != Source::kLeftHand && a_caster->castingSource != Source::kRightHand)) {
+			return;
+		}
+		// another mod's dim on this casting light (Baked Goods): asleep, a dimmer starting wakes the hands (a light with no controller is
+		// one read); a hand the pass does not follow takes the share here. Light Placer has just animated this hand's lights
+		auto* const cast = a_caster->light ? netimmerse_cast<RE::NiPointLight*>(a_caster->light->light.get()) : nullptr;
+		if (cast && cast->controllers && gHandsAsleep.load(std::memory_order_relaxed) && Followed(a_caster->GetCasterAsActor()) &&
+			LightKit::ForeignDimShare(cast) < 1.0f) {
+			WakeHands();
+		}
+		// a dimmer stays on its light after it ran (Baked Goods reuses it), so the share is read again as it comes back up
+		if (cast && (cast->controllers || !(cast->GetLightRuntimeData().fade > 0.0f))) {
+			auto* const     actor = a_caster->GetCasterAsActor();
+			const bool      left = a_caster->castingSource == Source::kLeftHand;
+			std::lock_guard lock(gLock);
+			if (actor && !ActiveSpellHand(actor, left)) {
+				RE::NiAVObject*   roots[2]{};
+				RE::NiPointLight* light = nullptr;
+				SpellHandLights(actor, left, roots, light);
+				const float share = CasterShareNow(cast);
+				for (auto* root : roots) {
+					ShareUnder(root, cast, share);
+				}
+			}
+		}
+		if (!Items::Holding()) {
 			return;
 		}
 		// Light Placer animates this hand's casting lights in the caster's update: only its own lights, as Items::Apply finds them

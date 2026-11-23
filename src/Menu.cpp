@@ -721,6 +721,22 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
 
+			// the five nature switches (his answer 2026-11-22, Illuminated's same five): each kind of spell lit, or left unlit
+			const auto nature = [](int a_index, const char* a_label) {
+				bool lit = NatureLightsOn(a_index);
+				if (ImGuiMCP::Checkbox(a_label, &lit)) {
+					SetNatureLightsOn(a_index, lit);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(T("Off: these spells give no light; their own art still shows."));
+			};
+			nature(0, T("Frost spells give light"));
+			nature(1, T("Earth and stone spells give light"));
+			nature(2, T("Water spells give light"));
+			nature(3, T("Wind spells give light"));
+			nature(4, T("Plant spells give light"));
+
 			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text; with Strange
 			// Runes loaded its switch hands the casting hands back to its runes
 			const auto* cs = CSLightLoaded();

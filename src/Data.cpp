@@ -622,7 +622,15 @@ namespace Plugin
 		if (!a_base || gStreams.empty() || a_base->GetFormID() == kCreatureBolt || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
+		// the creature bolts, cones and breaths Creatures 1.1 lights (Illuminated's StreamLights.cpp list): no row of ours on them, with
+		// Creatures installed or not - the player's own projectiles on the same models keep theirs (rule file 6 1.3, the paired drop)
+		static constexpr std::array<std::string_view, 8> kCreatureProjectiles{ "shockboltaimdwarvenspider", "dragonicespikevolleyprojectile",
+			"dragonicespikevolleyprojectile_aos", "dragonvoicealduinendtimesprojectile", "dragonfireprojectile02", "duncgalduinfireprojectile",
+			"dragonfrostprojectile01", "dragonfrostprojectile01_aos" };
 		return Cached(gStreamCache, a_base, [&]() -> const Stream* {
+			if (std::ranges::find(kCreatureProjectiles, Lower(EditorIdOf(a_base))) != kCreatureProjectiles.end()) {
+				return nullptr;
+			}
 			const auto key = KeyOf(a_base);
 			const auto it = key.empty() ? gStreams.cend() : Find(gStreams, gStreamKeysLongestFirst, key);
 			return it != gStreams.cend() ? &it->second : nullptr;

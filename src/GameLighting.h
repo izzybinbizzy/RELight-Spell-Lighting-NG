@@ -116,9 +116,14 @@ namespace GameLighting
 		{
 			std::vector<HMODULE> modules(256);
 			DWORD                needed = 0;
+			int                  failed = 0;
 			for (;;) {
 				const auto size = static_cast<DWORD>(modules.size() * sizeof(HMODULE));
 				if (!::K32EnumProcessModules(::GetCurrentProcess(), modules.data(), size, &needed)) {
+					// a DLL loading or unloading during the walk can fail it once: tried again before the lighting falls back
+					if (++failed < 3) {
+						continue;
+					}
 					return std::nullopt;
 				}
 				if (needed <= size) {

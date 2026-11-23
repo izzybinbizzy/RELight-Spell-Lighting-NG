@@ -364,7 +364,9 @@ namespace Plugin
 			const auto* proj = a_ref ? a_ref->As<RE::Projectile>() : nullptr;
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			const auto  own = spell ? Fade::Items::ChoiceColor(spell->GetFormID()) : std::nullopt;
-			return own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f;
+			// a spray of a nature kind switched off wears no row either (his answer 2026-11-22)
+			return (own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f) ||
+			       (a_ref && AnyNatureOff() && !NatureLightsOn(NatureIndexOf(a_ref->GetBaseObject())));
 		}
 
 		// true once the projectile wears its row

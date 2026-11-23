@@ -38,6 +38,7 @@
 #include "FadeSettingsText.h"
 #include "EnbShaderLights.h"
 #include "Plugin.h"
+#include "NatureKind.h"
 #include "StrangeRunes.h"
 
 namespace Plugin
@@ -54,15 +55,17 @@ namespace Plugin
 		constexpr int         kStrengthMin = 25, kStrengthMax = 200;
 
 		// explosions, streams, glows on people, enchanted weapons, ground effects (Strength, one slot each after kNone)
-		std::array<std::atomic<int>, 5>   gStrength{ 100, 100, 100, 100, 100 };
-		std::atomic<int>                  gBrightness{ 100 };
-		std::atomic<int>                  gReach{ 100 };
-		std::atomic<bool>                 gFecFrozenFades{ true };
-		std::atomic<bool>                 gFecBurningFades{ true };
-		std::atomic<bool>                 gHands{ true };
-		std::atomic<bool>                 gWeapons{ true };
-		std::atomic<bool>                 gEnchantedWeapons{ true };
-		std::atomic<bool>                 gStrangeRunes{ false };     // 1 = Strange Runes' runes light the casting hands
+		std::array<std::atomic<int>, 5> gStrength{ 100, 100, 100, 100, 100 };
+		std::atomic<int>                gBrightness{ 100 };
+		std::atomic<int>                gReach{ 100 };
+		std::atomic<bool>               gFecFrozenFades{ true };
+		std::atomic<bool>               gFecBurningFades{ true };
+		std::atomic<bool>               gHands{ true };
+		std::atomic<bool>               gWeapons{ true };
+		std::atomic<bool>               gEnchantedWeapons{ true };
+		std::atomic<bool>               gStrangeRunes{ false };  // 1 = Strange Runes' runes light the casting hands
+		// frost, earth and stone, water, wind, plants (NatureKind::kSettingKeys): false leaves that kind of spell unlit
+		std::array<std::atomic<bool>, 5>  gNature{ true, true, true, true, true };
 		std::atomic<bool>                 gEnbShaderLights{ false };  // 1 = ENB Lights For Effect Shaders lights FEC's bodies
 		std::vector<RE::TESEffectShader*> gEnbOurs;                   // our body shaders it lit when the first game loaded (main thread)
 		std::atomic<int>                  gWard{ 0 };
@@ -124,6 +127,11 @@ namespace Plugin
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
 			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
+			{ "FrostLights", [] { return gNature[0] ? 1 : 0; }, [](int v) { gNature[0] = v != 0; } },
+			{ "EarthLights", [] { return gNature[1] ? 1 : 0; }, [](int v) { gNature[1] = v != 0; } },
+			{ "WaterLights", [] { return gNature[2] ? 1 : 0; }, [](int v) { gNature[2] = v != 0; } },
+			{ "WindLights", [] { return gNature[3] ? 1 : 0; }, [](int v) { gNature[3] = v != 0; } },
+			{ "PlantLights", [] { return gNature[4] ? 1 : 0; }, [](int v) { gNature[4] = v != 0; } },
 			{ "ENBShaderLights", [] { return gEnbShaderLights ? 1 : 0; }, [](int v) { gEnbShaderLights = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
@@ -461,6 +469,30 @@ namespace Plugin
 	}
 
 	bool StrangeRunesLoaded() { return StrangeRunes::Loaded(); }
+
+	bool NatureLightsOn(int a_index) { return a_index < 0 || a_index >= static_cast<int>(gNature.size()) || gNature[static_cast<std::size_t>(a_index)]; }
+
+	void SetNatureLightsOn(int a_index, bool a_on)
+	{
+		if (a_index >= 0 && a_index < static_cast<int>(gNature.size()) && gNature[static_cast<std::size_t>(a_index)].exchange(a_on) != a_on) {
+			BumpSettings();  // the option walk, the rows and the body glows look again
+			SKSE::log::info("{} turned {}", NatureKind::kSettingKeys[static_cast<std::size_t>(a_index)], a_on ? "on" : "off");
+		}
+	}
+
+	bool AnyNatureOff()
+	{
+		return std::ranges::any_of(gNature, [](const auto& a_on) { return !a_on.load(); });
+	}
+
+	int NatureIndexOf(const RE::TESForm* a_form)
+	{
+		const auto* model = a_form ? a_form->As<RE::TESModel>() : nullptr;
+		const char* path = model ? model->GetModel() : nullptr;
+		return path ? NatureKind::IndexOf(NatureKind::KindOf(path)) : -1;
+	}
+
+	bool NatureKindOff(std::string_view a_path) { return !NatureLightsOn(NatureKind::IndexOf(NatureKind::KindOf(a_path))); }
 
 	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
 
