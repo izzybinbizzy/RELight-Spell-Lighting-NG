@@ -382,7 +382,7 @@ namespace Plugin
 
 		// RE::Light puts the player's enchantment lights back into the scene only when she goes indoors or outdoors
 		// (ReinitializeEnchantmentLights): after an outdoor-to-outdoor fast travel her drawn weapon's light stays out of it until
-		// a new equip makes a new light. For four seconds after her cell changes or she draws (Events.cpp), twice a second, her
+		// a new equip makes a new light. For four seconds after her cell changes, she draws or equips (Events.cpp), twice a second, her
 		// drawn weapons' RE::Light lights missing from both lists are added back; nothing is walked the rest of the time.
 		std::atomic<int> gWeaponChecks{ 0 };
 		// the option-lights walk is wanted (NoteOptionsLook - any thread)
@@ -431,7 +431,7 @@ namespace Plugin
 					gOptionsLook.store(true, std::memory_order_relaxed);  // the sheathed net and the switches see it too
 					if (logged < 5) {
 						++logged;
-						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change, draw or equip - put back");
 					}
 				}
 			}

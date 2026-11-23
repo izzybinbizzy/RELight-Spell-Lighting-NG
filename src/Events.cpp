@@ -113,9 +113,14 @@ namespace Plugin
 			public RE::BSTEventSink<SKSE::NiNodeUpdateEvent>
 		{
 		public:
-			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
 				NoteSweep(SweepWhy::kEquip);
+				// her weapon swapped while drawn: RE::Light's new enchantment light can stay out of the scene, as after a fast travel
+				if (a_event && a_event->actor && a_event->actor->IsPlayerRef()) {
+					WatchWeaponLights();
+					NoteOptionsLook();
+				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESDeathEvent*, RE::BSTEventSource<RE::TESDeathEvent>*) override

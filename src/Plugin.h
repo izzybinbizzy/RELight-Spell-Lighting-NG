@@ -393,7 +393,7 @@ namespace Plugin
 	void                      RenewHeldLights();   // a loading screen ended: every light taken off, the list of drawn actors kept
 	[[nodiscard]] std::size_t LiveHeldLights();
 	void                      NoteDrawing(RE::FormID a_actor);  // a weapon draw began or ended (any thread; Events.cpp)
-	void                      WatchWeaponLights();              // her cell changed or she drew: her weapon lights checked a while (any thread)
+	void                      WatchWeaponLights();              // her cell changed, she drew or equipped: her weapon lights checked a while (any thread)
 	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
 	void                      RenewAfterFailedLoad();           // a save that did not load: the lights kPreLoadGame let go made again
 	enum class SweepWhy : std::uint8_t
