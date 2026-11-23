@@ -403,6 +403,11 @@ namespace Plugin
 			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
 				return;
 			}
+			// RE::Light culls these lights on sheathe: a weapon swapped while sheathed must not light the ground
+			if (!player->AsActorState()->IsWeaponDrawn()) {
+				gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
+				return;
+			}
 			// a full walk times itself: this check inside it is not counted twice
 			std::optional<LightKit::Cost::Pass> pass;
 			if (a_timed) {

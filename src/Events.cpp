@@ -23,6 +23,20 @@ namespace Plugin
 			DropBurningBanners();  // a banner lights again at its next stage
 		}
 
+		// only a weapon or a shield changes what hangs an enchantment light on her WEAPON / SHIELD node
+		[[nodiscard]] bool WeaponOrShield(RE::FormID a_base)
+		{
+			const auto* form = RE::TESForm::LookupByID(a_base);
+			if (!form) {
+				return false;
+			}
+			if (form->IsWeapon()) {
+				return true;
+			}
+			const auto* armor = form->As<RE::TESObjectARMO>();
+			return armor && armor->IsShield();
+		}
+
 		class LoadingWatch final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 		{
 		public:
@@ -117,7 +131,7 @@ namespace Plugin
 			{
 				NoteSweep(SweepWhy::kEquip);
 				// her weapon swapped while drawn: RE::Light's new enchantment light can stay out of the scene, as after a fast travel
-				if (a_event && a_event->actor && a_event->actor->IsPlayerRef()) {
+				if (a_event && a_event->actor && a_event->actor->IsPlayerRef() && WeaponOrShield(a_event->baseObject)) {
 					WatchWeaponLights();
 					NoteOptionsLook();
 				}
