@@ -75,6 +75,11 @@ namespace Fade
 				out["art"].push_back({ { "base", base }, { "now", now } });
 			}
 			out["gemPlace"] = static_cast<int>(s.hudGemPlace);
+			// where the HUD's charge meters and bars were read (shares of the screen; ok false = not read): what the gem places follow
+			const auto box = [](const Glow::HudBox& a_b) { return json{ { "x0", a_b.x0 }, { "y0", a_b.y0 }, { "x1", a_b.x1 }, { "y1", a_b.y1 }, { "ok", a_b.ok } }; };
+			const auto hud = Hud();
+			out["hudBoxes"] = { { "leftMeter", box(hud.boxes.meters[0]) }, { "rightMeter", box(hud.boxes.meters[1]) },
+				{ "health", box(hud.boxes.bars[0]) }, { "magicka", box(hud.boxes.bars[1]) }, { "stamina", box(hud.boxes.bars[2]) } };
 			out["handsAsleep"] = HandsAsleep();
 			DevBenchGlue::Reply(a_sink, a_write, out);
 		}

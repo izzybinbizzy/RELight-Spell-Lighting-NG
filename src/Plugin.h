@@ -466,8 +466,9 @@ namespace Plugin
 	void VaerSwirls();  // once, after the data is read: Thaumaturgy's nine effect copies wear VAER's swirl art and shader
 
 	// ------------------------------------------------------------------ Menu.cpp
-	void RegisterMenu();
-	void RegisterMenuTail();  // after the fading module's pages: Choose Your Own Color and Performance (the testing DLL's Diagnostics last)
+	void        RegisterMenu();
+	void        RegisterMenuTail();        // after the fading module's pages: Choose Your Own Color and Performance (the testing DLL's Diagnostics last)
+	std::string ShowTestPage(int a_page);  // devbench only, never saved: a menu page in a window of its own (-1 closes)
 
 	// ------------------------------------------------------------------ DevBench.cpp: the settings and what was made, for a test bench
 	void OfferToDevBench();  // SKSE's post-load: inspect kind=relight and relight.control, when DevBench is loaded (optional)
