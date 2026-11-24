@@ -10,6 +10,11 @@
 // already lit. The look is the shared MenuStyle.h in warm spell-light gold, with this mod's glowing headings.
 
 #define WIN32_LEAN_AND_MEAN  // NOMINMAX is set for every file in xmake.lua (the fading module needs it too)
+#include <array>
+#include <atomic>
+#include <string>
+#include <utility>
+
 #include "Fade.h"
 #include "FadeSettingsText.h"
 #include "Plugin.h"
@@ -935,6 +940,38 @@ namespace Plugin
 			ImGuiMCP::TextWrapped("%s", T("Each hand's lights right now and the debug log switch are on the Fading - debug page."));
 		}
 #endif
+
+		// devbench only, never saved: one page drawn in a window of its own, so a test draws (and the translator reads) its lines
+		// without the framework's own list (Dynamic Wards' menuPage way): 0 Lights, 1 Choose Your Own Color, 2 Configs,
+		// 3 Praedy's Staves, 4 Performance; -1 closed
+		constexpr std::array<std::pair<const char*, void (*)()>, 5> kTestPages{ { { "Lights", RenderLights },
+			{ "Choose Your Own Color", RenderItems }, { "Configs", RenderConfigs }, { "Praedy's Staves", RenderPraedys },
+			{ "Performance", RenderPerformance } } };
+		std::atomic_int                                             gTestPage{ -1 };
+		SKSEMenuFramework::Model::WindowInterface*                  gTestWindow = nullptr;
+
+		void __stdcall DrawTestWindow()
+		{
+			const auto page = gTestPage.load();
+			ImGuiMCP::SetNextWindowPos(ImGuiMCP::ImVec2(40.0f, 20.0f), ImGuiMCP::ImGuiCond_Always);
+			ImGuiMCP::SetNextWindowSize(ImGuiMCP::ImVec2(820.0f, 1040.0f), ImGuiMCP::ImGuiCond_Always);
+			if (ImGuiMCP::Begin("RELight (test)", nullptr, ImGuiMCP::ImGuiWindowFlags_NoCollapse) && page >= 0 &&
+				static_cast<std::size_t>(page) < kTestPages.size()) {
+				kTestPages[static_cast<std::size_t>(page)].second();
+			}
+			ImGuiMCP::End();
+		}
+	}
+
+	std::string ShowTestPage(int a_page)
+	{
+		if (!gTestWindow) {
+			return {};
+		}
+		const bool open = a_page >= 0 && static_cast<std::size_t>(a_page) < kTestPages.size();
+		gTestPage = open ? a_page : -1;
+		gTestWindow->IsOpen = open;
+		return open ? std::string(kTestPages[static_cast<std::size_t>(a_page)].first) : std::string("closed");
 	}
 
 	void RegisterMenu()
@@ -960,6 +997,7 @@ namespace Plugin
 		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
 		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
 		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
+		gTestWindow = SKSEMenuFramework::AddWindow(LightKit::GuardedDraw<DrawTestWindow>, false);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
 	}
 
