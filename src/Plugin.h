@@ -413,10 +413,11 @@ namespace Plugin
 		kRefLoad,
 		kRefDrop,
 		kGameLoad,
+		kActor3DOut,
 		kCount,
 	};
 	inline constexpr std::array<const char*, static_cast<std::size_t>(SweepWhy::kCount)> kSweepWhyNames{ "draw", "cell", "equip", "death", "camera", "ni node update",
-		"actor 3d", "magic object", "magic object drop", "art init", "art detach", "reference load", "reference drop", "game load" };
+		"actor 3d", "magic object", "magic object drop", "art init", "art detach", "reference load", "reference drop", "game load", "actor 3d out" };
 	[[nodiscard]] std::uint32_t                                                          SweepNotes(std::size_t a_why) noexcept;  // how many times each kind of moment was heard: devbench's instrument
 	void                                                                                 NoteSweep(SweepWhy a_why) noexcept;      // any thread: something that can end or bring a light happened (Keep.cpp)
 	[[nodiscard]] bool                                                                   SweepWindowOpen() noexcept;              // the few frames after such a moment
