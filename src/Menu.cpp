@@ -298,14 +298,25 @@ namespace Plugin
 					DrawWardPick(true);
 					wardShown = true;
 				}
+				if (a_page == Page::kConfigs && o.name == "VAER Reborn") {
+					ImGuiMCP::SameLine(0.0f, 24.0f);
+					ImGuiMCP::SetNextItemWidth(180.0f);
+					int vae = VaerEffectsPercent();
+					if (ImGuiMCP::SliderInt(T("Enchantment effects"), &vae, 0, 400, "%d%%")) {
+						SetVaerEffectsPercent(vae / 25 * 25);
+						SaveSettings();
+					}
+					MenuStyle::Tip(T("How bright VAER Reborn's enchantment effects are; 100 is VAER's own. A drawn weapon changes when drawn again."));
+				}
 				if (const auto kind = a_page == Page::kConfigs ? StrengthBeside(o.name) : Strength::kNone; kind != Strength::kNone) {
 					DrawStrength(kind, true);
 					strengthShown[static_cast<std::size_t>(kind) - 1] = true;
 				}
 				ImGuiMCP::PopID();
 			}
-			// a kind whose switch is not there (its option not installed) still applies, so its strength keeps a heading of its own
-			if (a_page == Page::kConfigs && std::ranges::find(strengthShown, false) != strengthShown.end()) {
+			// a kind whose switch is not there (its option not installed) still applies, so its strength keeps a heading of its own; no
+			// switch stands for the ground effects at all, so the heading always stands, their strength under it
+			if (a_page == Page::kConfigs) {
 				GlowHeading("Strength");
 				for (std::size_t i = 0; i < strengthShown.size(); ++i) {
 					if (!strengthShown[i]) {
@@ -314,6 +325,9 @@ namespace Plugin
 						ImGuiMCP::PopID();
 					}
 				}
+				ImGuiMCP::PushID(static_cast<int>(1000 + strengthShown.size()));
+				DrawStrength(Strength::kGround, false);
+				ImGuiMCP::PopID();
 			}
 			// no Wards row to sit beside: the color still applies, so it keeps a heading of its own
 			if (a_page == Page::kConfigs && !wardShown) {
@@ -426,6 +440,7 @@ namespace Plugin
 				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is as I set them." },
 				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as I set them." },
 				{ Strength::kGlows, "Glow strength", "How bright glows on people are (cloaks, flesh spells, FEC bodies), on top of Brightness." },
+				{ Strength::kGround, "Ground effect strength", "How bright spells left on the ground are, like walls of fire, on top of Brightness." },
 				{ Strength::kEnchanted, "Enchanted weapon strength", "How bright enchanted weapons' lights are, on top of Brightness. Bound weapons, staves and artifacts use Brightness only." },
 			};
 			const auto* look = std::ranges::find(kLooks, a_kind, &Look::kind);
@@ -646,9 +661,9 @@ namespace Plugin
 					if (p.hands >= 0) {
 						SetHandLightsFor(p.hands);
 					}
-					// Default is the mod as it ships: the four strengths back to 100 % too
+					// Default is the mod as it ships: the five strengths back to 100 % too
 					if (p.hands == 0) {
-						for (const auto kind : { Strength::kExplosions, Strength::kStreams, Strength::kGlows, Strength::kEnchanted }) {
+						for (const auto kind : { Strength::kExplosions, Strength::kStreams, Strength::kGlows, Strength::kEnchanted, Strength::kGround }) {
 							SetStrengthPercent(kind, 100);
 						}
 					}
@@ -716,11 +731,67 @@ namespace Plugin
 			MenuStyle::Tip(T(
 				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
 
-			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text
-			if (const auto* cs = CSLightLoaded()) {
+			// Illuminated's same setting (his 646): with both hands lit each hand casts its own shadow; off, one from between them
+			bool eachHand = ShadowFromEachHand();
+			if (ImGuiMCP::Checkbox(T("A shadow from each hand"), &eachHand)) {
+				SetShadowFromEachHand(eachHand);
+				SaveSettings();
+			}
+			MenuStyle::Tip(T("With both hands lit and shadows on, each hand casts its own shadow. Off: one shadow from between the hands."));
+
+			// the five nature switches (his answer 2026-11-22, Illuminated's same five): each kind of spell lit, or left unlit
+			const auto nature = [](int a_index, const char* a_label) {
+				bool lit = NatureLightsOn(a_index);
+				if (ImGuiMCP::Checkbox(a_label, &lit)) {
+					SetNatureLightsOn(a_index, lit);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(T("Off: these spells give no light; their own art still shows."));
+			};
+			nature(0, T("Frost spells give light"));
+			nature(1, T("Earth and stone spells give light"));
+			nature(2, T("Water spells give light"));
+			nature(3, T("Wind spells give light"));
+			nature(4, T("Plant spells give light"));
+
+			// Illuminated's "Other Light Mods" heading: CS Light loaded is one warning line, its how-to in the hover text; with Strange
+			// Runes loaded its switch hands the casting hands back to its runes
+			const auto* cs = CSLightLoaded();
+			if (cs || StrangeRunesLoaded() || EnbShaderLightsLoaded() || BurnEmBannersLoaded()) {
 				GlowHeading("Other Light Mods", Icon::kBulb);
+			}
+			if (cs) {
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
 				MenuStyle::Tip(T("You don't need CS Light. If you keep it, untick its spell options or those lights glow twice."));
+			}
+			if (StrangeRunesLoaded()) {
+				bool runes = StrangeRunesLightOn();
+				if (ImGuiMCP::Checkbox(T("Strange Runes lights the hands"), &runes)) {
+					SetStrangeRunesLightOn(runes);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(T("On: Strange Runes' runes light casting hands in place of RELight's hand light."));
+			}
+			if (EnbShaderLightsLoaded()) {
+				bool enbShaders = EnbShaderLightsOn();
+				if (ImGuiMCP::Checkbox(T("ENB Lights For Effect Shaders"), &enbShaders)) {
+					SetEnbShaderLightsOn(enbShaders);
+					SaveSettings();
+					RehandSoon();
+				}
+				MenuStyle::Tip(
+					T("On: ENB Lights For Effect Shaders lights Frozen Electrocuted Combustion's burning, frozen, shocked and soul-trapped bodies "
+					  "in place of RELight's lights."));
+			}
+			if (BurnEmBannersLoaded()) {
+				bool theirs = BurnEmBannersLightsItself();
+				if (ImGuiMCP::Checkbox(T("Burn'em Banners lights its banners"), &theirs)) {
+					SetBurnEmBannersLightsItself(theirs);
+					SaveSettings();
+				}
+				MenuStyle::Tip(T("On: Burn'em Banners lights its burning banners in place of RELight's fire light."));
 			}
 		}
 
@@ -872,9 +943,7 @@ namespace Plugin
 		if (auto* data = RE::TESDataHandler::GetSingleton()) {
 			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
 		}
-		// the old folder's file read only while the new one is not there (CodeRabbit on #29; never written)
-		SKSE::log::info("{}", Translation::Load(Fade::SettingsText::ReadFrom("Data/SKSE/Plugins/RELightSpellLightingNG/Translation.json",
-								  "Data/SKSE/Plugins/RelightSpellAddon/Translation.json")));
+		SKSE::log::info("{}", Translation::Load("RELightSpellLightingNG"));
 		if (!SKSEMenuFramework::IsInstalled()) {
 			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
 			return;

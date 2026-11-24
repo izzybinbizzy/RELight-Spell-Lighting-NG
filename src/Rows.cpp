@@ -29,9 +29,6 @@ namespace Plugin
 	{
 		constexpr std::size_t kMostRowLights = 64;  // every row light in the scene together
 		constexpr std::size_t kMostPerRow = 20;
-		// off Community Shaders the game lets one piece of ground take only a few lights, so a row of 15 lit only the ground near
-		// her hands; fewer, wider lights reach the whole stream (BeamRow::Lay makes each stronger to keep the row's light)
-		constexpr std::size_t kMostPerRowPlain = 5;
 		constexpr float       kRowPlain = 0.5f;     // every row off Community Shaders
 		constexpr float       kRowHeight = 100.0f;  // a beam's usual height over the ground it lights
 		constexpr const char* kRowName = "RSARow";
@@ -71,6 +68,7 @@ namespace Plugin
 			RE::NiPoint3                     launch;
 			RE::NiPoint3                     spot;
 			float                            sinceEnd{ -1.0f };  // seconds since the cone ended; below 0 while it flies
+			int                              nature{ -1 };       // its nature kind (NatureKind.h index), -1 for none
 		};
 		std::vector<Cloud>    gClouds;
 		constexpr std::size_t kMostClouds = 8;
@@ -83,8 +81,7 @@ namespace Plugin
 			std::uint32_t                    frames{ 0 };
 		};
 		std::vector<CloudWait>  gCloudWait;
-		constexpr std::uint32_t kCloudTries = 600;          // about ten seconds of frames: a cone's cast and its cloud's life
-		constexpr float         kCloudReachShaders = 3.0f;  // Illuminated's: a row's x1 left Ice Storm's cloud faint on Community Shaders
+		constexpr std::uint32_t kCloudTries = 600;  // about ten seconds of frames: a cone's cast and its cloud's life
 
 		// Illuminated's row, the same numbers (its 1.4: the row came off its cap, so Vanilla and ENB were trimmed to Community
 		// Shaders' lift)
@@ -92,9 +89,9 @@ namespace Plugin
 		{
 			switch (a_lighting) {
 			case Lighting::kVanilla:
-				return 1.1f;
+				return BeamRow::gTune.vanilla.load(std::memory_order_relaxed);
 			case Lighting::kEnb:
-				return 0.5f;  // the whole stream lit, not washed out
+				return BeamRow::gTune.enb.load(std::memory_order_relaxed);
 			default:
 				return 1.0f;
 			}
@@ -307,7 +304,8 @@ namespace Plugin
 			const auto* proj = a_ref->As<RE::Projectile>();
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			gClouds.push_back({ RE::NiPointer<RE::NiAVObject>(root), RE::NiPointer<RE::TESObjectREFR>(a_ref), RE::NiPointer<RE::NiNode>(holder),
-				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f });
+				RE::NiPointer<RE::BSLight>(bs), rec, spell ? spell->GetFormID() : 0, a_ref->GetPosition(), a_ref->GetPosition(), -1.0f,
+				NatureIndexOf(a_ref->GetBaseObject()) });
 			return true;
 		}
 
@@ -334,14 +332,16 @@ namespace Plugin
 			// a cone's cloud is a stream's light too: the streams' strength reaches it
 			const float brightNow = Brightness() * VanillaStrength() * StrengthOf(Strength::kStreams);
 			// one light, not a row: where the inverse-square cap holds, its reach (and with it that cap) is its own
-			const float reach = rec.reach * Reach() * (isl ? kCloudReachShaders : RowReachFor(LightingFound()));
+			const float reach = rec.reach * Reach() * (isl ? BeamRow::gTune.cloudReachShaders.load(std::memory_order_relaxed) : RowReachFor(LightingFound()));
 			const float steady = BeamRow::Steady(rec.fade * brightNow * RowStrengthFor(LightingFound()), isl ? IslTop(reach) * (std::min)(brightNow, 1.0f) : 0.0f);
 			RE::NiColor color = rec.color;
 			if (const auto own = a_c.spell ? Fade::Items::ChoiceColor(a_c.spell) : std::nullopt) {
 				color = *own;  // the spell's Lights by Item color
 			}
 			color = VanillaLook(color);  // after the override, as the caster light (Brightness.cpp)
-			Dress(light, color, steady * left, reach, isl);
+			// its nature kind switched off: dark, still tracked, so it lights again if the kind comes back on before it fades
+			const bool natureOff = a_c.nature >= 0 && AnyNatureOff() && !NatureLightsOn(a_c.nature);
+			Dress(light, color, natureOff ? 0.0f : steady * left, reach, isl);
 			light->local.translate = a_c.holder->world.Invert() * a_c.spot;
 			RE::NiUpdateData update{};
 			light->Update(update);
@@ -368,7 +368,9 @@ namespace Plugin
 			const auto* proj = a_ref ? a_ref->As<RE::Projectile>() : nullptr;
 			const auto* spell = proj ? proj->GetProjectileRuntimeData().spell : nullptr;
 			const auto  own = spell ? Fade::Items::ChoiceColor(spell->GetFormID()) : std::nullopt;
-			return own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f;
+			// a spray of a nature kind switched off wears no row either (his answer 2026-11-22)
+			return (own && own->red <= 0.0f && own->green <= 0.0f && own->blue <= 0.0f) ||
+			       (a_ref && AnyNatureOff() && !NatureLightsOn(NatureIndexOf(a_ref->GetBaseObject())));
 		}
 
 		// true once the projectile wears its row
@@ -389,7 +391,7 @@ namespace Plugin
 				return false;
 			}
 			const bool isl = InverseSquare();
-			const auto most = isl ? kMostPerRow : kMostPerRowPlain;
+			const auto most = isl ? kMostPerRow : static_cast<std::size_t>(BeamRow::PlainLights());
 			const auto want = BeamRow::Lay(proj->GetProjectileRuntimeData().range, static_cast<int>(most), recipe->second.reach, kRowHeight);
 			const auto n = (std::min)(want.size(), kMostRowLights - gLights);
 			Live       live{ RE::NiPointer<RE::NiAVObject>(node), RE::NiPointer<RE::TESObjectREFR>(a_ref), &recipe->second, {} };

@@ -14,6 +14,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <bit>
 #include <cstdint>
@@ -83,6 +84,115 @@ namespace Glow
 		}
 		return { static_cast<float>(a_dx / a_pxX), static_cast<float>(a_dy / a_pxY), static_cast<float>(a_sx), static_cast<float>(a_sy),
 			static_cast<float>(std::clamp(a_alpha, 0.0, 1.0)) };
+	}
+
+	// Where the HUD draws one of its own parts, as shares of the screen (0..1 across, 0..1 down), read off the HUD's movie
+	// (FadeLights.cpp ReadHudBoxes): the stage's visible frame maps the movie's units onto the screen. Empty, reversed, not a
+	// number or mostly off the screen = not there (Flash reports an empty clip as a box millions of units wide)
+	struct HudBox
+	{
+		float x0{ 0.0f }, y0{ 0.0f }, x1{ 0.0f }, y1{ 0.0f };
+		bool  ok{ false };
+		bool  operator==(const HudBox&) const = default;
+	};
+
+	[[nodiscard]] inline HudBox BoxOnScreen(double a_xMin, double a_yMin, double a_xMax, double a_yMax, double a_left, double a_top, double a_right,
+		double a_bottom) noexcept
+	{
+		const double w = a_right - a_left, h = a_bottom - a_top;
+		const bool   usable = std::isfinite(a_xMin) && std::isfinite(a_yMin) && std::isfinite(a_xMax) && std::isfinite(a_yMax) && std::isfinite(w) &&
+		                      std::isfinite(h) && w > 0.0 && h > 0.0 && a_xMax > a_xMin && a_yMax > a_yMin;
+		if (!usable) {
+			return {};
+		}
+		const HudBox b{ static_cast<float>((a_xMin - a_left) / w), static_cast<float>((a_yMin - a_top) / h), static_cast<float>((a_xMax - a_left) / w),
+			static_cast<float>((a_yMax - a_top) / h), true };
+		const float  cx = (b.x0 + b.x1) * 0.5f, cy = (b.y0 + b.y1) * 0.5f;
+		if (cx < 0.0f || cx > 1.0f || cy < 0.0f || cy > 1.0f || b.x1 - b.x0 > 1.0f || b.y1 - b.y0 > 1.0f) {
+			return {};
+		}
+		return b;
+	}
+
+	// the HUD parts the gems sit by: [0] the left hand's charge meter, [1] the right's; the health, magicka and stamina bars
+	struct HudBoxes
+	{
+		std::array<HudBox, 2> meters{};
+		std::array<HudBox, 3> bars{};
+		bool                  operator==(const HudBoxes&) const = default;
+	};
+
+	// the HUD page's Gem place (his pick, checklist 626: both, as a choice)
+	enum class GemPlace : int
+	{
+		kChargeMeters = 0,  // above each of the HUD's own charge meters
+		kBars = 1           // at the right end of the health, magicka and stamina bars
+	};
+
+	struct GemSpot
+	{
+		float x{ 0.0f }, y{ 0.0f };
+	};
+
+	// The two gems' centres in pixels on a screen a_w x a_h, each gem a_gemW x a_gemH with a_below pixels under it for its
+	// percent; false when the HUD gave nothing to sit by (the caller keeps its fixed place). By the charge meters: each gem above
+	// its hand's meter - one meter for both hands, or two meters close together, puts them side by side over the middle. By the
+	// bars: side by side past the right end of the bars stacked with the health bar (or of any bar found, without it), level
+	// with their middle. Always whole on the screen.
+	[[nodiscard]] inline bool GemCentres(GemPlace a_place, const HudBoxes& a_b, float a_w, float a_h, float a_gemW, float a_gemH, float a_below,
+		std::array<GemSpot, 2>& a_out) noexcept
+	{
+		const bool usable = std::isfinite(a_w) && std::isfinite(a_h) && std::isfinite(a_gemW) && std::isfinite(a_gemH) && std::isfinite(a_below) &&
+		                    a_w > 0.0f && a_h > 0.0f && a_gemW > 0.0f && a_gemH > 0.0f && a_below >= 0.0f && a_gemW < a_w && a_gemH + a_below < a_h;
+		if (!usable) {
+			return false;
+		}
+		const float            gap = a_gemH * 0.25f, step = a_gemW * 1.9f;
+		std::array<GemSpot, 2> out{};
+		if (a_place == GemPlace::kChargeMeters) {
+			const auto& l = a_b.meters[0];
+			const auto& r = a_b.meters[1];
+			if (!l.ok && !r.ok) {
+				return false;
+			}
+			const auto above = [&](const HudBox& a_m) { return GemSpot{ (a_m.x0 + a_m.x1) * 0.5f * a_w, a_m.y0 * a_h - gap - a_below - a_gemH * 0.5f }; };
+			out = { above(l.ok ? l : r), above(r.ok ? r : l) };
+			if (std::abs(out[1].x - out[0].x) < step && std::abs(out[1].y - out[0].y) < a_gemH) {
+				const float mid = (out[0].x + out[1].x) * 0.5f, top = std::min(out[0].y, out[1].y);
+				out = { GemSpot{ mid - step * 0.5f, top }, GemSpot{ mid + step * 0.5f, top } };
+			}
+		} else {
+			const auto& health = a_b.bars[0];
+			HudBox      u{};
+			for (const auto& p : a_b.bars) {
+				if (!p.ok || (health.ok && (p.x1 < health.x0 || p.x0 > health.x1))) {
+					continue;
+				}
+				u = u.ok ? HudBox{ std::min(u.x0, p.x0), std::min(u.y0, p.y0), std::max(u.x1, p.x1), std::max(u.y1, p.y1), true } : p;
+			}
+			if (!u.ok) {
+				return false;
+			}
+			const float x = u.x1 * a_w + gap + a_gemW * 0.5f, y = (u.y0 + u.y1) * 0.5f * a_h - a_below * 0.5f;
+			out = { GemSpot{ x, y }, GemSpot{ x + step, y } };
+		}
+		// whole on the screen, the pair moved together so one never covers the other: shifted in as a unit
+		// when it fits side by side, else the second stacked above the first
+		const float lo = a_gemW * 0.5f, hi = a_w - a_gemW * 0.5f;
+		const float left = std::min(out[0].x, out[1].x), right = std::max(out[0].x, out[1].x);
+		if (right - left <= hi - lo) {
+			const float shift = left < lo ? lo - left : (right > hi ? hi - right : 0.0f);
+			out[0].x += shift;
+			out[1].x += shift;
+		} else {
+			out[0].x = out[1].x = std::clamp(out[0].x, lo, hi);
+			out[1].y = out[0].y - a_gemH - a_below - gap;
+		}
+		for (auto& s : out) {
+			s.y = std::clamp(s.y, a_gemH * 0.5f, a_h - a_gemH * 0.5f - a_below);
+		}
+		a_out = out;
+		return true;
 	}
 
 	[[nodiscard]] inline float ApplyCurve(Curve a_curve, float a_f) noexcept

@@ -27,8 +27,8 @@ namespace Fade
 
 	// ------------------------------------------------------------------ FadeSettings.cpp: the settings (FadeSettingsText.h)
 	// The one shared copy lives in FadeSettings.cpp behind a lock: the menu (render thread) and DevBench (its own thread)
-	// change it while the main thread reads it every frame, so everyone works on a copy. The two switches the per-call hooks
-	// read (the HUD charge bar, every effect update) are kept beside it as atomics, so those hooks never lock or copy.
+	// change it while the main thread reads it every frame, so everyone works on a copy. The debug log's switch, read by the
+	// per-call hooks, is kept beside it as an atomic, so those hooks never lock or copy.
 	[[nodiscard]] Settings Config();                                           // a copy, safe from any thread
 	void                   WatchHands();                                       // data load: the events that wake the hands' pass
 	void                   WakeHands() noexcept;                               // any thread: the hands' pass runs next frame
@@ -40,9 +40,6 @@ namespace Fade
 	void                   SetConfig(const Settings& a_settings);              // replaces it whole; live on the next frame
 	bool                   ApplySetting(std::string_view a_key, int a_value);  // one Fading.ini line; false if unknown
 	[[nodiscard]] bool     DebugLogOn() noexcept;                              // lock-free
-	[[nodiscard]] bool     HideChargeBarOn() noexcept;                         // lock-free; the switch AND Fading on
-	[[nodiscard]] bool     ChargeBarHooked() noexcept;                         // false on VR, or when another plugin changed the calls first
-	void                   RefreshChargeBar() noexcept;                        // the switch flipped: the bar follows at once
 	void                   LoadSettings();
 	void                   SaveSettings();
 
@@ -55,53 +52,14 @@ namespace Fade
 	};
 	[[nodiscard]] Preview& PreviewState();
 
-	// ------------------------------------------------------------------ FadeEditorIDs.cpp: names the game throws away
-	// (weapons and enchantments for the rule files, magic effects for the soul trap test and the plugins' own readers)
+	// ------------------------------------------------------------------ FadeEditorIDs.cpp: names from powerofthree's Tweaks (REQUIRED)
+	// Tweaks keeps every form's editor ID (its Load EditorIDs, on by default) and exports GetFormEditorID; a working Native EditorID Fix
+	// is taken in its place (Po3Tweaks::Judge), so it is never a missing dependency; no recorder of ours (rule
+	// file 2 rule 19c, requirements over rebuilds). RememberEditorID names only our own in-memory copies
 	void                      RememberEditorID(const RE::TESForm* a_form, const char* a_id) noexcept;
-	void                      InstallEditorIDHooks();               // weapons, enchantments, magic effects: before the game reads its plugins
-	void                      ForgetPassEditorIDs();                // after data load: only weapons, enchantments and magic effects are kept
+	void                      ForgetPassEditorIDs();                // after data load: our copies' names the passes needed are let go
 	[[nodiscard]] std::string EditorID(const RE::TESForm* a_form);  // "" when unknown (a copy: the table may be rewritten)
 	[[nodiscard]] std::string Label(const RE::TESForm* a_form);     // "Name [EditorID] Skyrim.esm|0004E4EE" for the log
-
-	// powerofthree's Tweaks keeps editor IDs itself (its Load EditorIDs fix, on by default) and exports GetFormEditorID: while it
-	// does, EditorID asks it and our recorder stays out for the types it keeps
-	[[nodiscard]] bool        TweaksKeepsEditorIDs();
-	[[nodiscard]] const char* TweaksEditorID(RE::FormID a_id);  // nullptr without Tweaks or for a form it does not know
-
-	// the types Tweaks' cache covers (its CacheFormEditorIDs fix) - only these are left to it
-	template <class T>
-	inline constexpr bool kTweaksKeeps = std::is_same_v<T, RE::TESObjectWEAP> || std::is_same_v<T, RE::EnchantmentItem> ||
-	                                     std::is_same_v<T, RE::EffectSetting> || std::is_same_v<T, RE::BGSProjectile> ||
-	                                     std::is_same_v<T, RE::BGSExplosion> || std::is_same_v<T, RE::BGSHazard> ||
-	                                     std::is_same_v<T, RE::TESObjectLIGH> || std::is_same_v<T, RE::TESEffectShader>;
-
-	// the hook RecordEditorIDs<T> installs: SetFormEditorID (vtable slot 0x33) on T, recording the ID, then the game's own
-	template <class T>
-	struct EditorIDRecorder
-	{
-		static bool thunk(RE::TESForm* a_this, const char* a_id)
-		{
-			RememberEditorID(a_this, a_id);
-			return func(a_this, a_id);
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-		static inline bool                             installed{ false };  // SKSE's post-load message, main thread
-	};
-
-	// the editor IDs of form type T recorded as they load; each type hooked once, whoever asks
-	template <class T>
-	void RecordEditorIDs()
-	{
-		if constexpr (kTweaksKeeps<T>) {
-			if (TweaksKeepsEditorIDs()) {
-				return;
-			}
-		}
-		if (!std::exchange(EditorIDRecorder<T>::installed, true)) {
-			REL::Relocation<std::uintptr_t> vtbl{ T::VTABLE[0] };
-			EditorIDRecorder<T>::func = vtbl.write_vfunc(0x33, EditorIDRecorder<T>::thunk);
-		}
-	}
 
 	// ------------------------------------------------------------------ FadeRules.cpp: rule files
 	void                                   LoadRules();  // at data load, after the settings
@@ -207,8 +165,10 @@ namespace Fade
 		bool                   hudHidden{ false };  // a HUD toggle mod has hidden the game's HUD
 		float                  gemSize{ 1.0f }, gemOpacity{ 0.9f };
 		bool                   gemPercent{ true };
-		bool                   gemFull{ false };  // a gem at full charge too (the HUD page's Show at full charge)
-		float                  low{ 0.15f };      // the sputter point: under it a Reticle Arcs bar reads low
+		bool                   gemFull{ false };                           // a gem at full charge too (the HUD page's Show at full charge)
+		Glow::GemPlace         gemPlace{ Glow::GemPlace::kChargeMeters };  // the HUD page's Gem place
+		Glow::HudBoxes         boxes{};                                    // where the HUD draws its charge meters and bars (ReadHudBoxes)
+		float                  low{ 0.15f };                               // the sputter point: under it a Reticle Arcs bar reads low
 		std::array<HudHand, 2> hands{};
 		bool                   shoutLit{ false };  // the shout the player has ready carries a light: `shoutColor` is its color
 		Glow::Rgb              shoutColor{};
@@ -225,8 +185,9 @@ namespace Fade
 
 	// ------------------------------------------------------------------ FadeTuning.cpp: the all-in-one advanced settings file
 	// (his rule: every value worth tuning that the menu does not show, one file, a section per category). A value is
-	// registered with its default and range before Load (data load); Load reads the file, then writes it back whole. A key
-	// that was renamed names its old name (a_was): a file that still carries the old line keeps its value, written back under
+	// registered with its default and range before Load (data load); Load reads the file, then the player's Custom file, and writes
+	// the file again only when it is missing, older than this layout or lacks a value (its values kept; never the Custom file). A
+	// key that was renamed names its old name (a_was): a file that still carries the old line keeps its value, written again under
 	// the new name (the rule for any renamed setting: write the new, read both).
 	namespace Tuning
 	{

@@ -20,6 +20,7 @@ namespace Plugin
 			RenewHeldLights();
 			RenewBodyLights();
 			RenewGroundLights();
+			DropBurningBanners();  // a banner lights again at its next stage
 		}
 
 		class LoadingWatch final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -66,6 +67,29 @@ namespace Plugin
 			}
 		};
 
+		// A draw or sheathe of any kind passes the actor's slot 0xA6 (DrawWeaponMagicHands, plugin coding 7a), and a spell's sends no SKSE draw
+		// event: an NPC who draws only spells is noted here (the ground twins walk Held.cpp's list). She is always walked. Any thread: only
+		// noted. Not on VR, whose slot is not read here
+		struct MagicHands
+		{
+			static void thunk(RE::Character* a_this, bool a_draw)
+			{
+				func(a_this, a_draw);
+				LightKit::Guarded("hands drawn", [a_this, a_draw]() {
+					NoteSweep(SweepWhy::kDraw);
+					if (a_draw) {
+						NoteDrawing(a_this->GetFormID());
+					}
+				});
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+			static void                                    Install()
+			{
+				REL::Relocation<std::uintptr_t> vtbl{ RE::Character::VTABLE[0] };
+				func = vtbl.write_vfunc(0xA6, thunk);
+			}
+		};
+
 		class Cells final : public RE::BSTEventSink<RE::BGSActorCellEvent>
 		{
 		public:
@@ -89,9 +113,14 @@ namespace Plugin
 			public RE::BSTEventSink<SKSE::NiNodeUpdateEvent>
 		{
 		public:
-			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent*, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
 			{
 				NoteSweep(SweepWhy::kEquip);
+				// her weapon swapped while drawn: RE::Light's new enchantment light can stay out of the scene, as after a fast travel
+				// a plain form id read, no game call: the player's reference is always 0x14
+				if (a_event && a_event->actor && a_event->actor->GetFormID() == 0x14) {
+					NoteHerEquip(a_event->baseObject);  // the main thread judges whether it was a weapon or a shield
+				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESDeathEvent*, RE::BSTEventSource<RE::TESDeathEvent>*) override
@@ -158,6 +187,14 @@ namespace Plugin
 		};
 	}
 
+	// a save that did not load leaves the old game: what kPreLoadGame let go is made again, as after a loading screen, and the fading
+	// hands' pass, which waits for the game's next event, looks now (main thread)
+	void RenewAfterFailedLoad()
+	{
+		AfterLoadingScreen();
+		Fade::WakeHands();
+	}
+
 	void WatchEvents()
 	{
 		static Draws        draws;
@@ -168,6 +205,9 @@ namespace Plugin
 		}
 		Actor3D<RE::Character>::Install();
 		Actor3D<RE::PlayerCharacter>::Install();
+		if (!REL::Module::IsVR()) {
+			MagicHands::Install();
+		}
 		static Changes changes;
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESEquipEvent>(&changes);
@@ -192,6 +232,6 @@ namespace Plugin
 			SKSE::log::warn("events: weapon draws {}, her cell changes {}", actions ? "watched" : "NOT watched", player ? "watched" : "NOT watched");
 			return;
 		}
-		SKSE::log::info("events: weapon draws and her cell changes watched");
+		SKSE::log::info("events: weapon draws and her cell changes watched, spell draws {}", REL::Module::IsVR() ? "NOT watched (VR)" : "watched");
 	}
 }

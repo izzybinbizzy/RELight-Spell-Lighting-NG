@@ -262,4 +262,30 @@ namespace LightKit
 		}
 		return out;
 	}
+
+	// another mod's two-key fade on a light, from (a_t0, a_v0) to (a_t1, a_v1): the share of its larger key it holds a_ranFor
+	// seconds into its run, 0..1 - fading out it starts at 1, fading back in it ends at 1, whatever fade the light was made with.
+	// A fresh run not yet updated counts as its first key; both keys 0 hold it dark; a bad number reads 1
+	[[nodiscard]] inline float DimmerShare(float a_t0, float a_v0, float a_t1, float a_v1, float a_ranFor, bool a_fresh) noexcept
+	{
+		const float top = (std::max)(a_v0, a_v1);
+		if (!std::isfinite(a_v0) || !std::isfinite(a_v1)) {
+			return 1.0f;
+		}
+		if (!(top > 0.0f)) {
+			return 0.0f;
+		}
+		if (!a_fresh && !std::isfinite(a_ranFor)) {
+			return 1.0f;
+		}
+		const float span = a_t1 - a_t0;
+		float       k = 1.0f;
+		if (a_fresh) {
+			k = 0.0f;
+		} else if (span > 0.0f && std::isfinite(a_ranFor)) {
+			k = std::clamp((a_ranFor - a_t0) / span, 0.0f, 1.0f);
+		}
+		const float v = a_v0 + (a_v1 - a_v0) * k;
+		return std::isfinite(v) ? std::clamp(v / top, 0.0f, 1.0f) : 1.0f;
+	}
 }

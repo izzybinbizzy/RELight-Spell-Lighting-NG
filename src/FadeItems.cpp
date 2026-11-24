@@ -47,7 +47,12 @@
 #include "Translation.h"
 #include "MenuStyle.h"
 
+#include <algorithm>
+#include <array>
 #include <sstream>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace Fade::Items
 {
@@ -83,7 +88,9 @@ namespace Fade::Items
 
 		std::vector<Item>              gCatalog;
 		std::unordered_set<RE::FormID> gCatalogIds;  // the same items, to refuse a choice for anything else (read-only after load)
-		bool                           gCatalogBuilt{ false };
+		// a shield of light a spell wears (the Sunlight Targe): shield ARMO -> the spell of the same name, made with the catalog
+		std::unordered_map<RE::FormID, RE::FormID> gShieldSpell;
+		bool                                       gCatalogBuilt{ false };
 		// another DLL's items: ids of their own, far above any form the catalog holds, so a lookup needs no table
 		constexpr RE::FormID                        kExternalFirst = 0xFFFE0000;
 		std::vector<Item>                           gExternalItems;
@@ -361,12 +368,55 @@ namespace Fade::Items
 			});
 		}
 
+		// the game's own files and the Creation Club's: every mod masters them, so a master link through one says nothing
+		[[nodiscard]] bool GameFile(const RE::TESFile* a_file)
+		{
+			constexpr std::array<std::string_view, 5> kGame{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm" };
+			const std::string_view                    name = a_file->GetFilename();
+			const auto                                same = [name](std::string_view a_name) { return a_name.size() == name.size() && _strnicmp(a_name.data(), name.data(), a_name.size()) == 0; };
+			return std::ranges::any_of(kGame, same) || (name.size() > 2 && _strnicmp(name.data(), "cc", 2) == 0);
+		}
+
+		[[nodiscard]] bool Masters(const RE::TESFile* a_file, const RE::TESFile* a_master)
+		{
+			for (std::uint32_t i = 0; a_file->masterPtrs && i < a_file->masterCount; ++i) {
+				if (a_file->masterPtrs[i] == a_master) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// the spell and the shield come from one mod: one file, or two files of it where one masters the other (neither the game's own)
+		[[nodiscard]] bool SameMod(const RE::TESFile* a_spell, const RE::TESFile* a_shield)
+		{
+			if (!a_spell || !a_shield) {
+				return false;
+			}
+			if (a_spell == a_shield) {
+				return true;
+			}
+			return !GameFile(a_spell) && !GameFile(a_shield) && (Masters(a_spell, a_shield) || Masters(a_shield, a_spell));
+		}
+
 		void VisitActor(RE::Actor* a_actor)
 		{
 			if (!a_actor || !a_actor->Is3DLoaded()) {
 				return;
 			}
 			const bool player = a_actor->IsPlayerRef();
+			// a shield of light a spell wears takes that spell's choice on the lights hung on it (the shield is the left hand's ARMO,
+			// which the hand loop below does not read)
+			if (!gShieldSpell.empty()) {
+				const auto* shield = a_actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kShield);
+				const auto  pair = shield ? gShieldSpell.find(shield->GetFormID()) : gShieldSpell.end();
+				if (const auto it = pair != gShieldSpell.end() ? gApplied.find(pair->second) : gApplied.end(); it != gApplied.end()) {
+					for (const bool first : { false, true }) {
+						auto* root = (!first || player) ? a_actor->Get3D(first) : nullptr;
+						TouchUnder(root ? root->GetObjectByName("SHIELD") : nullptr, it->second);
+					}
+				}
+			}
 			for (const bool left : { false, true }) {
 				auto* form = a_actor->GetEquippedObject(left);
 				if (player) {
@@ -481,6 +531,32 @@ namespace Fade::Items
 				continue;
 			}
 			gCatalog.push_back({ spell->GetFormID(), key, name, Lower(name), kind.school >= 0 ? kSchools[kind.school] : "Other spells", true, false });
+		}
+		gShieldSpell.clear();
+		// every spell of a name: two mods may each have one, and a shield belongs to its own mod's
+		std::unordered_map<std::string, std::vector<std::pair<RE::FormID, const RE::TESFile*>>> spellsByName;
+		for (const auto& item : gCatalog) {
+			if (item.spell) {
+				const auto* form = RE::TESForm::LookupByID(item.id);
+				spellsByName[item.lower].emplace_back(item.id, form ? form->GetFile(0) : nullptr);
+			}
+		}
+		for (auto* armor : dh->GetFormArray<RE::TESObjectARMO>()) {
+			const char* name = armor && armor->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kShield) ? armor->GetFullName() : nullptr;
+			const auto  it = name && *name ? spellsByName.find(Lower(name)) : spellsByName.end();
+			if (it == spellsByName.end()) {
+				continue;
+			}
+			// the shield and its spell come from one mod: another mod's or the game's shield that only shares the spell's name is not that spell's
+			// its own file's spell first; a spell of a file it masters (or that masters it) only when its own file has none
+			const auto* file = armor->GetFile(0);
+			auto        own = std::ranges::find_if(it->second, [file](const auto& a_spell) { return a_spell.second == file; });
+			if (own == it->second.end()) {
+				own = std::ranges::find_if(it->second, [file](const auto& a_spell) { return SameMod(a_spell.second, file); });
+			}
+			if (own != it->second.end()) {
+				gShieldSpell.emplace(armor->GetFormID(), own->first);
+			}
 		}
 		for (auto* weapon : dh->GetFormArray<RE::TESObjectWEAP>()) {
 			if (!weapon || !weapon->GetPlayable()) {

@@ -11,6 +11,7 @@
 //   StreamStrength=100          percent, 25 to 200 - the rows along streams, sprays and bolts and their own lights (Rows.cpp)
 //   GlowStrength=100            percent, 25 to 200 - glows on people: cloaks, flesh spells, FEC's bodies (BodyLights.cpp)
 //   EnchantedStrength=100       percent, 25 to 200 - enchanted weapons' lights, as the Enchanted weapons switch counts them
+//   GroundStrength=100          percent, 25 to 200 - spells left on the ground: a hazard's light (Brightness.cpp)
 //   FecFrozenFadesOut=1         1 = a body Frozen Electrocuted Combustion froze glows a few seconds, then fades; 0 = it stays lit
 //   FecBurningFadesOut=1        1 = a body it burned glows while its flames die down, then fades; 0 = it stays lit
 //   HandLights=1                the light on your hands while you cast (HandLights.cpp)
@@ -35,7 +36,10 @@
 #include "DataText.h"
 #include "Fade.h"
 #include "FadeSettingsText.h"
+#include "EnbShaderLights.h"
 #include "Plugin.h"
+#include "NatureKind.h"
+#include "StrangeRunes.h"
 
 namespace Plugin
 {
@@ -50,8 +54,8 @@ namespace Plugin
 		constexpr int         kReachMin = 50, kReachMax = 150;
 		constexpr int         kStrengthMin = 25, kStrengthMax = 200;
 
-		// explosions, streams, glows on people, enchanted weapons (Strength, one slot each after kNone)
-		std::array<std::atomic<int>, 4> gStrength{ 100, 100, 100, 100 };
+		// explosions, streams, glows on people, enchanted weapons, ground effects (Strength, one slot each after kNone)
+		std::array<std::atomic<int>, 5> gStrength{ 100, 100, 100, 100, 100 };
 		std::atomic<int>                gBrightness{ 100 };
 		std::atomic<int>                gReach{ 100 };
 		std::atomic<bool>               gFecFrozenFades{ true };
@@ -59,14 +63,22 @@ namespace Plugin
 		std::atomic<bool>               gHands{ true };
 		std::atomic<bool>               gWeapons{ true };
 		std::atomic<bool>               gEnchantedWeapons{ true };
-		std::atomic<int>                gWard{ 0 };
-		std::atomic<int>                gHandsFor{ 0 };
-		std::atomic<bool>               gAuto{ true };
-		std::atomic<bool>               gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
-		std::array<std::atomic<int>, 4> gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
-		std::atomic<bool>               gDynamic{ true };
-		std::atomic<bool>               gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
-		std::atomic<bool>               gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
+		std::atomic<bool>               gStrangeRunes{ false };   // 1 = Strange Runes' runes light the casting hands
+		std::atomic<bool>               gHandShadows{ true };     // 1 = both hands lit: each hand casts its own shadow
+		std::atomic<bool>               gBurnEm{ false };         // 1 = Burn'em Banners lights its own banners, ours stands down
+		RE::TESGlobal*                  gBurnEmGlobal = nullptr;  // RELightBurnEmBannersLight: Burn'em's Light Placer rows wait on it == 1
+		// frost, earth and stone, water, wind, plants (NatureKind::kSettingKeys): false leaves that kind of spell unlit
+		std::array<std::atomic<bool>, 5>  gNature{ true, true, true, true, true };
+		std::atomic<bool>                 gEnbShaderLights{ false };  // 1 = ENB Lights For Effect Shaders lights FEC's bodies
+		std::vector<RE::TESEffectShader*> gEnbOurs;                   // our body shaders it lit when the first game loaded (main thread)
+		std::atomic<int>                  gWard{ 0 };
+		std::atomic<int>                  gHandsFor{ 0 };
+		std::atomic<bool>                 gAuto{ true };
+		std::atomic<bool>                 gAllOff{ false };  // his Performance switch (Illuminated's CLAUDE.md): every light of this mod off
+		std::array<std::atomic<int>, 4>   gArt{};            // fire, frost, shock, healing art: 0 = the game's own (DataText::kPickNames)
+		std::atomic<bool>                 gDynamic{ true };
+		std::atomic<bool>                 gDynamicSession{ true };  // what this session's data was read with (FixDynamicLighting)
+		std::atomic<bool>                 gPulse{ true };           // Dynamic Lighting's Realistic: each hand light pulses in its kind's shape
 
 		// an art pick within its group's choices (DataText::kPickNames - one list, so a new pick needs no second edit)
 		[[nodiscard]] int ClampPick(int a_group, int a_v) { return std::clamp(a_v, 0, (std::max)(DataText::PickCount(a_group) - 1, 0)); }
@@ -111,11 +123,22 @@ namespace Plugin
 			{ "StreamStrength", [] { return gStrength[1].load(); }, [](int v) { gStrength[1] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "GlowStrength", [] { return gStrength[2].load(); }, [](int v) { gStrength[2] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "EnchantedStrength", [] { return gStrength[3].load(); }, [](int v) { gStrength[3] = std::clamp(v, kStrengthMin, kStrengthMax); } },
+			{ "GroundStrength", [] { return gStrength[4].load(); }, [](int v) { gStrength[4] = std::clamp(v, kStrengthMin, kStrengthMax); } },
 			{ "FecFrozenFadesOut", [] { return gFecFrozenFades ? 1 : 0; }, [](int v) { gFecFrozenFades = v != 0; } },
 			{ "FecBurningFadesOut", [] { return gFecBurningFades ? 1 : 0; }, [](int v) { gFecBurningFades = v != 0; } },
 			{ "HandLights", [] { return gHands ? 1 : 0; }, [](int v) { gHands = v != 0; } },
 			{ "WeaponLights", [] { return gWeapons ? 1 : 0; }, [](int v) { gWeapons = v != 0; } },
 			{ "EnchantedWeapons", [] { return gEnchantedWeapons ? 1 : 0; }, [](int v) { gEnchantedWeapons = v != 0; } },
+			{ "StrangeRunesLight", [] { return gStrangeRunes ? 1 : 0; }, [](int v) { gStrangeRunes = v != 0; } },
+			{ "HandShadows", [] { return gHandShadows ? 1 : 0; }, [](int v) { gHandShadows = v != 0; } },
+			{ "VAERSwirls", [] { return VaerEffectsPercent(); }, [](int v) { SetVaerEffectsPercent(v); } },
+			{ "BurnEmBannersLight", [] { return gBurnEm ? 1 : 0; }, [](int v) { gBurnEm = v != 0; } },
+			{ "FrostLights", [] { return gNature[0] ? 1 : 0; }, [](int v) { gNature[0] = v != 0; } },
+			{ "EarthLights", [] { return gNature[1] ? 1 : 0; }, [](int v) { gNature[1] = v != 0; } },
+			{ "WaterLights", [] { return gNature[2] ? 1 : 0; }, [](int v) { gNature[2] = v != 0; } },
+			{ "WindLights", [] { return gNature[3] ? 1 : 0; }, [](int v) { gNature[3] = v != 0; } },
+			{ "PlantLights", [] { return gNature[4] ? 1 : 0; }, [](int v) { gNature[4] = v != 0; } },
+			{ "ENBShaderLights", [] { return gEnbShaderLights ? 1 : 0; }, [](int v) { gEnbShaderLights = v != 0; } },
 			{ "WardColor", [] { return gWard.load(); }, [](int v) { gWard = std::clamp(v, 0, 1); } },
 			{ "HandLightsFor", [] { return gHandsFor.load(); }, [](int v) { gHandsFor = std::clamp(v, 0, 3); } },
 			{ "AutoLights", [] { return gAuto ? 1 : 0; }, [](int v) { gAuto = v != 0; } },
@@ -187,6 +210,21 @@ namespace Plugin
 				old.art[0], old.art[1], old.art[2], old.art[3], old.dynamic ? "on" : "off");
 		}
 
+		// the Bottled Shaders Shadows installer's pick (his 668): its one-shadow option's marker carries OneShadow=1, where a player
+		// who never saved "A shadow from each hand" starts
+		[[nodiscard]] bool ShadowInstallerPicksOne()
+		{
+			std::ifstream in("Data/SKSE/Plugins/RELightSpellLightingNG/Bottled Shaders Shadows.ini");
+			std::string   line;
+			while (std::getline(in, line)) {
+				std::erase_if(line, [](unsigned char a_c) { return std::isspace(a_c) != 0; });
+				if (SameText(line, "OneShadow=1")) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// the file itself: written beside itself and moved over, on the thread that calls it (the main thread - SaveSettings)
 		void WriteSettingsFile()
 		{
@@ -232,7 +270,7 @@ namespace Plugin
 		std::size_t              read = 0;
 		std::vector<std::string> problems;
 		std::vector<std::string> unknown;  // each unknown section named once
-		bool                     picksRead = false, pulseRead = false, dynamicRead = false;
+		bool                     picksRead = false, pulseRead = false, dynamicRead = false, handShadowsRead = false;
 		for (bool first = true; in && std::getline(in, line); first = false) {
 			if (first && line.starts_with("\xEF\xBB\xBF")) {
 				line.erase(0, 3);  // a file saved "UTF-8 with BOM" would lose its first section
@@ -272,6 +310,7 @@ namespace Plugin
 			if (settings) {
 				picksRead = picksRead || IsPickKey(key);
 				pulseRead = pulseRead || SameText(key, "PulseShapes");
+				handShadowsRead = handShadowsRead || SameText(key, "HandShadows");
 				dynamicRead = dynamicRead || SameText(key, "DynamicLighting");
 				// the glow limit's switch and count and Dim in daylight left the menu in 3.1: an older file's keys pass quietly
 				if (!SameText(key, "GlowLimit") && !SameText(key, "GlowLimitCount") && !SameText(key, "DimInDaylight") && !ApplySetting(key, *v)) {
@@ -292,6 +331,9 @@ namespace Plugin
 		}
 		if (!picksRead) {
 			CarryOldPicks(a_log);
+		}
+		if (!handShadowsRead) {
+			gHandShadows = !ShadowInstallerPicksOne();  // never saved: the shadow installer's pick
 		}
 		if (!pulseRead) {
 			gPulse = !dynamicRead;  // a new player starts on Realistic; one who saved Dynamic Lighting keeps it (On = Regular)
@@ -322,14 +364,20 @@ namespace Plugin
 		if (queued.exchange(true)) {
 			return;
 		}
-		const auto write = [] {
+		if (auto* tasks = SKSE::GetTaskInterface()) {
+			tasks->AddTask([] {
+				queued = false;
+				LightKit::Guarded("settings save", []() {
+					WriteSettingsFile();
+					SyncBurnEmGlobal();
+					RetuneBurningBanners();  // the burning banners' fire lights under the values just saved (BurningBanners.cpp)
+				});
+			});
+		} else {
+			// no way to reach the main thread: only the file is written here; the global and the banners touch game objects
 			queued = false;
 			LightKit::Guarded("settings save", []() { WriteSettingsFile(); });
-		};
-		if (auto* tasks = SKSE::GetTaskInterface()) {
-			tasks->AddTask(write);
-		} else {
-			write();
+			SKSE::log::warn("settings: no SKSE task interface - Burn'em Banners follows the saved value at the next start");
 		}
 	}
 
@@ -440,6 +488,161 @@ namespace Plugin
 			BumpSettings();
 			SKSE::log::info("enchanted weapons' lights turned {}", a_on ? "on" : "off");
 		}
+	}
+
+	bool StrangeRunesLightOn() { return gStrangeRunes; }
+
+	void SetStrangeRunesLightOn(bool a_on)
+	{
+		if (gStrangeRunes.exchange(a_on) != a_on) {
+			SKSE::log::info("Strange Runes lights the hands: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool StrangeRunesLoaded() { return StrangeRunes::Loaded(); }
+
+	bool NatureLightsOn(int a_index) { return a_index < 0 || a_index >= static_cast<int>(gNature.size()) || gNature[static_cast<std::size_t>(a_index)]; }
+
+	void SetNatureLightsOn(int a_index, bool a_on)
+	{
+		if (a_index >= 0 && a_index < static_cast<int>(gNature.size()) && gNature[static_cast<std::size_t>(a_index)].exchange(a_on) != a_on) {
+			BumpSettings();  // the option walk, the rows and the body glows look again
+			SKSE::log::info("{} turned {}", NatureKind::kSettingKeys[static_cast<std::size_t>(a_index)], a_on ? "on" : "off");
+		}
+	}
+
+	bool AnyNatureOff()
+	{
+		return std::ranges::any_of(gNature, [](const auto& a_on) { return !a_on.load(); });
+	}
+
+	int NatureIndexOf(const RE::TESForm* a_form)
+	{
+		const auto* model = a_form ? a_form->As<RE::TESModel>() : nullptr;
+		const char* path = model ? model->GetModel() : nullptr;
+		return path ? NatureKind::IndexOf(NatureKind::KindOf(path)) : -1;
+	}
+
+	bool NatureKindOff(std::string_view a_path) { return !NatureLightsOn(NatureKind::IndexOf(NatureKind::KindOf(a_path))); }
+
+	bool StrangeRunesHands() { return gStrangeRunes && StrangeRunes::Loaded(); }
+
+	// it starts at the Advanced Settings file's VAERebornEffects (read before the settings file) until the settings are first saved;
+	// from then on the saved slider wins
+	int VaerEffectsPercent() { return static_cast<int>(std::lround(gVaeEffects.load(std::memory_order_relaxed) * 100.0f)); }
+
+	void SetVaerEffectsPercent(int a_percent)
+	{
+		a_percent = std::clamp(a_percent, 0, 400);
+		if (VaerEffectsPercent() != a_percent) {
+			gVaeEffects.store(static_cast<float>(a_percent) / 100.0f, std::memory_order_relaxed);
+			SKSE::log::info("VAER Reborn's enchantment effects set to {}%", a_percent);
+		}
+	}
+
+	bool ShadowFromEachHand() { return gHandShadows; }
+
+	void SetShadowFromEachHand(bool a_on)
+	{
+		if (gHandShadows.exchange(a_on) != a_on) {
+			SKSE::log::info("a shadow from each hand: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool BurnEmBannersLoaded()
+	{
+		auto* dh = RE::TESDataHandler::GetSingleton();
+		return dh && (dh->LookupLoadedModByName("BurnEmBanners.esp") || dh->LookupLoadedLightModByName("BurnEmBanners.esp"));
+	}
+
+	bool BurnEmBannersLightsItself() { return gBurnEm; }
+
+	void SetBurnEmBannersLightsItself(bool a_on)
+	{
+		if (gBurnEm.exchange(a_on) != a_on) {
+			SKSE::log::info("Burn'em Banners lights its banners: {}", a_on ? "on" : "off");
+		}
+	}
+
+	// Illuminated's way (its Settings.cpp MakeGlobal): a global made by the game's own factory, its editor ID put into the game's
+	// table so Light Placer's condition finds it by name, read back by that name
+	void MakeBurnEmGlobal()
+	{
+		constexpr const char* kId = "RELightBurnEmBannersLight";
+		auto*                 g = LightKit::NewForm<RE::TESGlobal>();
+		if (!g) {
+			SKSE::log::warn("{}: the game made no global", kId);
+			return;
+		}
+		g->SetFormEditorID(kId);
+		const auto& [map, lock] = RE::TESForm::GetAllFormsByEditorID();
+		if (map) {
+			RE::BSWriteLockGuard guard{ lock };
+			map->insert({ RE::BSFixedString(kId), g });
+		}
+		gBurnEmGlobal = RE::TESForm::LookupByEditorID<RE::TESGlobal>(kId) == g ? g : nullptr;
+		SyncBurnEmGlobal();
+		SKSE::log::info("{}: {}", kId, gBurnEmGlobal ? "made" : "not found by its name");
+	}
+
+	void SyncBurnEmGlobal()
+	{
+		if (gBurnEmGlobal) {
+			gBurnEmGlobal->value = gBurnEm ? 1.0f : 0.0f;
+		}
+	}
+
+	bool EnbShaderLightsOn() { return gEnbShaderLights; }
+
+	void SetEnbShaderLightsOn(bool a_on)
+	{
+		if (gEnbShaderLights.exchange(a_on) != a_on) {
+			BumpSettings();  // the body lights look again: ours on its shaders off, or back
+			SKSE::log::info("ENB Lights For Effect Shaders lights FEC's bodies: {}", a_on ? "on" : "off");
+		}
+	}
+
+	bool EnbShaderLightsLoaded()
+	{
+		static const bool here = EnbShaderLights::Installed();  // asked after every SKSE plugin has loaded
+		return here;
+	}
+
+	bool EnbShadersGivenBack() { return gEnbShaderLights && EnbShaderLightsLoaded(); }
+
+	bool EnbShaderActor(const RE::Actor* a_actor)
+	{
+		// its own ini: 0 the player, 1 and followers, 2 everyone (its default)
+		static const int valid = EnbShaderLights::ValidActors();
+		return a_actor && (valid >= 2 || a_actor->IsPlayerRef() || (valid == 1 && a_actor->IsPlayerTeammate()));
+	}
+
+	void ApplyEnbShaderLights()
+	{
+		const bool giveBack = EnbShadersGivenBack() || AllLightsOff();
+		for (auto* shader : gEnbOurs) {
+			if (giveBack) {
+				EnbShaderLights::GiveBack(shader);
+			} else {
+				EnbShaderLights::TakeOff(shader);
+			}
+		}
+	}
+
+	void TakeEnbShaderLights()
+	{
+		static bool done = false;
+		if (done || !EnbShaderLightsLoaded()) {
+			return;
+		}
+		done = true;
+		for (auto* shader : BodyShaders()) {
+			if (EnbShaderLights::Lit(shader)) {
+				gEnbOurs.push_back(shader);
+			}
+		}
+		ApplyEnbShaderLights();
+		SKSE::log::info("ENB Lights For Effect Shaders lights {} body shader(s) RELight lights too: ours is the default there", gEnbOurs.size());
 	}
 
 	int WardColor() { return gWard; }

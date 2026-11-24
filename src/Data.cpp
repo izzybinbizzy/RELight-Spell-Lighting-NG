@@ -32,7 +32,9 @@
 #include "DataText.h"
 #include "Fade.h"
 #include "FadeFormText.h"
+#include "CreatureBases.h"
 #include "Plugin.h"
+#include "Po3Tweaks.h"
 
 namespace Plugin
 {
@@ -364,17 +366,8 @@ namespace Plugin
 		}
 
 		// RE::Light reads an effect shader's editor ID through powerofthree's Tweaks (clib_util::editorID) - the game keeps
-		// none for this form type - and so does this
-		[[nodiscard]] std::string EditorIdOf(const RE::TESForm* a_form)
-		{
-			using GetFormEditorID = const char* (*)(std::uint32_t);
-			static const auto fn = [] {
-				const auto tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks");
-				return tweaks ? reinterpret_cast<GetFormEditorID>(REX::W32::GetProcAddress(tweaks, "GetFormEditorID")) : nullptr;
-			}();
-			const char* id = fn ? fn(a_form->GetFormID()) : a_form->GetFormEditorID();
-			return id ? std::string(id) : std::string{};
-		}
+		// none for this form type - and so does this, through the shared Po3Tweaks.h (Tweaks first, then the form's own)
+		[[nodiscard]] std::string EditorIdOf(const RE::TESForm* a_form) { return Po3Tweaks::EditorID(a_form); }
 
 		// RE::Light's enchantment light (ShaderReferenceEffect::Init): a config by the shader's form, else by its
 		// lower-cased editor ID as an EXACT `meshPath` key (findConfigsForMeshPath is a plain lookup, no substring)
@@ -399,11 +392,8 @@ namespace Plugin
 					gShaderOwner.emplace(shader->GetFormID(), it->second);
 				}
 			}
-			const bool tweaks = REX::W32::GetModuleHandleW(L"po3_Tweaks") != nullptr;
-			SKSE::log::info("enchantment lights: {} effect shader(s) are ours, {} of {} had an editor ID (powerofthree's Tweaks {})",
-				gShaderOwner.size(), named, dh->GetFormArray<RE::TESEffectShader>().size(),
-				!tweaks ? "NOT loaded" : named ? "loaded" :
-												 "loaded, but it keeps no editor IDs - its Load EditorIDs setting may be off");
+			SKSE::log::info("enchantment lights: {} effect shader(s) are ours, {} of {} had an editor ID ({})", gShaderOwner.size(), named,
+				dh->GetFormArray<RE::TESEffectShader>().size(), Po3TweaksText::Describe(Po3Tweaks::StateNow()));
 		}
 
 		// a per-form answer, worked out once and cached. A form made while the game runs (its ID starts FF) is never cached:
@@ -455,6 +445,51 @@ namespace Plugin
 			out.resize(out.size() - 4);
 		}
 		return out;
+	}
+
+	namespace
+	{
+		// a base form Illuminated - Creature Lighting NG lights through RE::Light by base ID (its creature records on the models we
+		// share): RE::Light looks base IDs up first and lights it by Creatures' config, so no switch, slider or tint of ours touches
+		// it (CreatureBases.h, tested off the game). Only Creatures' own folder is read, once at data load
+		constexpr std::string_view     kConfigs = "Data/SKSE/Plugins/ReLight/Configs";
+		std::unordered_set<RE::FormID> gCreatureBases;
+
+		void ReadCreatureBases()
+		{
+			gCreatureBases.clear();
+			std::size_t     files = 0;
+			std::size_t     bad = 0;
+			std::error_code ec;
+			for (fs::directory_iterator top{ fs::path(kConfigs), ec }, end; !ec && top != end; top.increment(ec)) {
+				std::error_code topEc;
+				if (!top->is_directory(topEc) || !CreatureBases::CreaturesFolder(Fade::PathText(top->path().filename()))) {
+					continue;
+				}
+				std::error_code inEc;
+				for (fs::recursive_directory_iterator it{ top->path(), inEc }, inEnd; !inEc && it != inEnd; it.increment(inEc)) {
+					std::error_code entryEc;
+					if (Lower(Fade::PathText(it->path().extension())) != ".json" || !it->is_regular_file(entryEc)) {
+						continue;
+					}
+					std::ifstream     in(it->path(), std::ios::binary);
+					const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+					const auto        tokens = CreatureBases::BaseTokens(text);
+					if (!tokens) {
+						++bad;
+						continue;
+					}
+					++files;
+					for (const auto& token : *tokens) {
+						if (const auto form = ResolveBase(token)) {
+							gCreatureBases.insert(form);
+						}
+					}
+				}
+			}
+			SKSE::log::info("data: {} base form(s) Creatures lights through RE::Light are left to it ({} file(s) read, {} did not)",
+				gCreatureBases.size(), files, bad);
+		}
 	}
 
 	void LoadData()
@@ -512,6 +547,7 @@ namespace Plugin
 				SKSE::log::warn("{} does not read - its lights stay as RE::Light makes them", Fade::PathText(f.filename()));
 			}
 		}
+		ReadCreatureBases();
 		gKeysLongestFirst = LongestFirst(gMeshOwner);
 		FindShaderOwners();
 		gStreamKeysLongestFirst = LongestFirst(gStreams);
@@ -554,6 +590,9 @@ namespace Plugin
 			if (auto it = gBaseOwner.find(a_base->GetFormID()); it != gBaseOwner.end()) {
 				return it->second;
 			}
+			if (CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
+				return kNone;
+			}
 			const auto key = KeyOf(a_base);
 			const auto it = key.empty() ? gMeshOwner.cend() : Find(gMeshOwner, gKeysLongestFirst, key);
 			return it != gMeshOwner.cend() ? it->second : kNone;
@@ -577,10 +616,21 @@ namespace Plugin
 
 	const Stream* StreamOf(const RE::TESForm* a_base)
 	{
-		if (!a_base || gStreams.empty()) {
+		// the Dwarven Spider's bolt (Skyrim.esm 0x4EFDF) is Illuminated - Creature Lighting NG's, row and light; the other bolts on its
+		// model (Storm Calling's) keep ours
+		constexpr RE::FormID kCreatureBolt = 0x0004EFDF;
+		if (!a_base || gStreams.empty() || a_base->GetFormID() == kCreatureBolt || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
+		// the creature bolts, cones and breaths Creatures 1.1 lights (Illuminated's StreamLights.cpp list): no row of ours on them, with
+		// Creatures installed or not - the player's own projectiles on the same models keep theirs (rule file 6 1.3, the paired drop)
+		static constexpr std::array<std::string_view, 8> kCreatureProjectiles{ "shockboltaimdwarvenspider", "dragonicespikevolleyprojectile",
+			"dragonicespikevolleyprojectile_aos", "dragonvoicealduinendtimesprojectile", "dragonfireprojectile02", "duncgalduinfireprojectile",
+			"dragonfrostprojectile01", "dragonfrostprojectile01_aos" };
 		return Cached(gStreamCache, a_base, [&]() -> const Stream* {
+			if (std::ranges::find(kCreatureProjectiles, Lower(EditorIdOf(a_base))) != kCreatureProjectiles.end()) {
+				return nullptr;
+			}
 			const auto key = KeyOf(a_base);
 			const auto it = key.empty() ? gStreams.cend() : Find(gStreams, gStreamKeysLongestFirst, key);
 			return it != gStreams.cend() ? &it->second : nullptr;
@@ -684,12 +734,12 @@ namespace Plugin
 
 	const RE::NiColor* HandColorOf(const RE::TESForm* a_base)
 	{
-		return a_base ? ElementHandColor(a_base, KeyOf(a_base)) : nullptr;
+		return a_base && !CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner) ? ElementHandColor(a_base, KeyOf(a_base)) : nullptr;
 	}
 
 	const RE::NiColor* TintOf(const RE::TESForm* a_base)
 	{
-		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty())) {
+		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty()) || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
 		const auto work = [&]() -> const RE::NiColor* {
@@ -831,6 +881,17 @@ namespace Plugin
 	{
 		const auto it = a_shader ? gBodyBase.find(a_shader->GetFormID()) : gBodyBase.end();
 		return it != gBodyBase.end() ? &it->second : nullptr;
+	}
+
+	std::vector<RE::TESEffectShader*> BodyShaders()
+	{
+		std::vector<RE::TESEffectShader*> out;
+		for (const auto& entry : gBodyBase) {
+			if (auto* shader = RE::TESForm::LookupByID<RE::TESEffectShader>(entry.first)) {
+				out.push_back(shader);
+			}
+		}
+		return out;
 	}
 
 	const Stream* CloudOf(const RE::BGSProjectile* a_projectile)

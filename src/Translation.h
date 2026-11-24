@@ -1,202 +1,142 @@
-// Translation of the settings pages - shared by izzydoingit's SKSE plugins (the same file in each).
+// Translation of the settings pages - shared by izzydoingit's SKSE plugins (master: Tools\Shared Plugin Code).
 // Copyright (C) 2026 izzydoingit. GPL-3.0-or-later.
 //
-// SKSE Menu Framework translates only its own menu, so each plugin reads its own file:
-//   Data/SKSE/Plugins/<plugin folder>/Translation.json
-// a flat JSON object, every line "English text": "translated text". The mod ships it with the English on both sides (it
-// changes nothing); a translator replaces the right-hand side. A missing file, a missing line or an empty translation keeps
-// the English. A translation whose placeholders (%d, %s, %.0f ... or {}) do not match its English line is not used - it would
-// print garbage or crash - and the log says which.
+// The standard Skyrim translation files: each mod ships Data\Interface\Translations\<name>_ENGLISH.txt (UTF-16 with a byte order
+// mark, one "$Key<TAB>text" line per menu line, made by translationfiles.py from the menu's own lines). A translator copies it to
+// <name>_<LANGUAGE>.txt - the game's own language word: GERMAN, FRENCH, RUSSIAN ... - and changes the text after the tab. At data load
+// CommonLib's SKSE::Translation reads the file of the language the game runs in into the game's own translator, and a menu line is
+// asked of it by its key the first time it is shown. A missing file or line keeps the English; a translation whose placeholders do
+// not match its English line is not used and the log names it (TranslationText.h Usable).
 #pragma once
 
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
+#include "TranslationText.h"
+
+#include <functional>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 namespace Translation
 {
+	using TranslationText::Fill;
+
 	namespace Detail
 	{
-		inline std::unordered_map<std::string, std::string>& Map()
+		struct Hash
 		{
-			static std::unordered_map<std::string, std::string> map;
-			return map;
+			using is_transparent = void;
+			[[nodiscard]] std::size_t operator()(std::string_view a_text) const noexcept { return std::hash<std::string_view>{}(a_text); }
+		};
+
+		struct State
+		{
+			std::mutex                                                          lock;
+			std::string                                                         name;
+			std::unordered_map<std::string, std::string, Hash, std::equal_to<>> lines;   // English -> what the menu shows
+			std::thread::id                                                     main{};  // Load's thread: the game's main thread
+			std::unordered_set<std::string>                                     asked;   // lines asked for off it (copied: a caller's text may not outlive the call)
+			bool                                                                queued{ false };
+		};
+
+		[[nodiscard]] inline State& Get()
+		{
+			static State state;
+			return state;
 		}
 
-		// the printf conversions (%% excluded) and the {} fields of a line, in order. A '*' width or precision belongs to its
-		// conversion ("%*s" is not "%s" - it takes one more argument). a_format: the line is printed through printf, so the
-		// space and ' flags count too ("% d" takes an argument there); otherwise "100% is" stays plain text.
-		inline std::vector<std::string> Placeholders(std::string_view a_s, bool a_format = false)
+		// CommonLib's SKSE::Translation::ParseTranslation and ::Translate (our pin, Translation.cpp 46 / 129) each take a reference on
+		// the game's translator (GetStateAddRef) and never give it back, on every path once the loader is there. Called right after
+		// either: one reference of our own is taken and released with the one the helper left (none when the loader is not there,
+		// as the helper took none). The game keeps its own references, so the translator never goes. Main thread
+		inline void GiveBackTranslator()
 		{
-			const std::string_view   flags = a_format ? std::string_view("-+#0123456789.lhzjtLIw* '") : std::string_view("-+#0123456789.lhzjtLIw*");
-			std::vector<std::string> out;
-			for (std::size_t i = 0; i < a_s.size(); ++i) {
-				if (a_s[i] == '%') {
-					if (i + 1 < a_s.size() && a_s[i + 1] == '%') {
-						++i;
-						continue;
-					}
-					// a conversion is flags/width/length then one conversion letter - MSVC's own %S, %C, %Z and its I, I32,
-					// I64 and w sizes included ("%I64u" is one conversion, not "%I" and text)
-					std::size_t j = i + 1;
-					while (j < a_s.size() && flags.find(a_s[j]) != std::string_view::npos) {
-						++j;
-					}
-					const bool known = j < a_s.size() && std::string_view("diouxXeEfFgGaAcspnSCZ").find(a_s[j]) != std::string_view::npos;
-					// printf reads ANY '%' as a conversion: one it does not know (a translated "50 % r") or a '%' at the very
-					// end counts too, so it never matches the English and never reaches printf
-					if (known || a_format) {
-						out.emplace_back(a_s.substr(i, j - i + 1));
-						i = j;
-					}
-				} else if (a_s[i] == '{') {
-					const auto j = a_s.find('}', i);
-					if (j == std::string_view::npos) {
-						out.emplace_back("{");
-						break;
-					}
-					out.emplace_back(a_s.substr(i, j - i + 1));
-					i = j;
-				}
-			}
-			return out;
-		}
-
-		// where the file's top object closes - braces inside quoted text don't count - or npos
-		inline std::size_t RootClose(std::string_view a_text)
-		{
-			int  depth = 0;
-			bool quoted = false;
-			for (std::size_t i = 0; i < a_text.size(); ++i) {
-				const char c = a_text[i];
-				if (quoted) {
-					if (c == '\\') {
-						++i;
-					} else if (c == '"') {
-						quoted = false;
-					}
-				} else if (c == '"') {
-					quoted = true;
-				} else if (c == '{' || c == '[') {
-					++depth;
-				} else if ((c == '}' || c == ']') && --depth <= 0) {
-					return depth == 0 && c == '}' ? i : std::string_view::npos;
-				}
-			}
-			return std::string_view::npos;
-		}
-
-		// the file's lines, or false with what is wrong. As the reader before it: what follows the top object is not read, and
-		// a comma after the last line is forgiven (translators leave one; the parser itself refuses both); anything but one
-		// object of text lines is refused whole.
-		inline bool Read(std::string a_text, std::unordered_map<std::string, std::string>& a_out, std::string& a_error)
-		{
-			if (const auto close = RootClose(a_text); close != std::string::npos && close > 0) {
-				a_text.resize(close + 1);
-				const auto comma = a_text.find_last_not_of(" \t\r\n", close - 1);
-				const auto before = comma != std::string::npos && comma > 0 ? a_text.find_last_not_of(" \t\r\n", comma - 1) : std::string::npos;
-				if (before != std::string::npos && a_text[comma] == ',' && a_text[before] != '{') {
-					a_text.erase(comma, 1);
-				}
-			}
-			try {
-				const auto json = nlohmann::json::parse(a_text);
-				if (!json.is_object()) {
-					a_error = "the file must be one { } of \"English\": \"translation\" lines";
-					return false;
-				}
-				for (const auto& [key, value] : json.items()) {
-					if (!value.is_string()) {
-						a_error = "expected a quoted translation for \"" + key + "\"";
-						return false;
-					}
-					a_out[key] = value.get<std::string>();
-				}
-				return true;
-			} catch (const nlohmann::json::exception& e) {
-				a_error = e.what();
-				return false;
+			const auto* manager = RE::BSScaleformManager::GetSingleton();
+			auto*       loader = manager ? manager->loader : nullptr;
+			if (auto* translator = loader ? loader->GetStateAddRef<RE::GFxTranslator>(RE::GFxState::StateType::kTranslator) : nullptr) {
+				translator->Release();
+				translator->Release();
 			}
 		}
 	}
 
-	// Reads the file (call once, at data load, before the menu is registered). Returns what to log.
-	inline std::string Load(const std::filesystem::path& a_file)
+	// at data load, before the menu is registered: the game's translator reads <a_name>_<its language>.txt. Returns what to log
+	inline std::string Load(std::string_view a_name)
 	{
-		auto& map = Detail::Map();
-		map.clear();
-		std::ifstream in(a_file, std::ios::binary);
-		if (!in) {
-			// the name as UTF-8: path::string() throws for a name the ANSI code page cannot show
-			const auto name = a_file.filename().generic_u8string();
-			return "no translation file (" + std::string(name.begin(), name.end()) + "): the pages are in English";
+		auto& state = Detail::Get();
+		{
+			std::lock_guard l{ state.lock };
+			state.name = a_name;
+			state.lines.clear();
+			state.main = std::this_thread::get_id();
 		}
-		std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
-		if (text.starts_with("\xEF\xBB\xBF")) {
-			text.erase(0, 3);
-		}
-		std::unordered_map<std::string, std::string> read;
-		std::string                                  error;
-		if (!Detail::Read(std::move(text), read, error)) {
-			return "translation file not used - " + error;
-		}
-		std::size_t used = 0, same = 0, bad = 0;
-		std::string badLines;
-		for (auto& [en, tr] : read) {
-			if (tr.empty() || tr == en) {
-				++same;
-				continue;
-			}
-			// an English line with a conversion or a "%%" is printed through printf: read both sides by printf's own rules
-			const auto lenient = Detail::Placeholders(en);
-			const bool format = en.find("%%") != std::string::npos ||
-			                    std::ranges::any_of(lenient, [](const std::string& p) { return p.starts_with('%'); });
-			if (Detail::Placeholders(en, format) != Detail::Placeholders(tr, format)) {
-				++bad;
-				if (badLines.size() < 400) {
-					badLines += "\n  placeholders differ, English kept: \"" + en + "\"";
-				}
-				continue;
-			}
-			map.emplace(en, std::move(tr));
-			++used;
-		}
-		return "translation: " + std::to_string(used) + " line(s) translated, " + std::to_string(same) + " left in English, " +
-		       std::to_string(bad) + " not used" + badLines;
+		SKSE::Translation::ParseTranslation(std::string(a_name));
+		Detail::GiveBackTranslator();
+		return "translation: the menu's lines come from Interface\\Translations\\" + std::string(a_name) +
+		       "_<the game's language>.txt; a missing file or line stays English";
 	}
 
-	// the line in the reader's language, or the English itself
+	namespace Detail
+	{
+		// under state.lock, on the main thread only: the game's translator read for one line, kept
+		inline const char* Resolve(State& a_state, const char* a_english);
+	}
+
+	// the line in the reader's language, or the English itself. Each line is asked of the game's translator once, on the main
+	// thread: asked first from another thread (the menu draws on the render thread) it shows its English until one task has read it
 	inline const char* T(const char* a_english)
 	{
-		const auto& map = Detail::Map();
-		if (map.empty()) {
+		auto&           state = Detail::Get();
+		std::lock_guard l{ state.lock };
+		if (state.name.empty()) {
 			return a_english;
 		}
-		const auto it = map.find(a_english);
-		return it != map.end() ? it->second.c_str() : a_english;
-	}
-
-	// a (translated) line's {} filled in order with the given words - never std::format on a translated line, where a stray
-	// brace would throw. Load already refused a translation whose {} count differs from its English.
-	inline std::string Fill(std::string_view a_line, std::string_view a_one, std::string_view a_two = {})
-	{
-		std::string out;
-		int         n = 0;
-		for (std::size_t i = 0; i < a_line.size(); ++i) {
-			if (a_line[i] == '{' && i + 1 < a_line.size() && a_line[i + 1] == '}') {
-				out += n++ == 0 ? a_one : a_two;
-				++i;
-			} else {
-				out += a_line[i];
+		if (const auto it = state.lines.find(std::string_view(a_english)); it != state.lines.end()) {
+			return it->second.c_str();
+		}
+		if (std::this_thread::get_id() == state.main) {
+			return Detail::Resolve(state, a_english);
+		}
+		state.asked.insert(a_english);
+		if (!state.queued) {
+			if (auto* tasks = SKSE::GetTaskInterface()) {
+				state.queued = true;
+				tasks->AddTask([]() {
+					auto&           s = Detail::Get();
+					std::lock_guard g{ s.lock };
+					for (const auto& english : std::exchange(s.asked, {})) {
+						static_cast<void>(Detail::Resolve(s, english.c_str()));
+					}
+					s.queued = false;
+				});
 			}
 		}
-		return out;
+		return a_english;
+	}
+
+	inline const char* Detail::Resolve(State& a_state, const char* a_english)
+	{
+		auto& state = a_state;
+		if (const auto it = state.lines.find(std::string_view(a_english)); it != state.lines.end()) {
+			return it->second.c_str();
+		}
+		std::string shown = a_english;
+		std::string read;
+		const auto  key = TranslationText::KeyOf(state.name, a_english);
+		const bool  translated = SKSE::Translation::Translate(key, read);
+		GiveBackTranslator();  // our keys carry no {}: Translate took exactly one reference
+		if (translated && read != key) {
+			read = TranslationText::Unescape(read);
+			if (TranslationText::Usable(a_english, read)) {
+				shown = std::move(read);
+			} else if (!read.empty() && read != a_english) {
+				SKSE::log::warn("translation: placeholders differ, English kept: \"{}\"", a_english);
+			}
+		}
+		return state.lines.emplace(a_english, std::move(shown)).first->second.c_str();
 	}
 }

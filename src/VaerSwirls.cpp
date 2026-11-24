@@ -11,6 +11,11 @@
 // VAER's swirl is lost: 21 of VAER's 46 in his game, measured. Each gets VAER's Enchant Art and Enchant Shader back. The table
 // is relightgen.VAER_VANILLA_FORMS, read off VAEReborn.esp's own records; relightgen's selftest refuses one that differs.
 //
+// 0. BRIGHTER STRANDS (his "add an option for vaer swirls ... to change it's brightness", Illuminated's way): the VAER Reborn
+// option carries VAE Reborn's 36 swirl meshes with only their emissive raised four times, under meshes\RELight\VAER\L3s\, so
+// they replace nothing on disk. While the option's switch is on, each of VAE Reborn's art objects that names one is pointed
+// at our copy, and each copy the game makes takes its emissive from [Enchanted Weapons] VAERebornEffects (BGSArtObject::Clone3D).
+//
 // 2. VAER Reborn on Thaumaturgy's own effects. Thaumaturgy points the Fear, Paralyze, Turn Undead, Banish, Silent Moons and
 // second Absorb enchantments at new magic effects of its own, and VAER Reborn only dresses the vanilla ones, so those
 // weapons had no swirl. Each copy is given the enchant art and the enchant shader VAER made for the vanilla effect. Once, at
@@ -27,6 +32,9 @@ namespace Plugin
 {
 	namespace
 	{
+		constexpr std::string_view kVaerMeshes = "magic\\l3s\\";
+		constexpr std::string_view kOurMeshes = "RELight\\VAER\\L3s\\";
+
 		struct SwirlCopy
 		{
 			std::string_view effectPlugin;
@@ -149,6 +157,112 @@ namespace Plugin
 			return nullptr;
 		}
 
+		// VAE Reborn's swirl art objects pointed at our brighter copy, and that copy's emissive against VAE Reborn's own (4). Written at
+		// data load, read only after
+		std::unordered_map<const RE::BGSArtObject*, float> gSwirlArts;
+
+		// a copy gets materials of its own with the emissive at VAERebornEffects (a share of VAE Reborn's own); the cached model and
+		// the other copies are never written. On the thread that makes the copy; only that thread holds it yet
+		void ScaleSwirl(RE::NiAVObject* a_root, float a_base)
+		{
+			const float factor = std::clamp(gVaeEffects.load(std::memory_order_relaxed), 0.0f, 4.0f) / a_base;
+			if (!std::isfinite(factor) || std::abs(factor - 1.0f) < 0.001f) {
+				return;
+			}
+			RE::BSVisit::TraverseScenegraphGeometries(a_root, [factor](RE::BSGeometry* a_geometry) {
+				auto* raw = a_geometry ? a_geometry->GetGeometryRuntimeData().shaderProperty.get() : nullptr;
+				// a property the cached model or another copy still holds is left alone: a new material on it would compound with every copy
+				if (raw && raw->GetRefCount() != 1) {
+					static std::atomic<bool> said{ false };
+					if (!said.exchange(true)) {
+						SKSE::log::info("VAER: a swirl copy shares its shader property ({} holders); it keeps VAE Reborn's emissive", raw->GetRefCount());
+					}
+				}
+				auto* prop = raw && raw->GetRefCount() == 1 ? netimmerse_cast<RE::BSEffectShaderProperty*>(raw) : nullptr;
+				auto* mat = prop ? static_cast<RE::BSEffectShaderMaterial*>(prop->GetMaterial()) : nullptr;
+				auto* fresh = mat ? static_cast<RE::BSEffectShaderMaterial*>(mat->Create()) : nullptr;
+				if (fresh) {
+					fresh->CopyMembers(mat);
+					fresh->baseColorScale = mat->baseColorScale * factor;
+					prop->SetMaterial(fresh, true);
+					if (prop->GetMaterial() != fresh) {
+						fresh->~BSEffectShaderMaterial();
+						RE::free(fresh);
+					}
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+		}
+
+		// every art object's model is copied through this call; only VAE Reborn's swirls are touched, after one lookup
+		struct SwirlCopy3D
+		{
+			static RE::NiAVObject* thunk(RE::BGSArtObject* a_self, RE::TESObjectREFR* a_ref, std::uintptr_t a_arg)
+			{
+				auto* copy = func(a_self, a_ref, a_arg);
+				if (copy) {
+					if (const auto it = gSwirlArts.find(a_self); it != gSwirlArts.end()) {
+						LightKit::Guarded("VAER swirl copy", [copy, base = it->second]() { ScaleSwirl(copy, base); });
+					}
+				}
+				return copy;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// each of VAE Reborn's art objects that names one of its swirl meshes, pointed at our brighter copy (a copy not on disk is
+		// left alone)
+		void BrighterStrands()
+		{
+			std::size_t pointed = 0, absent = 0;
+			auto*       dh = RE::TESDataHandler::GetSingleton();
+			if (!dh) {
+				return;
+			}
+			for (auto* art : dh->GetFormArray<RE::BGSArtObject>()) {
+				const auto* file = art ? art->GetFile(0) : nullptr;
+				if (!file || _stricmp(file->fileName, "VAEReborn.esp") != 0) {
+					continue;
+				}
+				const std::string model = art->GetModel() ? art->GetModel() : "";
+				if (LightKit::Lower(model).rfind(kVaerMeshes, 0) != 0) {
+					continue;
+				}
+				const std::string ours = std::string(kOurMeshes) + model.substr(kVaerMeshes.size());
+				// through the game's own loader, so a copy packed into an archive counts too
+				if (RE::BSResourceNiBinaryStream stream{ "meshes\\" + ours }; !stream.good()) {
+					++absent;
+					continue;
+				}
+				art->SetModel(ours.c_str());
+				const char* back = art->GetModel();
+				if (back && LightKit::Lower(back) == LightKit::Lower(ours)) {
+					++pointed;
+					gSwirlArts[art] = 4.0f;
+				} else {
+					SKSE::log::warn("[VAER] {:08X} did not take {}", art->GetFormID(), ours);
+				}
+			}
+			SKSE::log::info("VAER strands: {} swirl art object(s) now use the brighter meshes, {} without our copy left alone", pointed, absent);
+			if (!gSwirlArts.empty()) {
+				REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BGSArtObject[0] };
+				SwirlCopy3D::func = vtbl.write_vfunc(0x40, SwirlCopy3D::thunk);
+				SKSE::log::info("VAER: {} swirl art object(s) follow VAERebornEffects (read from the Advanced Settings file as each copy is made)",
+					gSwirlArts.size());
+			}
+		}
+
+		// the VAER Reborn option's switch (read once at data load: a change takes effect the next time the game starts)
+		[[nodiscard]] bool VaerSwitchOn()
+		{
+			for (const auto& option : Options()) {
+				if (option.id == "Weapons - VAER Reborn") {
+					return option.on.load();
+				}
+			}
+			return false;
+		}
+
 		// the VAER Reborn option's data file is there only when the player ticked the option in the installer
 		[[nodiscard]] bool VaerOptionInstalled()
 		{
@@ -170,6 +284,12 @@ namespace Plugin
 		if (!VaerOptionInstalled()) {
 			SKSE::log::info("VAER: the VAER Reborn option is not installed; every effect keeps the art its winning plugin gives it");
 			return;
+		}
+		// 0. the brighter strands, only while the VAER Reborn switch is on (off: VAE Reborn's own meshes, as VAE Reborn made them)
+		if (VaerSwitchOn()) {
+			BrighterStrands();
+		} else {
+			SKSE::log::info("VAER: the VAER Reborn switch is off; VAE Reborn's swirls keep their own meshes");
 		}
 		auto* dh = RE::TESDataHandler::GetSingleton();
 		if (!dh) {

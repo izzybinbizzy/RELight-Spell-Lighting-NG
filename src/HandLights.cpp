@@ -19,7 +19,12 @@
 // A spell with none of them keeps what it has: no color is guessed.
 
 #include "Fade.h"
+#include "CreatureSpells.h"
+#include "NatureKind.h"
 #include "Plugin.h"
+#include "StrangeRunes.h"
+
+#include <unordered_set>
 
 namespace Plugin
 {
@@ -45,6 +50,7 @@ namespace Plugin
 			RE::NiLight* light{ nullptr };  // held in Keep.cpp; ForgetHandLights drops it here before it is freed
 			std::string  key;
 			bool         heldOut{ false };  // put out because nothing lights its key any more
+			int          nature{ -1 };      // the nature kind of the spell it was made for (NatureKind.h index), -1 for none
 		};
 
 		std::mutex                                                       gLock;
@@ -117,8 +123,11 @@ namespace Plugin
 		// says; its Blue pick keeps the layer's blue
 		const Hand* Picked(const Hand* a_hand)
 		{
-			if (!a_hand || WardsSteppedDown() || MeshKey(a_hand->key) != "wardinhandfx") {
+			if (!a_hand || MeshKey(a_hand->key) != "wardinhandfx") {
 				return a_hand;
+			}
+			if (WardsSteppedDown()) {
+				return nullptr;  // every ward is Dynamic Wards' when it loads: no hand light of ours beside its own
 			}
 			if (const auto other = Other360Color()) {
 				static std::unordered_map<const Hand*, Hand> recolored;
@@ -237,6 +246,9 @@ namespace Plugin
 					}
 				}
 			}
+			// a spell only creatures cast is Creatures' to light (the paired drop): it gets no automatic hand light here
+			const auto  creatures = CreatureSpells::CreatureOnlyEffects();
+			std::size_t creature = 0;
 			for (auto* effect : uncovered) {
 				// a ward (its effect raises Ward Power) and any spell on a ward's hand art (named wardinhandfx - the game's, Dynamic
 				// Wards' per rank, ours) are the wards' own: Dynamic Wards dresses every ward when it is installed, Wards.cpp when it
@@ -244,6 +256,13 @@ namespace Plugin
 				if (tuned.empty() || effect->data.castingType == RE::MagicSystem::CastingType::kConstantEffect ||
 					effect->data.archetype == RE::EffectArchetypes::ArchetypeID::kLight || SkippedPrefix(effect) ||
 					effect->data.primaryAV == RE::ActorValue::kWardPower || MeshKey(effect->data.castingArt->GetModel()).contains("wardinhandfx")) {
+					continue;
+				}
+				if (creatures.contains(effect)) {
+					if (a_loadArt) {
+						SKSE::log::info("[HAND-CREATURE] {:08X} {} | only creatures cast it: left to Creatures", effect->GetFormID(), effect->GetFullName());
+					}
+					++creature;
 					continue;
 				}
 				std::uint32_t rgb = 0;
@@ -286,6 +305,9 @@ namespace Plugin
 					gAutoHands.emplace(key, std::move(h));
 				}
 				gTargets.push_back({ effect, ownOf(effect), std::move(key), true });
+			}
+			if (a_loadArt) {
+				SKSE::log::info("automatic hand lights: {} spell(s) only creatures cast, left to Creatures", creature);
 			}
 			// an effect whose casting art moved to a mesh no layer lights is no target now: it gets its own light back,
 			// or it would keep our light for the art it no longer wears
@@ -381,13 +403,21 @@ namespace Plugin
 		ApplyHandLights(true);
 	}
 
+	void FindStrangeRunes()
+	{
+		SKSE::log::info("Strange Runes: {} hand rune light(s) found", StrangeRunes::Find());
+	}
+
 	void ApplyHandLights(bool a_log)
 	{
 		std::size_t lit = 0, given = 0;
+		// the runes' own light: back with the Strange Runes switch on, or with every light of ours off
+		StrangeRunes::Apply(StrangeRunesHands() || AllLightsOff());
+		ApplyEnbShaderLights();  // ENB Lights For Effect Shaders' light on FEC's bodies: back with its switch on, or with all ours off
 		{
 			std::lock_guard l{ gLock };
 			gInUse.clear();
-			const bool on = HandLightsOn() && !AllLightsOff();
+			const bool on = HandLightsOn() && !AllLightsOff() && !StrangeRunesHands();
 			for (auto& [key, copy] : gCopies) {
 				if (const Hand* h = on ? Picked(Winner(key)) : nullptr) {
 					Fill(copy, *h);
@@ -401,11 +431,20 @@ namespace Plugin
 				}
 			}
 			std::size_t autoLit = 0;
+			// the keys of spells of a nature kind switched off, and of the rest: a hand's light whose key only the first hold goes out now
+			std::unordered_set<std::string> natureOffKeys, natureOnKeys;
 			for (auto& t : gTargets) {
 				const auto& copies = t.automatic ? gAutoCopies : gCopies;
 				const auto  found = copies.find(t.key);
 				auto*       copy = found != copies.end() ? found->second : nullptr;
-				auto*       want = copy && gInUse.contains(copy) ? copy : t.own;
+				// a hand of a nature kind switched off gives the spell back its own light; the kind comes off the casting art, since an
+				// automatic hand's key names only its color
+				const auto* art = t.effect->data.castingArt;
+				const char* artPath = art ? art->GetModel() : nullptr;
+				const bool  natureOff = AnyNatureOff() && NatureKindOff(artPath ? std::string_view(artPath) : std::string_view(t.key));
+				// a nature kind switched off is unlit: not its own light either
+				auto* want = copy && gInUse.contains(copy) && !natureOff ? copy : (natureOff && !AllLightsOff() ? nullptr : t.own);
+				(natureOff ? natureOffKeys : natureOnKeys).insert(t.key);
 				if (t.effect->data.light != want) {
 					t.effect->data.light = want;
 				}
@@ -424,6 +463,13 @@ namespace Plugin
 				const auto  autoIt = AutoKey(live.key) ? gAutoHands.find(live.key) : gAutoHands.end();
 				const Hand* h = autoIt != gAutoHands.end() ? (autoOn ? &autoIt->second : nullptr) : on ? Picked(Winner(live.key)) :
 				                                                                                         nullptr;
+				if (h && natureOffKeys.contains(live.key) && !natureOnKeys.contains(live.key)) {
+					h = nullptr;  // a nature kind switched off: its light in the hand goes out now, not at the next cast
+				}
+				// its own spell's kind switched off, even when another kind's spell shares its key (an automatic light's color key)
+				if (h && live.nature >= 0 && AnyNatureOff() && !NatureLightsOn(live.nature)) {
+					h = nullptr;
+				}
 				if (h) {
 					if (live.heldOut) {
 						if (!KeptOutByBudget(live.light)) {
@@ -517,15 +563,33 @@ namespace Plugin
 		return { data.fade, data.radius.x };
 	}
 
+	// the nature kind of the spell in an actor's hand: its first effect whose casting art names one (main thread)
+	int NatureOfHand(const RE::Actor* a_actor, bool a_left)
+	{
+		auto* actor = const_cast<RE::Actor*>(a_actor);
+		auto* spell = actor ? actor->GetActorRuntimeData().selectedSpells[a_left ? RE::Actor::SlotTypes::kLeftHand : RE::Actor::SlotTypes::kRightHand] : nullptr;
+		if (!spell) {
+			return -1;
+		}
+		for (const auto* effect : spell->effects) {
+			const auto* art = effect && effect->baseEffect ? effect->baseEffect->data.castingArt : nullptr;
+			const char* path = art ? art->GetModel() : nullptr;
+			if (const int kind = path ? NatureKind::IndexOf(NatureKind::KindOf(path)) : -1; kind >= 0) {
+				return kind;
+			}
+		}
+		return -1;
+	}
+
 	// main thread (main.cpp NoteMagicLight)
-	void NoteHandLight(RE::NiLight* a_light, const std::string& a_key)
+	void NoteHandLight(RE::NiLight* a_light, const std::string& a_key, int a_nature)
 	{
 		if (!a_light) {
 			return;
 		}
 		KeepLight(a_light);
 		std::lock_guard l{ gLock };
-		gLive.push_back({ a_light, a_key });
+		gLive.push_back({ a_light, a_key, false, a_nature });
 	}
 
 	void ForgetHandLights(const GoneLights& a_gone)

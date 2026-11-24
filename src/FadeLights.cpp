@@ -30,7 +30,11 @@
 // (AfterShaderEffect) and the emissive scale of an enchantment art's glowing meshes (DimArt: VAER's swirls, EAE's art).
 
 #include "Fade.h"
+#include "FadeHudGem.h"
 #include "Plugin.h"
+
+#include <atomic>
+#include <mutex>
 
 namespace Fade
 {
@@ -70,7 +74,7 @@ namespace Fade
 		// here, as HoldsOurWrite skips a light only when all of them match
 		struct LightInputs
 		{
-			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f };
+			float brightness{ 0.0f }, reach{ 0.0f }, cool{ 0.0f }, share{ 1.0f };
 			bool  fire{ false }, reachFollows{ false };
 
 			[[nodiscard]] bool operator==(const LightInputs&) const = default;
@@ -133,8 +137,12 @@ namespace Fade
 			const void*          instance{ nullptr };
 			Glow::Hand           glow{};
 			Glow::Output         out{};
-			Verdict              verdict{};
-			Reading              reading{};
+			// another mod's dimmer on the hand's casting light (LightKit::ForeignDimShare): the hand's other lights take the same share;
+			// the casting light itself, already dimmed by it, is shareSkip
+			float                   share{ 1.0f };
+			const RE::NiPointLight* shareSkip{ nullptr };
+			Verdict                 verdict{};
+			Reading                 reading{};
 			// what the verdict was worked out for (it is kept until one of these changes)
 			bool          verdictKnown{ false };
 			const void*   verdictWeapon{ nullptr };
@@ -188,6 +196,12 @@ namespace Fade
 		// lock, held only while a few dozen bytes are copied - the render thread never waits on the per-frame pass (gLock)
 		std::mutex gHudLock;
 		HudState   gHud;
+		// where the HUD draws its charge meters and bars, for the gems: a UI task writes it (AskHudBoxes), PublishHud copies it
+		std::mutex                 gBoxLock;
+		Glow::HudBoxes             gHudBoxes{};
+		std::atomic<bool>          gBoxesAsked{ false };  // a read is queued and has not run yet
+		std::atomic<std::uint32_t> gHudSession{ 0 };      // a game load starts a new one: a read queued for the old HUD is dropped
+		std::atomic<bool>          gHudNew{ false };      // a new session's boxes are not read yet: the next frame with gems asks once
 
 		[[nodiscard]] std::uint64_t Key(RE::ActorHandle a_actor, bool a_left)
 		{
@@ -215,7 +229,7 @@ namespace Fade
 
 		[[nodiscard]] LightInputs InputsOf(const HandTrack& a_hand)
 		{
-			return { a_hand.out.brightness, a_hand.out.reach, a_hand.out.cool, a_hand.fire, a_hand.verdict.tuning.reachFollows > 0.0f };
+			return { a_hand.out.brightness, a_hand.out.reach, a_hand.out.cool, a_hand.share, a_hand.fire, a_hand.verdict.tuning.reachFollows > 0.0f };
 		}
 
 		// the light still holds every value ApplyLight last wrote, with the hand's numbers it has now: ApplyLight would write the
@@ -240,10 +254,45 @@ namespace Fade
 			return !(cutoff > 0.0f && std::isfinite(cutoff)) || (a_seen.cutoff.Written() && cutoff == a_seen.cutoff.written);
 		}
 
+		// a hand the fading pass does not follow (Fading or Spells off, its kind off, an actor outside Whose): another mod's dim on its
+		// casting light still reaches its lights, here, from the caster's update (AfterCaster). Each light by the value not ours and
+		// what we wrote, under gLock; one the pass takes up is handed back first (ApplyLight), so the two never compound
+		// keyed by address only, never held: a light kept alive by us would stay lit on what it lit after its owner let go, so only a
+		// light found live under a hand (or handed to ApplyLight) is ever read through its key
+		struct ShareSeen
+		{
+			float         base{ 0.0f }, written{ -1.0f };
+			std::uint32_t frame{ 0 };  // the last frame it was found under a hand
+		};
+		std::unordered_map<const RE::NiPointLight*, ShareSeen> gShared;
+		constexpr std::size_t                                  kMostShared = 256;    // past this many, entries unseen a while are dropped
+		constexpr std::uint32_t                                kSharedStale = 600;   // frames unseen before an entry may be dropped
+		std::atomic<bool>                                      gAnyShared{ false };  // gShared holds a light: the caster hook reads it without gLock
+
+		// a live light of gShared back as we found it, unless someone wrote it since (under gLock)
+		void UnShare(RE::NiPointLight* a_light, const ShareSeen& a_seen)
+		{
+			const auto turn = LightKit::Turn();
+			auto&      fade = a_light->GetLightRuntimeData().fade;
+			if (fade == a_seen.written) {
+				const float before = fade;
+				fade = a_seen.base;
+				Plugin::NoteFadeWrite(a_light, before, fade);
+			}
+		}
+
 		// a_found: the light was found under the hand this frame (a re-apply of this frame's numbers does not count, or a
 		// light that has left the weapon would never be let go)
 		void ApplyLight(RE::NiPointLight* a_light, const HandTrack& a_hand, bool a_found = true)
 		{
+			if (const auto shared = gShared.find(a_light); shared != gShared.end()) {
+				// an entry unseen a while may be another light that lived at this address: forgotten, never restored from
+				if (gFrame - shared->second.frame <= kSharedStale) {
+					UnShare(a_light, shared->second);
+				}
+				gShared.erase(shared);
+				gAnyShared.store(!gShared.empty(), std::memory_order_relaxed);
+			}
 			auto [it, added] = gLights.try_emplace(a_light);
 			auto& seen = it->second;
 			if (added) {
@@ -256,8 +305,9 @@ namespace Fade
 			const auto  turn = LightKit::Turn();  // its fields and the handshakes below in one turn (LightKit.h)
 			auto&       data = a_light->GetLightRuntimeData();
 			const auto& t = a_hand.verdict.tuning;
+			const float brightness = a_hand.out.brightness * (a_light == a_hand.shareSkip ? 1.0f : a_hand.share);
 			const float before = data.fade;
-			data.fade = seen.fade.Apply(before, a_hand.out.brightness);
+			data.fade = seen.fade.Apply(before, brightness);
 			Plugin::NoteFadeWrite(a_light, before, data.fade);
 			if (t.reachFollows > 0.0f || seen.radius.Written()) {
 				const float reachBefore = data.radius.x;
@@ -270,7 +320,7 @@ namespace Fade
 			// fade (LightKit::ReachCutoffFactor) so the light reaches what "Reach follows" asks
 			if (const float cutoffBefore = Plugin::InverseSquare() && LightKit::Isl::On(a_light) ? LightKit::Isl::Cutoff(a_light) : 0.0f; cutoffBefore > 0.0f && std::isfinite(cutoffBefore)) {
 				const float q = (std::max)(a_hand.out.reach, 0.05f);
-				const float factor = LightKit::ReachCutoffFactor(a_hand.out.brightness, q, seen.fade.base, seen.cutoff.BaseFor(cutoffBefore), data.radius.z);
+				const float factor = LightKit::ReachCutoffFactor(brightness, q, seen.fade.base, seen.cutoff.BaseFor(cutoffBefore), data.radius.z);
 				LightKit::Isl::SetCutoff(a_light, seen.cutoff.Apply(cutoffBefore, factor));
 				seen.cutoff.written = LightKit::Isl::Cutoff(a_light);  // as clamped: our own write, never read back as another's
 				Plugin::NoteCutoffWrite(a_light, cutoffBefore, seen.cutoff.written);
@@ -475,7 +525,8 @@ namespace Fade
 		[[nodiscard]] bool AtRest(const HandTrack& a_hand) noexcept
 		{
 			const auto* weapon = a_hand.reading.weapon;
-			return Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
+			// a hand another mod dims is not at rest: Light Placer writes its flickering lights again every frame
+			return a_hand.share >= 1.0f && Glow::RestsAtFull(a_hand.spell, a_hand.reading.bound, weapon && weapon->IsStaff() && !a_hand.sheathed, a_hand.fraction, a_hand.out);
 		}
 
 		// what can put something of ours in a hand: an equip, a draw, sheathe or cast (SKSE's action events), an actor loading, her cell
@@ -760,6 +811,74 @@ namespace Fade
 			gActiveSpellHands = 0;
 		}
 
+		// the share of full another mod holds a hand's casting light at: its dimmer's (LightKit::ForeignDimShare), else 0 when the light's
+		// own value (our last write taken off) is 0 - Baked Goods lights a spell drawn while sneaking at fade 0 with no dimmer. Under gLock
+		[[nodiscard]] float CasterShareNow(RE::NiPointLight* a_light)
+		{
+			if (!a_light) {
+				return 1.0f;
+			}
+			if (a_light->controllers) {
+				return LightKit::ForeignDimShare(a_light);
+			}
+			float own = a_light->GetLightRuntimeData().fade;
+			if (const auto it = gLights.find(a_light); it != gLights.end() && it->second.fade.Written() && own == it->second.fade.written) {
+				own = it->second.fade.base;
+			}
+			return own > 0.0f ? 1.0f : 0.0f;
+		}
+
+		// the lights under a hand's magic node that the pass does not hold take a_share of their own value; at full they are given
+		// back and forgotten (under gLock)
+		void ShareUnder(RE::NiAVObject* a_root, const RE::NiPointLight* a_skip, float a_share)
+		{
+			if (!a_root) {
+				return;
+			}
+			RE::BSVisit::TraverseScenegraphLights(a_root, [&](RE::NiPointLight* a_light) {
+				if (!a_light || a_light == a_skip || gLights.contains(a_light)) {
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				auto it = gShared.find(a_light);
+				// unseen a while: possibly another light at a reused address - its record is dropped, never read
+				if (it != gShared.end() && gFrame - it->second.frame > kSharedStale) {
+					gShared.erase(it);
+					it = gShared.end();
+				}
+				if (a_share >= 1.0f) {
+					if (it != gShared.end()) {
+						UnShare(a_light, it->second);
+						gShared.erase(it);
+					}
+					return RE::BSVisit::BSVisitControl::kContinue;
+				}
+				if (it == gShared.end()) {
+					// never a clear: a live light still dimmed would be read back as its own value and dimmed again. Only entries
+					// unseen for a while go (never read through, only forgotten); with none such, this light is left as it is
+					if (gShared.size() >= kMostShared) {
+						std::erase_if(gShared, [](const auto& a_entry) { return gFrame - a_entry.second.frame > kSharedStale; });
+						if (gShared.size() >= kMostShared) {
+							return RE::BSVisit::BSVisitControl::kContinue;
+						}
+					}
+					it = gShared.emplace(a_light, ShareSeen{}).first;
+				}
+				auto& seen = it->second;
+				seen.frame = gFrame;
+				const auto turn = LightKit::Turn();
+				auto&      fade = a_light->GetLightRuntimeData().fade;
+				if (fade != seen.written) {
+					seen.base = fade;  // Light Placer's (or the Brightness pass's) value this frame, not ours
+				}
+				const float before = fade;
+				fade = seen.base * a_share;
+				seen.written = fade;
+				Plugin::NoteFadeWrite(a_light, before, fade);
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+			gAnyShared.store(!gShared.empty(), std::memory_order_relaxed);
+		}
+
 		// one spell hand, one frame (from UpdateHands, under the lock)
 		void UpdateSpellHand(RE::Actor* a_actor, bool a_left, const Settings& a_s, float a_delta, bool a_previewOn, bool a_previewToggled,
 			float a_previewFraction)
@@ -771,6 +890,8 @@ namespace Fade
 			h.left = a_left;
 			h.spell = true;
 			h.frame = gFrame;
+			h.share = 1.0f;
+			h.shareSkip = nullptr;
 			SpellHand sp;
 			if (!ReadSpellHand(a_actor, a_left, sp)) {
 				h.active = false;
@@ -824,6 +945,9 @@ namespace Fade
 			h.active = true;
 			// magicka spent on a cast is not a hit, nor magicka coming back a soul gem: no pulse, no flare
 			h.out = Glow::Step(a_s.tuning, h.glow, h.fraction, a_delta, true);
+			// another mod dims the game's casting light (Baked Goods): the hand's lights of ours follow it by the same share
+			h.share = CasterShareNow(sp.casterLight);
+			h.shareSkip = sp.casterLight;
 			h.lights = h.roots = 0;
 			for (auto* node : sp.nodes) {
 				if (!node) {
@@ -921,6 +1045,65 @@ namespace Fade
 			return menu && menu->uiMovie && menu->uiMovie->GetVariable(&alpha, "_root._alpha") && alpha.IsNumber() && alpha.GetNumber() < 1.0;
 		}
 
+		// where the HUD draws its own charge meters and its health / magicka / stamina bars, as shares of the screen: the game's
+		// HUD movie and the HUDs that replace it (SkyHUD, Vel'dun UI, Norden UI) keep these members on their HUD object, and HUD NG
+		// moves the parts themselves, so the gems follow both. UI thread (AskHudBoxes), asked when the gems appear and when a menu
+		// closes (HUD NG's editor among them), never every frame
+		[[nodiscard]] Glow::HudBoxes ReadHudBoxes()
+		{
+			Glow::HudBoxes out{};
+			auto*          ui = RE::UI::GetSingleton();
+			const auto     menu = ui ? ui->GetMenu<RE::HUDMenu>() : nullptr;
+			auto*          movie = menu ? menu->uiMovie.get() : nullptr;
+			RE::GFxValue   root;
+			if (!movie || !movie->GetVariable(&root, "_root")) {
+				return out;
+			}
+			const auto frame = movie->GetVisibleFrameRect();
+			const auto box = [&](const char* a_path) {
+				RE::GFxValue clip;
+				RE::GFxValue bounds;
+				if (!movie->GetVariable(&clip, a_path) || !clip.IsDisplayObject() || !clip.Invoke("getBounds", &bounds, &root, 1) || !bounds.IsObject()) {
+					return Glow::HudBox{};
+				}
+				constexpr std::array<const char*, 4> kSides{ "xMin", "yMin", "xMax", "yMax" };
+				std::array<double, 4>                side{};
+				for (std::size_t i = 0; i < kSides.size(); ++i) {
+					RE::GFxValue v;
+					if (!bounds.GetMember(kSides[i], &v) || !v.IsNumber()) {
+						return Glow::HudBox{};
+					}
+					side[i] = v.GetNumber();
+				}
+				return Glow::BoxOnScreen(side[0], side[1], side[2], side[3], frame.left, frame.top, frame.right, frame.bottom);
+			};
+			out.meters = { box("_root.HUDMovieBaseInstance.LeftChargeMeterAnim"), box("_root.HUDMovieBaseInstance.RightChargeMeterAnim") };
+			out.bars = { box("_root.HUDMovieBaseInstance.Health"), box("_root.HUDMovieBaseInstance.Magica"), box("_root.HUDMovieBaseInstance.Stamina") };
+			return out;
+		}
+
+		// the HUD movie is the UI thread's: its read runs as one UI task, at most one queued at a time
+		void AskHudBoxes()
+		{
+			if (gBoxesAsked.exchange(true, std::memory_order_relaxed)) {
+				return;
+			}
+			auto* tasks = SKSE::GetTaskInterface();
+			if (!tasks) {
+				gBoxesAsked.store(false, std::memory_order_relaxed);
+				return;
+			}
+			tasks->AddUITask([session = gHudSession.load(std::memory_order_relaxed)] {
+				const auto             boxes = ReadHudBoxes();
+				const std::scoped_lock lock{ gBoxLock };
+				if (session != gHudSession.load(std::memory_order_relaxed)) {
+					return;  // the old game's HUD: its boxes and its pending flag are not the new one's
+				}
+				gHudBoxes = boxes;
+				gBoxesAsked.store(false, std::memory_order_relaxed);
+			});
+		}
+
 		void PublishHud(const Settings& a_s, bool a_hudHidden)
 		{
 			HudState hud;
@@ -930,6 +1113,11 @@ namespace Fade
 			hud.gemOpacity = a_s.hudGemOpacity;
 			hud.gemPercent = a_s.hudGemPercent;
 			hud.gemFull = a_s.hudGemFull;
+			hud.gemPlace = a_s.hudGemPlace;
+			{
+				const std::scoped_lock lock{ gBoxLock };
+				hud.boxes = gHudBoxes;
+			}
 			hud.low = a_s.tuning.sputterBelow;
 			auto*       player = RE::PlayerCharacter::GetSingleton();
 			const auto* state = player ? player->AsActorState() : nullptr;
@@ -1022,6 +1210,197 @@ namespace Fade
 		return gActiveHands.load(std::memory_order_relaxed) != 0 || gItemRootsWanted.load(std::memory_order_relaxed) || Items::Holding();
 	}
 
+	namespace
+	{
+		// what the fading preview asks of every hand this frame (read once, before the hands)
+		struct FrameAsks
+		{
+			bool  previewOn{ false };
+			bool  previewToggled{ false };
+			bool  pulse{ false };
+			bool  flare{ false };
+			float previewFraction{ 0.0f };
+		};
+
+		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw over the HUD, at once when
+		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames. Never while the HUD's
+		// own movie holds the gems (FadeHudGem.cpp): they hide and fade with it by themselves. Before gLock (a game read)
+		bool HudHiddenNow(const Settings& a_s, bool& a_gems)
+		{
+			static bool          hudHiddenWas = false;
+			static bool          gemsWere = false;
+			static bool          menusWere = false;
+			static std::uint32_t hudLook = 0;
+			a_gems = a_s.enabled && a_s.hudGems && gGemsShown.load(std::memory_order_relaxed) && !HudGem::Live();
+			bool hudHidden = false;
+			if (a_gems) {
+				const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
+				hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
+			}
+			// the gems' place follows the HUD: read when they appear, when a menu closes (HUD NG may have moved its parts) and once
+			// after a load, which left the gems showing and no menu seen closing
+			const bool menus = MenusHideHud();
+			const bool fresh = a_gems && gHudNew.exchange(false, std::memory_order_relaxed);
+			if (a_gems && (fresh || !gemsWere || (menusWere && !menus))) {
+				AskHudBoxes();
+			}
+			menusWere = menus;
+			gemsWere = a_gems;
+			hudHiddenWas = hudHidden;
+			return hudHidden;
+		}
+
+		// under gLock: Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen
+		// for a few frames are let go (they hold the effects' 3D)
+		void PruneRoots()
+		{
+			gItemRootsWanted.store(false, std::memory_order_relaxed);
+			if (gFrame % 60 != 0) {
+				return;
+			}
+			for (auto it = gItemRoots.begin(); it != gItemRoots.end();) {
+				std::erase_if(it->second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
+				it = it->second.empty() ? gItemRoots.erase(it) : std::next(it);
+			}
+			std::erase_if(gNotedLights, [](auto& a_kv) {
+				std::erase_if(a_kv.second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
+				return a_kv.second.empty();
+			});
+		}
+
+		// under gLock: one weapon hand this frame - the reading taken before the lock, the verdict, the glow stepped onto its lights
+		void UpdateWeaponHand(RE::Actor* a_actor, bool a_left, const Reading& a_reading, const Settings& a_s, float a_delta, const FrameAsks& a_asks)
+		{
+			auto& h = gHands[Key(a_actor->GetHandle(), a_left)];
+			h.actor = a_actor->GetHandle();
+			h.key = Key(h.actor, a_left);
+			h.actorSeen = a_actor;
+			h.left = a_left;
+			h.frame = gFrame;
+			h.reading = a_reading;
+			if (!h.reading.tracked) {
+				h.active = false;
+				h.weapon = nullptr;
+				h.effectRoots.clear();  // nothing of ours here: let go of the old effects' 3D
+				return;
+			}
+			// the verdict changes only with the weapon, the settings or the rules: worked out again only then
+			if (!h.verdictKnown || h.verdictWeapon != h.reading.weapon || h.verdictEnch != h.reading.ench ||
+				h.verdictEnchID != (h.reading.ench ? h.reading.ench->GetFormID() : 0) || h.verdictRules != RulesGeneration() ||
+				!(h.verdictSettings == a_s)) {
+				h.verdict = Judge(h.reading.weapon, h.reading.ench, a_s);
+				h.verdictKnown = true;
+				h.verdictWeapon = h.reading.weapon;
+				h.verdictEnch = h.reading.ench;
+				h.verdictEnchID = h.reading.ench ? h.reading.ench->GetFormID() : 0;
+				h.verdictRules = RulesGeneration();
+				h.verdictSettings = a_s;
+				h.weaponLabel = Label(h.reading.weapon);
+				h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
+				h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
+			}
+			if (const auto* state = a_actor->AsActorState()) {
+				h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
+			}
+			if (h.verdict.mode == Mode::kExempt) {
+				if (h.active || h.weapon != h.reading.weapon) {
+					h.actorName = a_actor->GetName();
+					LogHand(h, "left alone", a_s.debugLog);
+				}
+				h.active = false;
+				h.weapon = h.reading.weapon;
+				h.effectRoots.clear();
+				return;
+			}
+			const Glow::Follow follow = Glow::FollowOf(h.reading.bound, h.verdict.mode == Mode::kBound, h.reading.current,
+				h.reading.max, h.verdict.boundFadeSeconds, h.reading.fraction);
+			h.fraction = follow.fraction;
+			if (a_asks.previewOn) {  // before a new weapon's reset, so the preview's charge is not taken as a hit or a refill
+				h.fraction = Glow::Clamp01(a_asks.previewFraction);
+			}
+			// the gem of a bound weapon counts its spell's whole time down (his report 2026-10-16: no gem on a bound sword
+			// with half its time gone - it read the light's fraction, full until the last seconds)
+			h.hudFraction = Glow::HudFraction(h.reading.bound, a_asks.previewOn, h.reading.current, h.reading.max, h.fraction);
+			if (a_asks.previewToggled) {
+				h.glow.lastFraction = h.fraction;  // the preview going on or off is not a hit or a refill either
+			}
+			if (!h.active || h.weapon != h.reading.weapon || h.instance != h.reading.instance) {
+				h.weapon = h.reading.weapon;
+				h.instance = h.reading.instance;
+				h.glow.Reset(h.fraction, static_cast<std::uint32_t>(Key(h.actor, a_left) * 2654435761u));
+				h.actorName = a_actor->GetName();
+				LogHand(h, "now tracked", a_s.debugLog);
+				if (a_s.debugLog) {
+					LogActorLights(a_actor);
+				}
+			}
+			if (a_asks.pulse) {
+				h.glow.TriggerPulse(h.verdict.tuning);
+			}
+			if (a_asks.flare) {
+				h.glow.TriggerFlare();
+			}
+			h.active = true;
+			// a spell's time left is not a charge; nor is the preview's slider, which moves the charge by hand (its
+			// buttons pulse and flare on purpose, above)
+			h.out = Glow::Step(h.verdict.tuning, h.glow, h.fraction, a_delta, follow.timed || a_asks.previewOn);
+			if ((h.out.pulsed || h.out.flared) && a_s.debugLog) {
+				LogHand(h, h.out.pulsed ? "spent charge (pulse)" : "recharged (flare)", true);
+			}
+			ApplyHand(a_actor, h);
+		}
+
+		// under gLock, the frame's end: the hands not read this frame, the sweep, the lists, the HUD, Lights by Item, then rest and sleep
+		void FinishFrame(const Settings& a_s, bool a_hudHidden, bool a_gems, bool a_previewOn)
+		{
+			// a hand not read this frame (a follower dismissed, an actor unloaded) is no longer active: the effect hooks must not
+			// keep putting last frame's numbers on its lights
+			for (auto& [key, hand] : gHands) {
+				if (hand.frame != gFrame) {
+					hand.active = false;
+					hand.effectRoots.clear();  // its effects' 3D is not ours to keep
+				}
+			}
+			const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
+			Sweep();
+			gActiveList.clear();
+			std::size_t spells = 0;
+			for (auto& [key, hand] : gHands) {
+				if (hand.active && !hand.spell) {
+					gActiveList.push_back(&hand);
+				}
+				spells += hand.active && hand.spell ? 1 : 0;
+			}
+			gActiveHands = gActiveList.size();
+			gActiveSpellHands = spells;
+			PublishHud(a_s, a_hudHidden);
+			Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
+			// asleep too with every hand at rest, once Sweep has had its passes; a gem on screen keeps the pass for its HUD check. Full is what the
+			// lights already show, so the effect hooks have nothing to do either, and no actor is held
+			const bool rest = !a_gems && !a_previewOn && !Items::Holding() && std::ranges::all_of(gHands, [](const auto& a_hand) { return !a_hand.second.active || AtRest(a_hand.second); });
+			gRestPasses = rest ? gRestPasses + 1 : 0;
+			const bool rested = gRestPasses > kKeepFrames;
+			if (rested) {
+				gActiveHands = 0;
+				gActiveSpellHands = 0;
+				gActors.clear();
+				// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
+				// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
+				PutBack();
+			}
+			const bool nothing = NothingHeld();
+			if ((rested || nothing) && !Items::Holding()) {
+				for (auto& [key, hand] : gHands) {
+					hand.effectRoots.clear();  // the effects' 3D
+				}
+				gItemRoots.clear();
+				gNotedLights.clear();
+			}
+			gNothingToFollow.store(nothing, std::memory_order_relaxed);
+			gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
+		}
+	}
+
 	void UpdateHands(float a_delta)
 	{
 		// asleep: nothing of ours in any hand and nothing to put back, or every hand at rest; only what can change that wakes the pass
@@ -1051,35 +1430,12 @@ namespace Fade
 				readings.push_back({ ReadHand(actor.get(), false), ReadHand(actor.get(), true) });
 			}
 		}
-		// the HUD's alpha is a Flash read, dear for one number: only while a gem of ours can draw, at once when
-		// gems appear, then every fourth frame - the gem still hides with the HUD within a few frames
-		static bool          hudHiddenWas = false;
-		static bool          gemsWere = false;
-		static std::uint32_t hudLook = 0;
-		const bool           gems = s.enabled && s.hudGems && gGemsShown.load(std::memory_order_relaxed);
-		bool                 hudHidden = false;
-		if (gems) {
-			const LightKit::Cost::Scope c{ 19, "fading: the HUD check" };
-			hudHidden = !gemsWere || ++hudLook % 4 == 0 ? HudMovieHidden() : hudHiddenWas;
-		}
-		gemsWere = gems;
-		hudHiddenWas = hudHidden;
+		bool            gems = false;
+		const bool      hudHidden = HudHiddenNow(s, gems);
 		std::lock_guard lock(gLock);
 		++gFrame;
 		gFrameSettings = s;
-		// Lights by Item asks again this frame if it still needs its own roots (EffectRootsOf); a hand's roots not seen for a
-		// few frames are let go (they hold the effects' 3D)
-		gItemRootsWanted.store(false, std::memory_order_relaxed);
-		if (gFrame % 60 == 0) {
-			for (auto it = gItemRoots.begin(); it != gItemRoots.end();) {
-				std::erase_if(it->second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
-				it = it->second.empty() ? gItemRoots.erase(it) : std::next(it);
-			}
-			std::erase_if(gNotedLights, [](auto& a_kv) {
-				std::erase_if(a_kv.second, [](const Root& r) { return !r.node || gFrame - r.frame > kKeepFrames; });
-				return a_kv.second.empty();
-			});
-		}
+		PruneRoots();
 		gEnabled = s.enabled;
 		gDimShader = s.dimShader;
 		if (!s.enabled) {
@@ -1096,87 +1452,10 @@ namespace Fade
 		static bool previewWas = false;
 		const bool  previewToggled = previewOn != previewWas;
 		previewWas = previewOn;
-		const bool flareNow = preview.flare.exchange(false);
+		const FrameAsks asks{ previewOn, previewToggled, pulseNow, preview.flare.exchange(false), preview.fraction };
 		for (std::size_t i = 0; i < gActors.size() && i < readings.size(); ++i) {
-			auto& actor = gActors[i];
 			for (const bool left : { false, true }) {
-				auto& h = gHands[Key(actor->GetHandle(), left)];
-				h.actor = actor->GetHandle();
-				h.key = Key(h.actor, left);
-				h.actorSeen = actor.get();
-				h.left = left;
-				h.frame = gFrame;
-				h.reading = readings[i][left ? 1 : 0];
-				if (!h.reading.tracked) {
-					h.active = false;
-					h.weapon = nullptr;
-					h.effectRoots.clear();  // nothing of ours here: let go of the old effects' 3D
-					continue;
-				}
-				// the verdict changes only with the weapon, the settings or the rules: worked out again only then
-				if (!h.verdictKnown || h.verdictWeapon != h.reading.weapon || h.verdictEnch != h.reading.ench ||
-					h.verdictEnchID != (h.reading.ench ? h.reading.ench->GetFormID() : 0) || h.verdictRules != RulesGeneration() ||
-					!(h.verdictSettings == s)) {
-					h.verdict = Judge(h.reading.weapon, h.reading.ench, s);
-					h.verdictKnown = true;
-					h.verdictWeapon = h.reading.weapon;
-					h.verdictEnch = h.reading.ench;
-					h.verdictEnchID = h.reading.ench ? h.reading.ench->GetFormID() : 0;
-					h.verdictRules = RulesGeneration();
-					h.verdictSettings = s;
-					h.weaponLabel = Label(h.reading.weapon);
-					h.enchLabel = h.reading.ench ? Label(h.reading.ench) : std::string(h.reading.bound ? "(bound weapon)" : "(none)");
-					h.fire = h.reading.ench && KindOf(h.reading.ench).element == Element::kFire;
-				}
-				if (const auto* state = actor->AsActorState()) {
-					h.sheathed = state->GetWeaponState() == RE::WEAPON_STATE::kSheathed;
-				}
-				if (h.verdict.mode == Mode::kExempt) {
-					if (h.active || h.weapon != h.reading.weapon) {
-						h.actorName = actor->GetName();
-						LogHand(h, "left alone", s.debugLog);
-					}
-					h.active = false;
-					h.weapon = h.reading.weapon;
-					h.effectRoots.clear();
-					continue;
-				}
-				const Glow::Follow follow = Glow::FollowOf(h.reading.bound, h.verdict.mode == Mode::kBound, h.reading.current,
-					h.reading.max, h.verdict.boundFadeSeconds, h.reading.fraction);
-				h.fraction = follow.fraction;
-				if (previewOn) {  // before a new weapon's reset, so the preview's charge is not taken as a hit or a refill
-					h.fraction = Glow::Clamp01(preview.fraction);
-				}
-				// the gem of a bound weapon counts its spell's whole time down (his report 2026-10-16: no gem on a bound sword
-				// with half its time gone - it read the light's fraction, full until the last seconds)
-				h.hudFraction = Glow::HudFraction(h.reading.bound, previewOn, h.reading.current, h.reading.max, h.fraction);
-				if (previewToggled) {
-					h.glow.lastFraction = h.fraction;  // the preview going on or off is not a hit or a refill either
-				}
-				if (!h.active || h.weapon != h.reading.weapon || h.instance != h.reading.instance) {
-					h.weapon = h.reading.weapon;
-					h.instance = h.reading.instance;
-					h.glow.Reset(h.fraction, static_cast<std::uint32_t>(Key(h.actor, left) * 2654435761u));
-					h.actorName = actor->GetName();
-					LogHand(h, "now tracked", s.debugLog);
-					if (s.debugLog) {
-						LogActorLights(actor.get());
-					}
-				}
-				if (pulseNow) {
-					h.glow.TriggerPulse(h.verdict.tuning);
-				}
-				if (flareNow) {
-					h.glow.TriggerFlare();
-				}
-				h.active = true;
-				// a spell's time left is not a charge; nor is the preview's slider, which moves the charge by hand (its
-				// buttons pulse and flare on purpose, above)
-				h.out = Glow::Step(h.verdict.tuning, h.glow, h.fraction, a_delta, follow.timed || previewOn);
-				if ((h.out.pulsed || h.out.flared) && s.debugLog) {
-					LogHand(h, h.out.pulsed ? "spent charge (pulse)" : "recharged (flare)", true);
-				}
-				ApplyHand(actor.get(), h);
+				UpdateWeaponHand(gActors[i].get(), left, readings[i][left ? 1 : 0], s, a_delta, asks);
 			}
 		}
 		// the spells in hand: their lights and glow follow the caster's magicka
@@ -1188,51 +1467,7 @@ namespace Fade
 				}
 			}
 		}
-		// a hand not read this frame (a follower dismissed, an actor unloaded) is no longer active: the effect hooks must not
-		// keep putting last frame's numbers on its lights
-		for (auto& [key, hand] : gHands) {
-			if (hand.frame != gFrame) {
-				hand.active = false;
-				hand.effectRoots.clear();  // its effects' 3D is not ours to keep
-			}
-		}
-		const LightKit::Cost::Scope sweep{ 22, "fading: sweep, lists, HUD and Lights by Item" };
-		Sweep();
-		gActiveList.clear();
-		std::size_t spells = 0;
-		for (auto& [key, hand] : gHands) {
-			if (hand.active && !hand.spell) {
-				gActiveList.push_back(&hand);
-			}
-			spells += hand.active && hand.spell ? 1 : 0;
-		}
-		gActiveHands = gActiveList.size();
-		gActiveSpellHands = spells;
-		PublishHud(s, hudHidden);
-		Items::Apply();  // last: an item's own choice wins over the fading (his order, FadeItems.cpp)
-		// asleep too with every hand at rest, once Sweep has had its passes; a gem on screen keeps the pass for its HUD check. Full is what the
-		// lights already show, so the effect hooks have nothing to do either, and no actor is held
-		const bool rest = !gems && !previewOn && !Items::Holding() && std::ranges::all_of(gHands, [](const auto& a_hand) { return !a_hand.second.active || AtRest(a_hand.second); });
-		gRestPasses = rest ? gRestPasses + 1 : 0;
-		const bool rested = gRestPasses > kKeepFrames;
-		if (rested) {
-			gActiveHands = 0;
-			gActiveSpellHands = 0;
-			gActors.clear();
-			// asleep, no light of the game's is held: the scene takes a light out when its owner let go only if nothing else holds it, and one
-			// that left a hand meanwhile would stay lit where it was. Found again at the next wake; the hands stay, their magicka still wakes it
-			PutBack();
-		}
-		const bool nothing = NothingHeld();
-		if ((rested || nothing) && !Items::Holding()) {
-			for (auto& [key, hand] : gHands) {
-				hand.effectRoots.clear();  // the effects' 3D
-			}
-			gItemRoots.clear();
-			gNotedLights.clear();
-		}
-		gNothingToFollow.store(nothing, std::memory_order_relaxed);
-		gHandsAsleep.store(rested || nothing, std::memory_order_relaxed);
+		FinishFrame(s, hudHidden, gems, previewOn);
 	}
 
 	void AfterReferenceEffect(RE::ReferenceEffect* a_effect, bool a_own3D)
@@ -1286,7 +1521,34 @@ namespace Fade
 	void AfterCaster(RE::ActorMagicCaster* a_caster)
 	{
 		using Source = RE::MagicSystem::CastingSource;
-		if (!a_caster || !Items::Holding() || (a_caster->castingSource != Source::kLeftHand && a_caster->castingSource != Source::kRightHand)) {
+		if (!a_caster || (a_caster->castingSource != Source::kLeftHand && a_caster->castingSource != Source::kRightHand)) {
+			return;
+		}
+		// another mod's dim on this casting light (Baked Goods): asleep, a dimmer starting wakes the hands (a light with no controller is
+		// one read); a hand the pass does not follow takes the share here. Light Placer has just animated this hand's lights
+		auto* const cast = a_caster->light ? netimmerse_cast<RE::NiPointLight*>(a_caster->light->light.get()) : nullptr;
+		// a light with no controller dimmed to 0 (a spell drawn while sneaking) wakes them too; a full, unchanged hand stays asleep
+		if (cast && gHandsAsleep.load(std::memory_order_relaxed) && Followed(a_caster->GetCasterAsActor()) &&
+			(cast->controllers ? LightKit::ForeignDimShare(cast) < 1.0f : !(cast->GetLightRuntimeData().fade > 0.0f))) {
+			WakeHands();
+		}
+		// a dimmer stays on its light after it ran (Baked Goods reuses it), so the share is read again as it comes back up
+		// lit again with no controller, a hand whose siblings we dimmed still runs it once: ShareUnder at full gives their fade back
+		if (cast && (cast->controllers || !(cast->GetLightRuntimeData().fade > 0.0f) || gAnyShared.load(std::memory_order_relaxed))) {
+			auto* const     actor = a_caster->GetCasterAsActor();
+			const bool      left = a_caster->castingSource == Source::kLeftHand;
+			std::lock_guard lock(gLock);
+			if (actor && !ActiveSpellHand(actor, left)) {
+				RE::NiAVObject*   roots[2]{};
+				RE::NiPointLight* light = nullptr;
+				SpellHandLights(actor, left, roots, light);
+				const float share = CasterShareNow(cast);
+				for (auto* root : roots) {
+					ShareUnder(root, cast, share);
+				}
+			}
+		}
+		if (!Items::Holding()) {
 			return;
 		}
 		// Light Placer animates this hand's casting lights in the caster's update: only its own lights, as Items::Apply finds them
@@ -1423,9 +1685,19 @@ namespace Fade
 		RestoreAll();
 		Items::Release();
 		WakeHands();
+		{
+			// the old HUD's boxes go with it (the gems take the fixed place until the new HUD is read); a read queued for it is dropped
+			const std::scoped_lock boxLock{ gBoxLock };
+			gHudBoxes = {};
+			gHudSession.fetch_add(1, std::memory_order_relaxed);
+			gBoxesAsked.store(false, std::memory_order_relaxed);  // a HUD read queued as the old game ended may never run
+			gHudNew.store(true, std::memory_order_relaxed);
+		}
 		gActors.clear();
 		gItemRoots.clear();  // the old game's effects' 3D
 		gNotedLights.clear();
+		gShared.clear();  // the old game's lights by address: never read again, so a light made later at one of them starts clean
+		gAnyShared.store(false, std::memory_order_relaxed);
 	}
 
 	// a plugin's light for a hand that hangs away from the hand's 3D: the fading pass and Lights by Item take it as the hand's

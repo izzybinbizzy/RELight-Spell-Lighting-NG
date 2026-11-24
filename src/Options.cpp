@@ -56,9 +56,46 @@ namespace Plugin
 			const void*   parent{ nullptr };  // the node it hangs on
 			std::size_t   option{ kNone };    // kNone: not one of ours (or not RE::Light's)
 			std::uint32_t frame{ 0 };         // last seen; a light unseen for a while is forgotten
+			bool          owned{ true };      // false: RE::Light's light with no reference found yet - asked again next walk
+			std::uint8_t  tries{ 0 };         // how often an unowned light was asked: a true orphan stops being asked
+			int           nature{ -1 };       // the nature kind of its object's model (NatureKind.h index), -1 for none
 		};
+		constexpr std::uint8_t                        kOwnerTries = 30;
 		std::unordered_map<const RE::NiLight*, Known> gKnown;
 		std::uint32_t                                 gFrame = 0;
+
+		// A hazard or explosion model whose root is a plain NiNode (Frost's and Storms' walls) is stored with no reference on its tree,
+		// so a light under it had no switch, twin net or slider. Its Load3D (Hooks.cpp) hands us the pair; any thread, locked
+		struct PlainRoot
+		{
+			RE::FormID                ref{ 0 };
+			const RE::TESBoundObject* base{ nullptr };
+		};
+		std::unordered_map<const RE::NiAVObject*, PlainRoot> gPlainRoots;
+		std::mutex                                           gPlainRootsLock;
+		constexpr std::size_t                                kPlainRootsPrune = 256;
+
+		// the noted reference still stands with the same base. Not its stored 3D: RE::Light's twin may hang on an earlier root, and a
+		// root still loading has none; a node reused for another piece of the same base answers the same option, strength and tint
+		[[nodiscard]] bool StillOwns(const RE::TESObjectREFR* a_ref, const PlainRoot& a_root)
+		{
+			return a_ref && a_ref->GetBaseObject() == a_root.base;
+		}
+
+		RE::TESObjectREFR* PlainRootOwner(const RE::NiAVObject* a_obj)
+		{
+			std::lock_guard l{ gPlainRootsLock };
+			if (gPlainRoots.empty()) {
+				return nullptr;
+			}
+			for (const auto* o = a_obj; o; o = o->parent) {
+				if (const auto it = gPlainRoots.find(o); it != gPlainRoots.end()) {
+					auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(it->second.ref);
+					return StillOwns(ref, it->second) ? ref : nullptr;
+				}
+			}
+			return nullptr;
+		}
 
 		// where RE::Light attached for this effect (GetReferenceAttachRoot, then the third-person node of the same name)
 		RE::NiAVObject* EnchantRootOf(RE::ShaderReferenceEffect* a_effect)
@@ -168,8 +205,10 @@ namespace Plugin
 			gFlesh.erase(fleshRepeats.begin(), fleshRepeats.end());
 		}
 
-		std::size_t LookUpOption(RE::NiLight* a_light)
+		std::size_t LookUpOption(RE::NiLight* a_light, bool& a_owned, int& a_nature)
 		{
+			a_owned = true;
+			a_nature = -1;
 			if (!IsReLightLight(a_light)) {
 				return kNone;
 			}
@@ -177,6 +216,9 @@ namespace Plugin
 				return EnchantOptionOf(a_light);
 			}
 			auto* ref = ReferenceOf(a_light);
+			// a walk can meet a hazard's light in the moment before its Load3D notes the plain root
+			a_owned = ref != nullptr;
+			a_nature = ref ? NatureIndexOf(ref->GetBaseObject()) : -1;
 			return ref ? OptionOf(ref->GetBaseObject()) : kNone;
 		}
 
@@ -190,8 +232,13 @@ namespace Plugin
 			auto&       k = gKnown[a_light];
 			const void* name = a_light->name.c_str();
 			const void* parent = a_light->parent;
-			if (k.frame == 0 || k.name != name || k.parent != parent) {
-				k = { name, parent, LookUpOption(a_light), gFrame };
+			const bool  same = k.frame != 0 && k.name == name && k.parent == parent;
+			if (!same || (!k.owned && k.tries < kOwnerTries)) {
+				bool               owned = true;
+				int                nature = -1;
+				const auto         option = LookUpOption(a_light, owned, nature);
+				const std::uint8_t tries = same ? static_cast<std::uint8_t>(k.tries + 1) : std::uint8_t{ 0 };
+				k = { name, parent, option, gFrame, owned, tries, nature };
 			}
 			k.frame = gFrame;
 			return k.option;
@@ -233,7 +280,24 @@ namespace Plugin
 			return weapon && !weapon->IsStaff() && !weapon->IsBound() && !weapon->HasKeywordID(kDaedricArtifact);
 		}
 
-		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant) { return Off(a_option) || (a_enchant && EnchantedOut(a_light, a_option)); }
+		// the five nature switches (his answer 2026-11-22): a light of ours on an object whose model is of a kind switched off goes out
+		// like a switched-off option's - its kind read with its option (gKnown), else off its reference now; enchantment lights are no kind
+		bool NatureOut(RE::NiLight* a_light)
+		{
+			if (!AnyNatureOff() || IsEnchantLight(a_light)) {
+				return false;
+			}
+			if (const auto it = gKnown.find(a_light); it != gKnown.end() && it->second.frame != 0) {
+				return !NatureLightsOn(it->second.nature);
+			}
+			auto* ref = ReferenceOf(a_light);
+			return ref && !NatureLightsOn(NatureIndexOf(ref->GetBaseObject()));
+		}
+
+		bool OffFor(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
+		{
+			return Off(a_option) || (a_option != kNone && NatureOut(a_light)) || (a_enchant && EnchantedOut(a_light, a_option));
+		}
 
 		void HoldOut(RE::NiLight* a_light, std::size_t a_option, bool a_enchant)
 		{
@@ -318,9 +382,26 @@ namespace Plugin
 
 		// RE::Light puts the player's enchantment lights back into the scene only when she goes indoors or outdoors
 		// (ReinitializeEnchantmentLights): after an outdoor-to-outdoor fast travel her drawn weapon's light stays out of it until
-		// a new equip makes a new light. For four seconds after her cell changes or she draws (Events.cpp), twice a second, her
+		// a new equip makes a new light. For four seconds after her cell changes, she draws or equips (Events.cpp), twice a second, her
 		// drawn weapons' RE::Light lights missing from both lists are added back; nothing is walked the rest of the time.
 		std::atomic<int> gWeaponChecks{ 0 };
+		// her last equip's base id from the event sink (any thread), and whether more than one came before the main thread looked
+		std::atomic<RE::FormID> gHerEquip{ 0 };
+		std::atomic<bool>       gHerEquips{ false };
+
+		// only a weapon or a shield changes what hangs an enchantment light on her WEAPON / SHIELD node. Main thread
+		[[nodiscard]] bool WeaponOrShield(RE::FormID a_base)
+		{
+			const auto* form = RE::TESForm::LookupByID(a_base);
+			if (!form) {
+				return false;
+			}
+			if (form->IsWeapon()) {
+				return true;
+			}
+			const auto* armor = form->As<RE::TESObjectARMO>();
+			return armor && armor->IsShield();
+		}
 		// the option-lights walk is wanted (NoteOptionsLook - any thread)
 		std::atomic<bool> gOptionsLook{ true };
 		constexpr int     kWeaponChecks = 8;
@@ -337,6 +418,11 @@ namespace Plugin
 			constexpr std::uint32_t kEvery = 30;
 			auto*                   player = RE::PlayerCharacter::GetSingleton();
 			if (gFrame % kEvery != 0 || !player || gWeaponChecks.load(std::memory_order_relaxed) <= 0) {
+				return;
+			}
+			// RE::Light culls these lights on sheathe: a weapon swapped while sheathed must not light the ground
+			if (!player->AsActorState()->IsWeaponDrawn()) {
+				gWeaponChecks.fetch_sub(1, std::memory_order_relaxed);
 				return;
 			}
 			// a full walk times itself: this check inside it is not counted twice
@@ -367,7 +453,7 @@ namespace Plugin
 					gOptionsLook.store(true, std::memory_order_relaxed);  // the sheathed net and the switches see it too
 					if (logged < 5) {
 						++logged;
-						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change - put back");
+						SKSE::log::info("weapon lights: RE::Light's light on her weapon was out of the scene after a cell change, draw or equip - put back");
 					}
 				}
 			}
@@ -410,7 +496,32 @@ namespace Plugin
 				return ref;
 			}
 		}
-		return nullptr;
+		return a_obj ? PlainRootOwner(a_obj) : nullptr;
+	}
+
+	void NotePlainRoot(const RE::NiAVObject* a_root, const RE::TESObjectREFR* a_ref)
+	{
+		const auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+		if (!a_root || !base) {
+			return;
+		}
+		std::lock_guard l{ gPlainRootsLock };
+		if (gPlainRoots.size() >= kPlainRootsPrune) {
+			std::erase_if(gPlainRoots, [](const auto& a_kv) {
+				return !StillOwns(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_kv.second.ref), a_kv.second);
+			});
+		}
+		gPlainRoots.insert_or_assign(a_root, PlainRoot{ a_ref->GetFormID(), base });
+	}
+
+	void ForgetPlainRoots(const RE::TESObjectREFR* a_ref)
+	{
+		if (!a_ref) {
+			return;
+		}
+		const auto      id = a_ref->GetFormID();
+		std::lock_guard l{ gPlainRootsLock };
+		std::erase_if(gPlainRoots, [id](const auto& a_kv) { return a_kv.second.ref == id; });
 	}
 
 	bool HeldOutForOption(const RE::NiLight* a_light) { return gHeldSet.contains(a_light); }
@@ -431,9 +542,24 @@ namespace Plugin
 
 	void NoteOptionsLook() { gOptionsLook.store(true, std::memory_order_relaxed); }
 
+	void NoteHerEquip(RE::FormID a_base)
+	{
+		if (gHerEquip.exchange(a_base, std::memory_order_relaxed) != 0) {
+			gHerEquips.store(true, std::memory_order_relaxed);
+		}
+	}
+
 	void UpdateOptionLights()
 	{
 		++gFrame;
+		// her equip, judged here on the main thread: a weapon or shield (or several equips at once, any of which may be one) arms the look
+		if (gHerEquip.load(std::memory_order_relaxed) != 0) {
+			const auto base = gHerEquip.exchange(0, std::memory_order_relaxed);
+			if (gHerEquips.exchange(false, std::memory_order_relaxed) || WeaponOrShield(base)) {
+				WatchWeaponLights();
+				gOptionsLook.store(true, std::memory_order_relaxed);
+			}
+		}
 		auto& opts = Options();
 		// a switch off holds its lights out as they come, so then the walk runs every frame: RE::Light hangs them in its own load hooks and
 		// names none of them (its source, CommonLib's and SKSE's events searched). Otherwise only when something it depends on happened
@@ -441,7 +567,7 @@ namespace Plugin
 		static bool          anyOff = false;
 		if (const auto gen = SettingsGeneration(); gen != lastGen) {
 			lastGen = gen;
-			anyOff = AllLightsOff() || !EnchantedWeaponsOn();
+			anyOff = AllLightsOff() || !EnchantedWeaponsOn() || AnyNatureOff();
 			for (std::size_t i = 0; i < opts.size() && !anyOff; ++i) {
 				anyOff = !OptionLit(i);
 			}
@@ -531,7 +657,7 @@ namespace Plugin
 		// the lights are touched here)
 		auto*      ref = ReferenceOf(a_root);
 		const auto opt = ref ? OptionOf(ref->GetBaseObject()) : kNone;
-		if (!Off(opt)) {
+		if (!Off(opt) && (opt == kNone || !AnyNatureOff() || NatureLightsOn(NatureIndexOf(ref->GetBaseObject())))) {
 			return out;
 		}
 		a_option = opt;

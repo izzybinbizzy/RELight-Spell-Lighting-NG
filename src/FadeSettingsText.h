@@ -30,12 +30,12 @@
 //   BoundFadeSeconds=10       1 to 60: the last seconds of a bound weapon's spell, over which its light fades
 //   Who=0                     0 the player, 1 the player and followers, 2 everyone nearby (each actor the game fully runs near you)
 //   DimShader=1               the enchantment's glow (its shader and its art's swirls) follows the charge too
-//   HideChargeBar=0           the HUD's enchantment charge bar is hidden (vanilla HUD, SkyHUD, TrueHUD) - while Fading is on
 //   HudGems=0                 a soul gem per weapon hand beside the health bar, shown while its charge is down (needs SKSE Menu Framework)
 //   HudGemSize=100            percent, 50 to 200
 //   HudGemOpacity=90          percent, 10 to 100
 //   HudGemPercent=1           the percent under each gem
 //   HudGemFull=0              a gem for every enchanted or bound weapon in hand, full ones too (0: once its charge drops)
+//   HudGemPlace=0             0 above the HUD's own charge meters, 1 at the right end of the health, magicka and stamina bars
 //   DebugLog=0
 //   Fire=1 Frost=1 Shock=1 Absorb=1 SoulTrap=1 Paralyze=1 FearTurnBanish=1 OtherEffects=1
 //                             by effect: an enchantment's or a spell's strongest effect, for weapons and spells alike
@@ -91,12 +91,12 @@ namespace Fade
 		std::array<bool, 5> schools{ true, true, true, true, true };
 		float               boundFadeSeconds{ 10.0f };
 		bool                dimShader{ true };  // the enchantment's glow shader and its art's swirls follow the charge too
-		bool                hideChargeBar{ false };
-		bool                hudGems{ false };  // FadeMenu.cpp's HUD element: one charge gem per tracked hand of the player
+		bool                hudGems{ false };   // FadeMenu.cpp's HUD element: one charge gem per tracked hand of the player
 		float               hudGemSize{ 1.0f };
 		float               hudGemOpacity{ 0.9f };
-		bool                hudGemPercent{ true };  // the percent under each gem
-		bool                hudGemFull{ false };    // a gem at full charge too (his ask 2026-10-16); off: once the charge drops
+		bool                hudGemPercent{ true };                         // the percent under each gem
+		bool                hudGemFull{ false };                           // a gem at full charge too (his ask 2026-10-16); off: once the charge drops
+		Glow::GemPlace      hudGemPlace{ Glow::GemPlace::kChargeMeters };  // the HUD page's Gem place (his checklist 626)
 		bool                debugLog{ false };
 
 		bool operator==(const Settings&) const = default;
@@ -196,13 +196,14 @@ namespace Fade
 				[](Settings& s, int v) { s.boundFadeSeconds = static_cast<float>(std::clamp(v, 1, 60)); } },
 			{ "Who", [](const Settings& s) { return static_cast<int>(s.who); }, [](Settings& s, int v) { s.who = static_cast<Who>(std::clamp(v, 0, 2)); } },
 			{ "DimShader", [](const Settings& s) { return s.dimShader ? 1 : 0; }, [](Settings& s, int v) { s.dimShader = v != 0; } },
-			{ "HideChargeBar", [](const Settings& s) { return s.hideChargeBar ? 1 : 0; }, [](Settings& s, int v) { s.hideChargeBar = v != 0; } },
 			{ "HudGems", [](const Settings& s) { return s.hudGems ? 1 : 0; }, [](Settings& s, int v) { s.hudGems = v != 0; } },
 			{ "HudGemSize", [](const Settings& s) { return ToPct(s.hudGemSize); }, [](Settings& s, int v) { s.hudGemSize = Pct(v, 50, 200); } },
 			{ "HudGemOpacity", [](const Settings& s) { return ToPct(s.hudGemOpacity); },
 				[](Settings& s, int v) { s.hudGemOpacity = Pct(v, 10, 100); } },
 			{ "HudGemPercent", [](const Settings& s) { return s.hudGemPercent ? 1 : 0; }, [](Settings& s, int v) { s.hudGemPercent = v != 0; } },
 			{ "HudGemFull", [](const Settings& s) { return s.hudGemFull ? 1 : 0; }, [](Settings& s, int v) { s.hudGemFull = v != 0; } },
+			{ "HudGemPlace", [](const Settings& s) { return static_cast<int>(s.hudGemPlace); },
+				[](Settings& s, int v) { s.hudGemPlace = v == 1 ? Glow::GemPlace::kBars : Glow::GemPlace::kChargeMeters; } },
 			{ "DebugLog", [](const Settings& s) { return s.debugLog ? 1 : 0; }, [](Settings& s, int v) { s.debugLog = v != 0; } },
 			{ "Fire", [](const Settings& s) { return s.elements[0] ? 1 : 0; }, [](Settings& s, int v) { s.elements[0] = v != 0; } },
 			{ "Frost", [](const Settings& s) { return s.elements[1] ? 1 : 0; }, [](Settings& s, int v) { s.elements[1] = v != 0; } },
@@ -221,7 +222,7 @@ namespace Fade
 
 		// keys an older version wrote: read past without a warning, never written again (Glow::TintFor decides the cooling tint)
 		inline constexpr std::string_view kRetired[]{ "OwnLight", "OwnLightReach", "ColorCoolingTint", "Reticle", "ReticleStyle", "ReticleSize",
-			"ReticleOpacity", "ReticleDotSize", "ReticleDotClear" };
+			"ReticleOpacity", "ReticleDotSize", "ReticleDotClear", "HideChargeBar" };
 
 		using LightKit::SameText;  // LightMath.h: the one case-blind compare
 

@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -57,6 +58,23 @@ namespace BeamRow
 	// where it was launched to where it is now, and once the cone ends it stays there and fades out over kCloudLife
 	inline constexpr float kCloudAlong = 0.5f;
 	inline constexpr float kCloudLife = 0.5f;  // seconds: the cloud's art is gone about when its cone ends (measured)
+
+	// the rows' values a player may tune in the Advanced Settings file (Illuminated and RELight register them there; a plugin that
+	// does not keeps these defaults)
+	struct Tune
+	{
+		std::atomic<float> spacing{ kSpacing };  // the farthest two lights may stand apart
+		// the most lights a row has off Community Shaders: the game lets one piece of ground take only a few lights, so a row of 15
+		// lit only the ground near her hands; fewer, wider lights reach the whole stream (Lay makes each stronger to keep the light)
+		std::atomic<float> plainLights{ 5.0f };
+		std::atomic<float> vanilla{ 1.1f };            // a row's strength on Vanilla
+		std::atomic<float> enb{ 0.5f };                // a row's strength on ENB: the whole stream lit, not washed out
+		std::atomic<float> cloudReachShaders{ 3.0f };  // a lingering cloud's reach on Community Shaders, times its row's
+	};
+	inline Tune gTune;
+
+	[[nodiscard]] inline float Spacing() { return std::clamp(gTune.spacing.load(std::memory_order_relaxed), 20.0f, 400.0f); }
+	[[nodiscard]] inline int   PlainLights() { return std::clamp(static_cast<int>(gTune.plainLights.load(std::memory_order_relaxed) + 0.5f), 1, 20); }
 
 	// a row light's steady strength where its lighting caps it at a_top (Community Shaders: a light's strength for its reach):
 	// a light held at its cap cannot swing up and burns white in the middle. No cap (a_top 0): what was asked
@@ -133,11 +151,11 @@ namespace BeamRow
 			return;
 		}
 		// clamped in double before it becomes an int: a mod's range can be any float, and a huge one must not overflow it
-		const double needed = (std::min)(std::ceil(static_cast<double>(a_length) / kSpacing), static_cast<double>(a_most));
+		const double needed = (std::min)(std::ceil(static_cast<double>(a_length) / Spacing()), static_cast<double>(a_most));
 		const int    n = std::clamp((std::max)(static_cast<int>(needed), kFewest), 1, a_most);
 		const float  spacing = a_length / static_cast<float>(n);
 		const float  besideBeam = std::clamp(kReachTimes * spacing, kLeastReach, kMostReach);
-		const bool   thinned = static_cast<int>(needed) >= a_most && spacing > kSpacing;
+		const bool   thinned = static_cast<int>(needed) >= a_most && spacing > Spacing();
 		const float  reach = thinned ? (std::max)(besideBeam, (std::min)(kGapReach * spacing, kMostGapReach)) : besideBeam;
 		a_row.reserve(static_cast<std::size_t>(n));
 		for (int i = 0; i < n; ++i) {

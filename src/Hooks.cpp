@@ -65,7 +65,7 @@ namespace
 	// on the main thread only (an SKSE task from the hook below): a new spell light goes into our lists. The last
 	// reference to a light is only ever dropped on the main thread (here, or in Keep.cpp's sweep)
 	void NoteMagicLight(const RE::NiPointer<RE::NiLight>& a_light, const std::string& a_handKey, bool a_ours, Pulse::Kind a_kind,
-		Plugin::Dressed a_dressed)
+		Plugin::Dressed a_dressed, int a_nature)
 	{
 		if (!a_light || a_light->GetRefCount() <= 1) {
 			return;  // the game let go of it before the main thread came round: nothing to note (freed right here)
@@ -73,7 +73,7 @@ namespace
 		Plugin::KeepLight(a_light.get());
 		gMagicLights.insert(a_light.get());
 		if (!a_handKey.empty()) {
-			Plugin::NoteHandLight(a_light.get(), a_handKey);
+			Plugin::NoteHandLight(a_light.get(), a_handKey, a_nature);
 		}
 		// a hand light of ours, a spray light RE::Light made from our config, and the light of a beam or breath
 		// projectile our data names (RE::Light lights it; Streams.cpp) are ours for the sliders
@@ -208,8 +208,8 @@ namespace
 		a_light->world.translate = a_point;
 	}
 
-	// main thread, each frame: with both her hands lit their shadow casters sit at one point between them, so she throws one
-	// shadow; a hand lit alone casts from out of its own palm (OutOfThePalm's place)
+	// main thread, each frame: with both her hands lit and "A shadow from each hand" off, their shadow casters sit at one point
+	// between them, so she throws one shadow; otherwise each casts from out of its own palm (OutOfThePalm's place)
 	void PlaceHerShadow()
 	{
 		if (!gHerShadowsAny.load(std::memory_order_relaxed)) {
@@ -243,7 +243,7 @@ namespace
 			const bool  left = std::string_view(node->name.c_str()).contains("L MagicNode");
 			const auto* strings = RE::FixedStrings::GetSingleton();
 			auto*       other = strings ? rootOf(node)->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode) : nullptr;
-			const bool  both = other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
+			const bool  both = !Plugin::ShadowFromEachHand() && other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
 				return MagicNodeOf(a_l) == other && Shows(a_l);
 			});
 			if (both) {
@@ -284,8 +284,8 @@ namespace
 
 	std::vector<RE::NiPointLight*> gPromotedBetween;  // main thread only; a light is read only while gMagicLights holds it
 
-	// main thread, each frame, with Promote on and no Bottled shadow download: while both her hands are lit their lights sit at
-	// one point between them, so she throws one shadow (the same lights, the same brightness)
+	// main thread, each frame, with Promote on and no Bottled shadow download: while both her hands are lit and "A shadow from
+	// each hand" is off, their lights sit at one point between them, so she throws one shadow (the same lights, the same brightness)
 	void PlacePromotedHands()
 	{
 		static const bool on = Plugin::InverseSquare() && !REL::Module::IsVR() && !Plugin::ShadowPatch() && PromoteOn();
@@ -304,7 +304,7 @@ namespace
 			auto* root = player->Get3D(first);
 			auto* left = root ? root->GetObjectByName(strings->npcLMagicNode) : nullptr;
 			auto* right = root ? root->GetObjectByName(strings->npcRMagicNode) : nullptr;
-			if (!left || !right || !HasHandLight(left) || !HasHandLight(right)) {
+			if (Plugin::ShadowFromEachHand() || !left || !right || !HasHandLight(left) || !HasHandLight(right)) {
 				continue;
 			}
 			const auto point = (left->world * LightKit::kHandPoint + right->world * LightKit::kHandPoint) * 0.5f;
@@ -398,9 +398,12 @@ namespace
 						std::lock_guard lock(gBudgetPendingLock);
 						gBudgetPending.insert(made);
 					}
-					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, budgetCaster, distant, kind, dressed, pending]() {
+					// the caster held by its refcount: its hand's spell (and so its nature kind) is read on the main thread
+					tasks->AddTask([light = RE::NiPointer<RE::NiLight>(made), key = hand ? hand->key : std::string{}, ours, budgetCaster, distant, kind, dressed, pending,
+									   caster = RE::NiPointer<RE::TESObjectREFR>(hand ? a_ref : nullptr), left]() {
 						LightKit::Guarded("spell light task", [&]() {
-							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed);
+							const int nature = caster ? Plugin::NatureOfHand(caster->As<RE::Actor>(), left) : -1;
+							NoteMagicLight(light, key, ours, key.empty() ? Pulse::Kind::kNone : kind, dressed, nature);
 							if (budgetCaster != 0 && gMagicLights.contains(light.get())) {
 								gBudgetLights[light.get()] = { budgetCaster, distant };
 							}
@@ -445,19 +448,31 @@ namespace
 				return root;
 			}
 			LightKit::Guarded("3D load", [&]() {
-				// may be a loader thread: the lights are put out now (never a frame lit) and our lists take them on the main thread.
-				// RE::Light has already hung its light here; a switched-off option's goes out before its first frame
-				std::size_t option = Plugin::kNone;
-				if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
-					tasks->AddTask([lights = std::move(culled), option]() { LightKit::Guarded("option lights task", [&]() { Plugin::AdoptOptionLights(option, lights); }); });
-				}
-				Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
-				if constexpr (std::is_same_v<T, RE::Hazard>) {
-					Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
-				}
-				if constexpr (std::is_base_of_v<RE::Projectile, T>) {
-					Plugin::QueueRow(a_this);  // a bolt / spray / cone our data lights: its row of lights, hung on the main thread (Rows.cpp)
-				}
+				// only noted here (this may be a loader thread): the root and the reference held by their refcounts, every read of the game in
+				// the task, on the main thread (an event sink only notes). A switched-off option's RE::Light light may show for that one frame
+				tasks->AddTask([held = RE::NiPointer<RE::NiAVObject>(root), ref = RE::NiPointer<RE::TESObjectREFR>(a_this)]() {
+					LightKit::Guarded("3D load task", [&]() {
+						auto* self = static_cast<T*>(ref.get());
+						if (!self || !held) {
+							return;
+						}
+						if constexpr (std::is_same_v<T, RE::Hazard> || std::is_same_v<T, RE::Explosion>) {
+							// before the cull asks: a plain NiNode root (Frost's and Storms' walls) is stored with no reference on its tree
+							Plugin::NotePlainRoot(held.get(), self);
+						}
+						std::size_t option = Plugin::kNone;
+						if (auto culled = Plugin::CullOptionLightsUnder(held.get(), option); !culled.empty()) {
+							Plugin::AdoptOptionLights(option, culled);
+						}
+						Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
+						if constexpr (std::is_same_v<T, RE::Hazard>) {
+							Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
+						}
+						if constexpr (std::is_base_of_v<RE::Projectile, T>) {
+							Plugin::QueueRow(self);  // a bolt / spray / cone our data lights: its row of lights (Rows.cpp)
+						}
+					});
+				});
 			});
 			return root;
 		}
@@ -469,6 +484,9 @@ namespace
 			set(a_this, a_object, a_queue3DTasks);
 			if (!a_object && had) {
 				Plugin::NoteSweep(Plugin::SweepWhy::kMagicDrop);
+				if constexpr (std::is_same_v<T, RE::Hazard> || std::is_same_v<T, RE::Explosion>) {
+					Plugin::ForgetPlainRoots(a_this);
+				}
 			}
 		}
 		static inline REL::Relocation<decltype(thunk)>    func;
@@ -503,7 +521,8 @@ namespace
 				// Brightness.cpp's NoteFadeWrite)
 				Plugin::UpdateBrightness(a_delta);
 				Fade::UpdateHands(a_delta);
-				Plugin::TickGroundLights();  // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				Plugin::TickGroundLights();    // last: off Community Shaders the hand lights' twins copy this frame's numbers (GroundLights.cpp)
+				Plugin::TickBurningBanners();  // a banner the game said started or stopped burning (BurningBanners.cpp)
 				LightKit::Cost::FrameEnd();
 			});
 		}
