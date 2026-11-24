@@ -181,7 +181,7 @@ namespace Glow
 					// with the health bar read, another bar counts only stacked with it (above or below, the same span); one in its row
 					// is a side bar whose clip reaches under it (the vanilla HUD's magicka and stamina boxes overlap the health box)
 					const bool other = health.ok && &p != &health;
-					if (!p.ok || (other && (p.x1 < health.x0 || p.x0 > health.x1 || !(p.y1 < health.y0 || p.y0 > health.y1)))) {
+					if (!p.ok || (other && (p.x1 < health.x0 || p.x0 > health.x1 || !(p.y1 <= health.y0 || p.y0 >= health.y1)))) {
 						continue;
 					}
 					u = u.ok ? HudBox{ std::min(u.x0, p.x0), std::min(u.y0, p.y0), std::max(u.x1, p.x1), std::max(u.y1, p.y1), true } : p;
