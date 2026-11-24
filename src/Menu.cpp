@@ -957,7 +957,8 @@ namespace Plugin
 			ImGuiMCP::SetNextWindowSize(ImGuiMCP::ImVec2(820.0f, 1040.0f), ImGuiMCP::ImGuiCond_Always);
 			if (ImGuiMCP::Begin("RELight (test)", nullptr, ImGuiMCP::ImGuiWindowFlags_NoCollapse) && page >= 0 &&
 				static_cast<std::size_t>(page) < kTestPages.size()) {
-				kTestPages[static_cast<std::size_t>(page)].second();
+				// guarded inside Begin / End, so a throw never leaves the window open on ImGui's stack
+				LightKit::Guarded("menu: test window", kTestPages[static_cast<std::size_t>(page)].second);
 			}
 			ImGuiMCP::End();
 		}

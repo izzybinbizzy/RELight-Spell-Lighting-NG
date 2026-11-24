@@ -167,27 +167,31 @@ namespace Glow
 			// sits in that gap, where the health bar's end would be - their union would reach the screen's right edge
 			const auto& magicka = a_b.bars[1];
 			const auto& stamina = a_b.bars[2];
-			if (!health.ok && magicka.ok && stamina.ok && (magicka.x1 < stamina.x0 || stamina.x1 < magicka.x0)) {
-				const auto& l = magicka.x1 < stamina.x0 ? magicka : stamina;
-				const auto& r = magicka.x1 < stamina.x0 ? stamina : magicka;
+			const bool  apart = !health.ok && magicka.ok && stamina.ok && (magicka.x1 < stamina.x0 || stamina.x1 < magicka.x0);
+			const auto& l = magicka.x1 < stamina.x0 ? magicka : stamina;
+			const auto& r = magicka.x1 < stamina.x0 ? stamina : magicka;
+			// only a gap the pair fits in (a narrow one keeps the union's right end)
+			if (apart && (r.x0 - l.x1) * a_w >= step + a_gemW) {
 				const float mid = (l.x1 + r.x0) * 0.5f * a_w;
 				const float y = (std::min(l.y0, r.y0) + std::max(l.y1, r.y1)) * 0.5f * a_h - a_below * 0.5f;
 				out = { GemSpot{ mid - step * 0.5f, y }, GemSpot{ mid + step * 0.5f, y } };
-				a_out = out;
-				return true;
-			}
-			HudBox u{};
-			for (const auto& p : a_b.bars) {
-				if (!p.ok || (health.ok && (p.x1 < health.x0 || p.x0 > health.x1))) {
-					continue;
+			} else {
+				HudBox u{};
+				for (const auto& p : a_b.bars) {
+					// with the health bar read, another bar counts only stacked with it (above or below, the same span); one in its row
+					// is a side bar whose clip reaches under it (the vanilla HUD's magicka and stamina boxes overlap the health box)
+					const bool other = health.ok && &p != &health;
+					if (!p.ok || (other && (p.x1 < health.x0 || p.x0 > health.x1 || !(p.y1 < health.y0 || p.y0 > health.y1)))) {
+						continue;
+					}
+					u = u.ok ? HudBox{ std::min(u.x0, p.x0), std::min(u.y0, p.y0), std::max(u.x1, p.x1), std::max(u.y1, p.y1), true } : p;
 				}
-				u = u.ok ? HudBox{ std::min(u.x0, p.x0), std::min(u.y0, p.y0), std::max(u.x1, p.x1), std::max(u.y1, p.y1), true } : p;
+				if (!u.ok) {
+					return false;
+				}
+				const float x = u.x1 * a_w + gap + a_gemW * 0.5f, y = (u.y0 + u.y1) * 0.5f * a_h - a_below * 0.5f;
+				out = { GemSpot{ x, y }, GemSpot{ x + step, y } };
 			}
-			if (!u.ok) {
-				return false;
-			}
-			const float x = u.x1 * a_w + gap + a_gemW * 0.5f, y = (u.y0 + u.y1) * 0.5f * a_h - a_below * 0.5f;
-			out = { GemSpot{ x, y }, GemSpot{ x + step, y } };
 		}
 		// whole on the screen, the pair moved together so one never covers the other: shifted in as a unit
 		// when it fits side by side, else the second stacked above the first

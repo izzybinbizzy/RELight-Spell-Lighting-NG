@@ -20,6 +20,7 @@
 #include "DevBenchGlue.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -115,7 +116,7 @@ namespace Plugin
 			if (action == "menupage") {
 				// a test's picture of one page, and its lines read through the translator: never saved
 				const auto v = DevBenchGlue::Number(a_args, "value");
-				const auto page = ShowTestPage(v ? static_cast<int>(std::clamp(*v, -1.0, 64.0)) : -1);
+				const auto page = ShowTestPage(v && std::isfinite(*v) ? static_cast<int>(std::clamp(*v, -1.0, 64.0)) : -1);
 				if (page.empty()) {
 					return DevBenchGlue::Refusal("menupage needs SKSE Menu Framework's window");
 				}
