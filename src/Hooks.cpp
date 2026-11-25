@@ -25,16 +25,22 @@
 #	define NOMINMAX  // the build defines it too (xmake.lua)
 #endif
 #include "Fade.h"
+#include "NoteRing.h"
 #include "Plugin.h"
 
 #include <Windows.h>  // VirtualQuery, GetModuleHandleExW: whose code a VR call site's call leads into
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -167,7 +173,7 @@ namespace
 	std::mutex                       gHerShadowLock;
 	std::atomic<bool>                gHerShadowsAny{ false };  // set when one joins; the pass clears it when none is left
 	std::unordered_set<RE::NiLight*> gHerShadows;
-	std::unordered_set<RE::NiLight*> gShadowsBetween;  // the casters moved between her hands; main thread only
+	std::unordered_set<RE::NiLight*> gShadowsBetween;  // the casters moved between her hands or out of her torso; main thread only
 
 	// a hand light that shows; faded to nothing (the off choice) or put out by a switch, its hand counts as unlit
 	[[nodiscard]] bool Shows(RE::NiLight* a_light) { return a_light->GetLightRuntimeData().fade > 0.0f && !Plugin::WantedDark(a_light); }
@@ -235,6 +241,8 @@ namespace
 			}
 			return a_node;
 		};
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* body = player ? player->Get3D(false) : nullptr;
 		for (auto* light : lights) {
 			auto* node = MagicNodeOf(light);
 			if (!node) {
@@ -248,6 +256,14 @@ namespace
 			});
 			if (both) {
 				MoveTo(light, (node->world * LightKit::kHandPoint + other->world * LightKit::kHandPoint) * 0.5f);
+				gShadowsBetween.insert(light);
+				continue;
+			}
+			// its own hand's place, out of her torso when an animation holds the hand against it
+			const auto palm = node->world * LightKit::kHandPoint;
+			const auto out = LightKit::OutOfBody(body, palm);
+			if (out.GetDistance(palm) > 0.01f) {
+				MoveTo(light, out);
 				gShadowsBetween.insert(light);
 			} else if (gShadowsBetween.erase(light) > 0) {
 				OutOfThePalm(netimmerse_cast<RE::NiPointLight*>(light), light->parent);
@@ -300,11 +316,32 @@ namespace
 		const LightKit::Cost::Pass            pass{ 10, "her shadow, promoted hands" };
 		static std::vector<RE::NiPointLight*> between;
 		between.clear();
+		auto* body = player->Get3D(false);
 		for (const bool first : { false, true }) {
 			auto* root = player->Get3D(first);
 			auto* left = root ? root->GetObjectByName(strings->npcLMagicNode) : nullptr;
 			auto* right = root ? root->GetObjectByName(strings->npcRMagicNode) : nullptr;
-			if (Plugin::ShadowFromEachHand() || !left || !right || !HasHandLight(left) || !HasHandLight(right)) {
+			if (!left || !right) {
+				continue;
+			}
+			if (Plugin::ShadowFromEachHand()) {
+				// each hand's lights at its own palm, out of her torso when an animation holds the hand against it
+				for (auto* any : gMagicLights) {
+					auto*       light = netimmerse_cast<RE::NiPointLight*>(any);
+					const auto* node = light ? MagicNodeOf(light) : nullptr;
+					if (!node || (node != left && node != right)) {
+						continue;
+					}
+					const auto palm = node->world * LightKit::kHandPoint;
+					const auto out = LightKit::OutOfBody(body, palm);
+					if (out.GetDistance(palm) > 0.01f) {
+						MoveTo(light, out);
+						between.push_back(light);
+					}
+				}
+				continue;
+			}
+			if (!HasHandLight(left) || !HasHandLight(right)) {
 				continue;
 			}
 			const auto point = (left->world * LightKit::kHandPoint + right->world * LightKit::kHandPoint) * 0.5f;
@@ -437,43 +474,38 @@ namespace
 		static inline REL::Relocation<MagicLightFn> func;
 	};
 
+	// the projectiles, explosions and hazards whose 3D came in since the last player update: only their ids, noted on the game's
+	// loader threads (no task, no hold on the reference there - the 720 rule), read on the main thread by TakeMagicLoads
+	enum class LoadKind : std::uint8_t
+	{
+		kProjectile,
+		kExplosion,
+		kHazard
+	};
+	// form id << 8 | kind + 1 (never 0); no lock and no allocation on the loader threads (the plugin framework 7a, Threads)
+	NoteRing<256> gMagicLoads;
+	// how each kind's 3D comes in: [kind][background load][on the main thread], read through devbench (inspect kind=relight
+	// "magicLoadWays"). A synchronous load stores its 3D inside Load3D on its caller's thread (TESObjectREFR::Load3D 19727 +0x21C);
+	// if it never runs off the main thread, the game's main-thread store sites can take the place of the ring
+	std::array<std::atomic<std::uint32_t>, 12> gLoadWays{};
+	std::atomic<std::uint32_t>                 gMainThread{ 0 };
+
 	template <class T>
 	struct Load3D
 	{
 		static RE::NiAVObject* thunk(T* a_this, bool a_backgroundLoading)
 		{
 			auto* root = func(a_this, a_backgroundLoading);
-			auto* tasks = root ? SKSE::GetTaskInterface() : nullptr;
-			if (!tasks) {
-				return root;
-			}
-			LightKit::Guarded("3D load", [&]() {
-				// only noted here (this may be a loader thread): the root and the reference held by their refcounts, every read of the game in
-				// the task, on the main thread (an event sink only notes). A switched-off option's RE::Light light may show for that one frame
-				tasks->AddTask([held = RE::NiPointer<RE::NiAVObject>(root), ref = RE::NiPointer<RE::TESObjectREFR>(a_this)]() {
-					LightKit::Guarded("3D load task", [&]() {
-						auto* self = static_cast<T*>(ref.get());
-						if (!self || !held) {
-							return;
-						}
-						if constexpr (std::is_same_v<T, RE::Hazard> || std::is_same_v<T, RE::Explosion>) {
-							// before the cull asks: a plain NiNode root (Frost's and Storms' walls) is stored with no reference on its tree
-							Plugin::NotePlainRoot(held.get(), self);
-						}
-						std::size_t option = Plugin::kNone;
-						if (auto culled = Plugin::CullOptionLightsUnder(held.get(), option); !culled.empty()) {
-							Plugin::AdoptOptionLights(option, culled);
-						}
-						Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
-						if constexpr (std::is_same_v<T, RE::Hazard>) {
-							Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
-						}
-						if constexpr (std::is_base_of_v<RE::Projectile, T>) {
-							Plugin::QueueRow(self);  // a bolt / spray / cone our data lights: its row of lights (Rows.cpp)
-						}
-					});
+			if (root) {
+				LightKit::Guarded("3D load", [a_this, a_backgroundLoading]() {
+					constexpr LoadKind kind = std::is_same_v<T, RE::Hazard>    ? LoadKind::kHazard :
+					                          std::is_same_v<T, RE::Explosion> ? LoadKind::kExplosion :
+					                                                             LoadKind::kProjectile;
+					const bool         main = ::GetCurrentThreadId() == gMainThread.load(std::memory_order_relaxed);
+					gLoadWays[static_cast<std::size_t>(kind) * 4 + (a_backgroundLoading ? 2 : 0) + (main ? 1 : 0)].fetch_add(1, std::memory_order_relaxed);
+					gMagicLoads.Note((static_cast<std::uint64_t>(a_this->GetFormID()) << 8) | (static_cast<std::uint64_t>(kind) + 1));
 				});
-			});
+			}
 			return root;
 		}
 		// and out: a light kept for it stays in the scene until the sweep lets go, and no other moment announces its end. Its own vtable's
@@ -499,6 +531,53 @@ namespace
 		}
 	};
 
+	// main thread, the player update: each magic object noted by Load3D, read off its reference now. One gone already needs nothing;
+	// a switched-off option's RE::Light light may have shown for the frame between
+	void TakeMagicLoads()
+	{
+		if (!gMagicLoads.Armed()) {
+			return;
+		}
+		static std::vector<std::pair<RE::FormID, LoadKind>> loads;  // main thread; its storage kept between frames
+		loads.clear();
+		const bool lost = gMagicLoads.Drain([](std::uint64_t a_note) {
+			loads.emplace_back(static_cast<RE::FormID>(a_note >> 8), static_cast<LoadKind>((a_note & 0xFF) - 1));
+		});
+		if (lost) {
+			// more loads in one frame than the ring holds: the option walk looks round once for the lights they may have shown
+			Plugin::NoteOptionsLook();
+			static bool told = false;
+			if (!told) {
+				told = true;
+				SKSE::log::warn("magic loads: more 3D loads in one frame than the note ring holds; the option walk looks round instead");
+			}
+		}
+		const LightKit::Cost::Pass pass{ 3, "magic loads" };
+		for (const auto& [id, kind] : loads) {
+			auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
+			auto* root = ref ? ref->Get3D() : nullptr;
+			if (!root) {
+				continue;
+			}
+			if (kind != LoadKind::kProjectile) {
+				// before the cull asks: a plain NiNode root (Frost's and Storms' walls) is stored with no reference on its tree
+				Plugin::NotePlainRoot(root, ref);
+			}
+			std::size_t option = Plugin::kNone;
+			if (auto culled = Plugin::CullOptionLightsUnder(root, option); !culled.empty()) {
+				Plugin::AdoptOptionLights(option, culled);
+			}
+			Plugin::NoteSweep(Plugin::SweepWhy::kMagicObject);
+			if (kind == LoadKind::kHazard) {
+				Plugin::NoteOptionsLook();  // RE::Light may have hung a twin light on it (Options.cpp TwinNet)
+			}
+			if (kind == LoadKind::kProjectile) {
+				Plugin::QueueRow(ref);  // a bolt / spray / cone our data lights: its row of lights (Rows.cpp)
+			}
+		}
+		loads.clear();
+	}
+
 	struct PlayerUpdate
 	{
 		static void thunk(RE::PlayerCharacter* a_this, float a_delta)
@@ -508,6 +587,8 @@ namespace
 				// each pass times itself after its own early return (LightKit::Cost::Pass)
 				// first: every list forgets the lights that left the game since the last frame, and they are freed
 				Plugin::SweepKeptLights();
+				Plugin::TakeBodyNotes();  // the bodies that came or went on the game's loader threads (Events.cpp)
+				TakeMagicLoads();         // the projectiles, explosions and hazards that loaded on those threads
 				UpdateBudgetLights();
 				Plugin::UpdateOptionLights();
 				HoldBudgetLightsOut();
@@ -780,7 +861,20 @@ namespace
 namespace Plugin
 {
 	void InstallSpellLightHooks() { InstallCallSites(); }
-	void InstallLateHooks() { InstallLoadHooks(); }
+	void InstallLateHooks()
+	{
+		gMainThread.store(::GetCurrentThreadId(), std::memory_order_relaxed);  // data load runs on the main thread
+		InstallLoadHooks();
+	}
+
+	std::array<std::uint32_t, 12> MagicLoadWays()
+	{
+		std::array<std::uint32_t, 12> out{};
+		for (std::size_t i = 0; i < out.size(); ++i) {
+			out[i] = gLoadWays[i].load(std::memory_order_relaxed);
+		}
+		return out;
+	}
 }
 
 bool Plugin::WantedDark(RE::NiLight* a_light)

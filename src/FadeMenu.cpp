@@ -337,7 +337,7 @@ namespace Fade
 			{
 				Settings s = Config();
 				bool     save = false;
-				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to my log file.", save);
+				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to the mod's log file.", save);
 				if (save) {
 					ApplySetting("DebugLog", s.debugLog ? 1 : 0);
 					QueueSave();
@@ -406,7 +406,7 @@ namespace Fade
 			ImGuiMCP::Text(T("%zu light(s) being scaled; %zu glow(s) dimmed"), ScaledLightCount(), DimmedGlowCount());
 			if (const auto frozen = FrozenLightCount()) {
 				ImGuiMCP::TextColored(kGold, T("%zu light(s) held steady: another plugin scales them the same way"), frozen);
-				Tip("Another mod scales these lights too, so I hold them steady; they still fade.");
+				Tip("Another mod scales these lights too, so they are held steady; they still fade.");
 			}
 
 			GlowHeading(Icon::kBook, "Rule files");

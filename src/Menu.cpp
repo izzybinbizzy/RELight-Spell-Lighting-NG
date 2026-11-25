@@ -108,7 +108,7 @@ namespace Plugin
 		// amber on the menu's own dark - headings on a soft glow that fades to the right with a thin lit underline, gold
 		// check marks and slider grips, frames a touch warmer when hovered. Scoped to our pages, so no other mod's changes.
 		constexpr ImGuiMCP::ImVec4 kGold{ 1.0f, 0.86f, 0.55f, 1.0f };
-		// every shown line goes through T(): Data\SKSE\Plugins\RELightSpellLightingNG\Translation.json (relightgen.py writes the English one)
+		// every shown line goes through T(): the standard Interface\Translations\RELightSpellLightingNG_<LANGUAGE>.txt (Translation.h)
 		using Translation::T;
 
 #ifdef FADE_DEBUG_PAGE
@@ -442,8 +442,8 @@ namespace Plugin
 				const char* tip;
 			};
 			static constexpr Look kLooks[]{
-				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is as I set them." },
-				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as I set them." },
+				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is the default." },
+				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is the default." },
 				{ Strength::kGlows, "Glow strength", "How bright glows on people are (cloaks, flesh spells, FEC bodies), on top of Brightness." },
 				{ Strength::kGround, "Ground effect strength", "How bright spells left on the ground are, like walls of fire, on top of Brightness." },
 				{ Strength::kEnchanted, "Enchanted weapon strength", "How bright enchanted weapons' lights are, on top of Brightness. Bound weapons, staves and artifacts use Brightness only." },
@@ -482,7 +482,7 @@ namespace Plugin
 		// presets per version if they switch to say, enb to community shaders mid save." Presets.ini beside the data files,
 		// a section per preset "[<lighting>|<name>]"; the menu shows the presets of the lighting found now (HandLights.cpp).
 		constexpr const char* kPresetsPath = "Data/SKSE/Plugins/RELightSpellLightingNG/Presets.ini";
-		// up to 2.5 in the RelightSpellAddon folder: read while the new one is not there yet, never written (HIS ORDER 2026-10-20)
+		// up to 2.5 in the RelightSpellAddon folder: read while the new one is not there yet, never written
 		constexpr const char* kOldPresetsPath = "Data/SKSE/Plugins/RelightSpellAddon/Presets.ini";
 		struct UserPreset
 		{
@@ -652,7 +652,7 @@ namespace Plugin
 			};
 			const Preset presets[] = {
 				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1 },
-				{ T("Default"), T("My lights as I made them."), 100, 100, 0 },
+				{ T("Default"), T("Every light as it was made."), 100, 100, 0 },
 				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1 },
 			};
 			for (std::size_t i = 0; i < std::size(presets); ++i) {
@@ -724,7 +724,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"How bright my lights are. 100% is the measured brightness; Reach sets how far they carry."));
+				"How bright the lights are. 100% is the measured brightness; Reach sets how far they carry."));
 
 			int r = ReachPercent();
 			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
@@ -734,7 +734,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
+				"How far the lights carry. 100% is the measured reach; Brightness sets how bright."));
 
 			// Illuminated's same setting (his 646): with both hands lit each hand casts its own shadow; off, one from between them
 			bool eachHand = ShadowFromEachHand();
@@ -833,7 +833,7 @@ namespace Plugin
 				DrawArtPicks();
 				GlowHeading("Spells Without a Patch", Icon::kBulb);
 				bool autoOn = AutoLightsOn();
-				if (ImGuiMCP::Checkbox(T("Light spells I have no patch for"), &autoOn)) {
+				if (ImGuiMCP::Checkbox(T("Light spells with no patch"), &autoOn)) {
 					SetAutoLightsOn(autoOn);
 					SaveSettings();
 					RehandSoon();
@@ -855,7 +855,7 @@ namespace Plugin
 			const GlowStyle style;
 			GlowHeading("Performance", Icon::kBulb);
 			const std::vector<const char*> kQuality{ T("Quality"), T("Performance") };
-			const std::vector<const char*> kQualityTips{ T("All my lights; Hand lights for still picks whose hands carry one."),
+			const std::vector<const char*> kQualityTips{ T("Every light on; Hand lights for still picks whose hands carry one."),
 				T("Only you and your followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
 			int                            quality = PerformanceMode() ? 1 : 0;
 			if (ChoiceCombo(T("Quality"), quality, kQuality, kQualityTips)) {
@@ -877,13 +877,13 @@ namespace Plugin
 				"Which casters' hands carry a spell light. Fewer lights keep big fights smooth."));
 			// his list: "under performance add a toggle to turn off lights completely for the entire mod"
 			bool allOff = AllLightsOff();
-			if (ImGuiMCP::Checkbox(T("All my lights off"), &allOff)) {
+			if (ImGuiMCP::Checkbox(T("All lights off"), &allOff)) {
 				SetAllLightsOff(allOff);
 				SaveSettings();
 				RehandSoon();
 			}
 			MenuStyle::Tip(T(
-				"Turns all my lights off, to compare or when every frame counts. Off again brings them back."));
+				"Turns every light of the mod off, to compare or when every frame counts. Off again brings them back."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation

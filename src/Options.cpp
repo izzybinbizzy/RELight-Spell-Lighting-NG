@@ -19,8 +19,8 @@
 // It never edits a config, a record or a file. A light it puts out is held in a list and given back the
 // moment the switch is turned on again.
 //
-// THREADS: the lists are the main thread's only. A 3D-load hook (a loader thread) puts a switched-off option's lights out
-// at once and hands them over (CullOptionLightsUnder -> AdoptOptionLights, an SKSE task). The per-frame walk remembers what
+// THREADS: the lists are the main thread's only. A 3D-load hook (a loader thread) only notes the object; the player update puts a
+// switched-off option's lights out and takes them in (Hooks.cpp TakeMagicLoads: CullOptionLightsUnder -> AdoptOptionLights). The per-frame walk remembers what
 // it worked out about each light (gKnown) and asks again only when that light is new to it, or is a different light at
 // the same address (its name or parent changed) - the walk up to the reference and the data lookup are not done for every
 // light every frame.
@@ -611,27 +611,33 @@ namespace Plugin
 		GiveBackDroppedWeaponLights(ssn, false);
 		gTwinSeen.clear();
 		const LightKit::Cost::Scope c{ 18, "option lights: scene walk" };
-		for (auto& bsLight : ssn->GetRuntimeData().activeLights) {
-			if (!bsLight || !bsLight->light) {
-				continue;
-			}
-			auto* niLight = bsLight->light.get();
-			TwinNet(niLight);
-			SheathedNet(niLight);  // every RE::Light enchantment light, ours or not
-			const auto opt = OptionOfLight(niLight);
-			if (opt == kNone) {
-				continue;
-			}
-			if (OffFor(niLight, opt, IsEnchantLight(niLight))) {
-				// RE::Light unculls its enchantment light on each new equip, so one already held can come round again
-				if (!niLight->GetAppCulled()) {
-					niLight->SetAppCulled(true);
-					HoldOut(niLight, opt, IsEnchantLight(niLight));
+		// both lists: with Open Shaders' Promote or the Bottled shadow download a light sits in the shadow list, and a switch off must
+		// reach it there too (Brightness.cpp walks both the same way)
+		const auto walk = [&opts](auto& a_list) {
+			for (auto& bsLight : a_list) {
+				if (!bsLight || !bsLight->light) {
+					continue;
 				}
-			} else if (!niLight->GetAppCulled()) {
-				++opts[opt].lit;
+				auto* niLight = bsLight->light.get();
+				TwinNet(niLight);
+				SheathedNet(niLight);  // every RE::Light enchantment light, ours or not
+				const auto opt = OptionOfLight(niLight);
+				if (opt == kNone) {
+					continue;
+				}
+				if (OffFor(niLight, opt, IsEnchantLight(niLight))) {
+					// RE::Light unculls its enchantment light on each new equip, so one already held can come round again
+					if (!niLight->GetAppCulled()) {
+						niLight->SetAppCulled(true);
+						HoldOut(niLight, opt, IsEnchantLight(niLight));
+					}
+				} else if (!niLight->GetAppCulled()) {
+					++opts[opt].lit;
+				}
 			}
-		}
+		};
+		walk(ssn->GetRuntimeData().activeLights);
+		walk(ssn->GetRuntimeData().activeShadowLights);
 		for (const auto& h : gHeldOut) {
 			if (h.option < opts.size()) {
 				++opts[h.option].heldOut;
@@ -653,8 +659,7 @@ namespace Plugin
 		if (!a_root) {
 			return out;
 		}
-		// done at load so a switched-off light never shows for the frame before the next player update (any thread: only
-		// the lights are touched here)
+		// done in the player update right after the object loaded (Hooks.cpp TakeMagicLoads): only the lights are touched here
 		auto*      ref = ReferenceOf(a_root);
 		const auto opt = ref ? OptionOf(ref->GetBaseObject()) : kNone;
 		if (!Off(opt) && (opt == kNone || !AnyNatureOff() || NatureLightsOn(NatureIndexOf(ref->GetBaseObject())))) {

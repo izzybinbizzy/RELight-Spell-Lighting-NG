@@ -3,7 +3,7 @@
 // GPL-3.0-or-later; see LICENSE and the notice at the top of main.cpp.
 //
 // DevBench, when it is in the load order (it is optional; nothing here runs without it) - Illuminated's DevBench.cpp, the
-// same way for this mod (his order 2026-10-14: "relight brought up to illuminated standards in every way that matters"):
+// same way for this mod:
 //   inspect kind=relight     every setting and switch with its value; the lighting found; what the plugin made and holds now
 //                            (hand lights, ground lights, held lights, kept lights) and the spray / beam records it claims.
 //   relight.control          action = setting (key = a [Settings] key, or switch:<option id>; value = a whole number: changed
@@ -20,6 +20,7 @@
 #include "DevBenchGlue.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -57,6 +58,14 @@ namespace Plugin
 			out["lighting"] = json::parse(LightingReport());  // Lighting.cpp, as Illuminated's
 			out["handLights"] = { { "made", HandLightsMade() }, { "effects", HandEffects() }, { "automatic", AutoHandEffects() } };
 			out["groundLights"] = { { "now", GroundLightCount() }, { "made", GroundLightsMade() }, { "leftHidden", GroundLightsLeftHidden() } };  // GroundLights.cpp
+			{
+				const auto ways = MagicLoadWays();  // Hooks.cpp
+				json       loads;
+				for (const auto& [kind, at] : { std::pair{ "projectile", 0 }, std::pair{ "explosion", 4 }, std::pair{ "hazard", 8 } }) {
+					loads[kind] = { { "syncOffMain", ways[at] }, { "syncMain", ways[at + 1] }, { "backgroundOffMain", ways[at + 2] }, { "backgroundMain", ways[at + 3] } };
+				}
+				out["magicLoadWays"] = loads;
+			}
 			out["heldLights"] = LiveHeldLights();
 			out["bodyLights"] = { { "now", LiveBodyLights() }, { "made", BodyLightsMade() } };  // BodyLights.cpp
 			out["keptLights"] = KeptLights();
@@ -102,7 +111,7 @@ namespace Plugin
 			if (action == "item") {
 				const auto    form = DevBenchGlue::Text(a_args, "form");
 				std::uint32_t id = 0;
-				// the whole text must be the number: "0x12junk" would otherwise name form 0x12 (2.2's CodeRabbit round)
+				// the whole text must be the number: "0x12junk" would otherwise name form 0x12
 				if (!FormText::ParseHex(form, id) || !RE::TESForm::LookupByID(id)) {
 					return DevBenchGlue::Refusal("item needs form: a loaded spell's or weapon's form id");
 				}

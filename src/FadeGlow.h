@@ -164,7 +164,8 @@ namespace Glow
 		} else {
 			const auto& health = a_b.bars[0];
 			// no health bar read but magicka and stamina apart (the vanilla HUD's layout, its health bar between them): the pair
-			// sits in that gap, where the health bar's end would be - their union would reach the screen's right edge
+			// sits over that gap, above the bars - level with them it sat on the health bar (his 717); their union would reach the
+			// screen's right edge
 			const auto& magicka = a_b.bars[1];
 			const auto& stamina = a_b.bars[2];
 			const bool  apart = !health.ok && magicka.ok && stamina.ok && (magicka.x1 < stamina.x0 || stamina.x1 < magicka.x0);
@@ -173,7 +174,7 @@ namespace Glow
 			// only a gap the pair fits in (a narrow one keeps the union's right end)
 			if (apart && (r.x0 - l.x1) * a_w >= step + a_gemW) {
 				const float mid = (l.x1 + r.x0) * 0.5f * a_w;
-				const float y = (std::min(l.y0, r.y0) + std::max(l.y1, r.y1)) * 0.5f * a_h - a_below * 0.5f;
+				const float y = std::min(l.y0, r.y0) * a_h - gap - a_below - a_gemH * 0.5f;
 				out = { GemSpot{ mid - step * 0.5f, y }, GemSpot{ mid + step * 0.5f, y } };
 			} else {
 				HudBox u{};

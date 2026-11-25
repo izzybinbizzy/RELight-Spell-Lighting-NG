@@ -26,6 +26,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -217,6 +218,50 @@ namespace LightKit
 	// Community Shaders' inverse-square flag on a light RECORD (TESObjectLIGH): its falloff is then the cutoff
 	inline constexpr std::uint32_t kRecordInverseSquare = 1u << 14;
 	inline constexpr RE::NiPoint3  kHandPoint{ 0.0f, -40.0f, 0.0f };  // a hand light out of the palm, in the magic node's frame: in it the fingers throw long shadows
+
+	// some casting animations hold a hand against her chest, and her own body then shadows its light out (carlosChanpio70's
+	// report under Illuminated 3.1): a hand light nearer her body's middle line than this is pushed level out to it
+	inline constexpr float kBodyClear = 22.0f;
+
+	// a hand light's place kept out of her torso; the middle line runs from the pelvis to the neck of her third-person body
+	[[nodiscard]] inline RE::NiPoint3 OutOfBody(RE::NiAVObject* a_body, const RE::NiPoint3& a_point)
+	{
+		static const RE::BSFixedString pelvisName{ "NPC Pelvis [Pelv]" };
+		static const RE::BSFixedString neckName{ "NPC Neck [Neck]" };
+		const auto*                    pelvis = a_body ? a_body->GetObjectByName(pelvisName) : nullptr;
+		const auto*                    neck = a_body ? a_body->GetObjectByName(neckName) : nullptr;
+		if (!pelvis || !neck) {
+			return a_point;
+		}
+		const auto& low = pelvis->world.translate;
+		const auto& high = neck->world.translate;
+		if (high.z <= low.z || a_point.z < low.z || a_point.z > high.z) {
+			return a_point;
+		}
+		const RE::NiPoint3 axis = low + (high - low) * ((a_point.z - low.z) / (high.z - low.z));
+		float              dx = a_point.x - axis.x;
+		float              dy = a_point.y - axis.y;
+		const float        away = std::sqrt(dx * dx + dy * dy);
+		if (away >= kBodyClear) {
+			return a_point;
+		}
+		if (away < 0.5f) {
+			// on the line itself: out in front of her
+			const auto& r = a_body->world.rotate;
+			dx = r.entry[0][1];
+			dy = r.entry[1][1];
+			const float length = std::sqrt(dx * dx + dy * dy);
+			if (length < 0.001f) {
+				return a_point;
+			}
+			dx /= length;
+			dy /= length;
+		} else {
+			dx /= away;
+			dy /= away;
+		}
+		return { axis.x + dx * kBodyClear, axis.y + dy * kBodyClear, a_point.z };
+	}
 
 	// Community Shaders' inverse-square lighting reads a flag and the cutoff from the first eight bytes of a light's runtime
 	// data (its ambient color's red and green, as the game lays them out); without Community Shaders those words are plain

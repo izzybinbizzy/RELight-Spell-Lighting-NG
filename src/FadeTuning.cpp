@@ -14,8 +14,11 @@
 #include "Fade.h"
 #include "FadeTuningText.h"
 
+#include <atomic>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <string>
 
 namespace Fade::Tuning
 {
@@ -199,6 +202,14 @@ namespace Fade::Tuning
 		WarnUnused(found, "the file:", texts);
 		WarnUnused(mine, "Custom:", texts);
 		SKSE::log::info("advanced settings: {} value(s) of {} read from {}, {} from {}", taken, knobs.size(), from, takenMine, Mod::kAdvancedCustomPath);
+		// for the log, so a bug report shows a player's own values: each value that differs from its default
+		std::string changed;
+		for (const auto& k : knobs) {
+			if (const float v = k.value->load(std::memory_order_relaxed); v != k.text.def) {
+				changed += std::format("{}[{}] {}={} (default {})", changed.empty() ? "" : ", ", k.text.section, k.text.key, v, k.text.def);
+			}
+		}
+		SKSE::log::info("advanced settings: {}", changed.empty() ? std::string("every value at its default") : "changed from the default: " + changed);
 		// written only when there is no file, one older than this layout or one that lacks a value (its own values kept, never the
 		// Custom file's); a UTF-16 file is left alone
 		std::error_code ec;

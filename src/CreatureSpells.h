@@ -23,6 +23,17 @@ namespace CreatureSpells
 	inline constexpr RE::FormID kCreatureKeyword = 0x13795;
 	inline constexpr RE::FormID kAnimalKeyword = 0x13798;
 
+	// a creature or an animal by its race's or its own keyword, the same test as the spells below: its lights are Creatures'
+	[[nodiscard]] inline bool IsCreature(RE::Actor* a_actor)
+	{
+		static const auto* creature = RE::TESForm::LookupByID<RE::BGSKeyword>(kCreatureKeyword);
+		static const auto* animal = RE::TESForm::LookupByID<RE::BGSKeyword>(kAnimalKeyword);
+		const auto         has = [](const RE::BGSKeywordForm* a_form) {
+			return a_form && ((creature && a_form->HasKeyword(creature)) || (animal && a_form->HasKeyword(animal)));
+		};
+		return a_actor && !a_actor->IsPlayerRef() && (has(a_actor->GetRace()) || has(a_actor->GetActorBase()));
+	}
+
 	[[nodiscard]] inline std::unordered_set<const RE::EffectSetting*> CreatureOnlyEffects()
 	{
 		const auto* creature = RE::TESForm::LookupByID<RE::BGSKeyword>(kCreatureKeyword);

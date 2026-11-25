@@ -430,6 +430,13 @@ namespace Plugin
 					gInUse[copy] = &gAutoHands.find(key)->second;
 				}
 			}
+			// each shadow twin takes its copy's numbers here, on the main thread, never in the light hook (a loader thread may be
+			// making a light from the twin while another writes it)
+			for (auto& [copy, twin] : gShadowTwins) {
+				twin->data = copy->data;
+				twin->data.flags.set(RE::TES_LIGHT_FLAGS::kOmniShadow);
+				twin->fade = copy->fade;
+			}
 			std::size_t autoLit = 0;
 			// the keys of spells of a nature kind switched off, and of the rest: a hand's light whose key only the first hold goes out now
 			std::unordered_set<std::string> natureOffKeys, natureOnKeys;
@@ -501,17 +508,10 @@ namespace Plugin
 
 	RE::TESObjectLIGH* ShadowTwinOf(RE::TESObjectLIGH* a_light)
 	{
+		// the twin carries the copy's numbers as the menu last set them, plus the engine's omni shadow flag (ApplyHandLights)
 		std::lock_guard l{ gLock };
 		const auto      it = a_light ? gShadowTwins.find(a_light) : gShadowTwins.end();
-		if (it == gShadowTwins.end()) {
-			return a_light;
-		}
-		// the copy's numbers as the menu last set them, plus the engine's omni shadow flag
-		auto* twin = it->second;
-		twin->data = a_light->data;
-		twin->data.flags.set(RE::TES_LIGHT_FLAGS::kOmniShadow);
-		twin->fade = a_light->fade;
-		return twin;
+		return it == gShadowTwins.end() ? a_light : it->second;
 	}
 
 	const Hand* HandOfLight(const RE::TESObjectLIGH* a_light)

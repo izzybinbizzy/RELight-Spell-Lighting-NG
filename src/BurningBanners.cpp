@@ -236,7 +236,8 @@ namespace Plugin
 		};
 
 		// this light's numbers under the sliders now (main thread): drawn inverse square where a shader draws it (ArtLights.cpp's way),
-		// else plain, its Light Limit Fix words written whole
+		// else plain, its Light Limit Fix words written whole. SetLightAttenuation leaves the radius words alone and a clone's radius
+		// is 1, so they are written here, or the light reaches nothing off Community Shaders
 		void Dress(RE::NiPointLight* a_light)
 		{
 			const float strength = BurnEm::LightStrength() * GroundElement::StrengthOf(GroundElement::Element::kFire);
@@ -244,6 +245,7 @@ namespace Plugin
 			auto&       data = a_light->GetLightRuntimeData();
 			data.diffuse = gColor;
 			if (InverseSquare()) {
+				data.radius = { reach, reach, LightKit::kLightSize };
 				a_light->SetLightAttenuation(reach);
 				data.fade = kFade * strength;
 				// after SetLightAttenuation, which writes the same two words
@@ -252,6 +254,7 @@ namespace Plugin
 				return;
 			}
 			const auto plain = LightKit::PlainAt(kFade, 0.0f, reach);
+			data.radius = { plain.radius, plain.radius, LightKit::kLightSize };
 			a_light->SetLightAttenuation(plain.radius);
 			data.fade = plain.fade * strength;
 			if (LightLimitFix()) {

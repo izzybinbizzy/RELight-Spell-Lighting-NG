@@ -88,10 +88,11 @@ namespace Fade
 		Register("Fading with Magicka", "RiseSeconds", 0.35f, 0.0f, 3.0f, "How quickly a light comes back as the charge or magicka returns, in seconds.", gRiseSeconds);
 		Register("HUD", "GemDistance", 215.0f, 40.0f, 900.0f, "How far each charge gem sits from the middle of the screen when the HUD shows no charge meters or bars to sit by, in pixels at 1080p.", gGemDistance);
 		Register("HUD", "GemHeight", 62.0f, 0.0f, 1000.0f, "How high above the bottom of the screen the charge gems sit when the HUD shows no charge meters or bars to sit by, in pixels at 1080p.", gGemHeight);
-		// the log's level, so a player can send a detailed log (spdlog's order: 0 trace, 1 debug, 2 info, 3 warn, 4 error)
+		// the log's level (spdlog's order: 0 trace, 1 debug, 2 info, 3 warn, 4 error); the plugins write no trace or debug
+		// lines, so 0 and 1 log the same as 2
 		static std::atomic<float> logLevel{ 2.0f };
 		Register("General", "LogLevel", 2.0f, 0.0f, 4.0f,
-			"How much the log file writes: 0 every detail, 1 more detail, 2 the usual, 3 warnings only, 4 errors only. Set 0 or 1 to send a detailed log with a bug report.",
+			"How much the log file writes: 2 or lower everything (the usual), 3 warnings only, 4 errors only. Keep it at 2 when you send a log with a bug report.",
 			logLevel);
 		Tuning::Load();
 		spdlog::set_level(static_cast<spdlog::level::level_enum>(std::clamp(static_cast<int>(std::lround(Get(logLevel))), 0, 4)));

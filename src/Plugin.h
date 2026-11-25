@@ -8,6 +8,9 @@
 
 #include "LightKit.h"
 
+#include <array>
+#include <cstdint>
+
 namespace Plugin
 {
 	// ------------------------------------------------------------------ Data.cpp: what the installed options light
@@ -43,7 +46,7 @@ namespace Plugin
 		int         order{ 0 };          // a later layer overrides an earlier one
 		int         menu{ 0 };           // where it sits in the menu, which is NOT the override order
 		bool        switchable{ false };
-		// its switch: flipped by the menu (render thread), read every frame and by the 3D-load hooks (loader threads)
+		// its switch: flipped by the menu (render thread), read on the main thread (every frame, and for each 3D the loads noted)
 		Relaxed<bool> on{ true };
 		std::size_t   meshes{ 0 }, bases{ 0 }, streams{ 0 };
 		// counted every frame on the main thread, shown in the menu (render thread)
@@ -143,6 +146,8 @@ namespace Plugin
 	[[nodiscard]] std::size_t GroundLightCount();
 	[[nodiscard]] std::size_t GroundLightsMade();
 	[[nodiscard]] std::size_t GroundLightsLeftHidden();  // GroundLights.cpp: casting lights the game holds hidden on a caster whose hands are down
+	// Hooks.cpp: projectile / explosion / hazard 3D loads so far, 4 each: synchronous off / on the main thread, background off / on it
+	[[nodiscard]] std::array<std::uint32_t, 12> MagicLoadWays();
 	// Hooks.cpp: a spell light the mod keeps dark now (a switched-off option, a hand light held out) - its twin too
 	[[nodiscard]] bool WantedDark(RE::NiLight* a_light);
 	// Hooks.cpp: a caster's light "Hand lights for - Everyone nearby" keeps out while the caster is far (main thread)
@@ -223,38 +228,41 @@ namespace Plugin
 	[[nodiscard]] std::size_t AutoHandEffects();  // spells lit by an automatic hand light now
 
 	// ------------------------------------------------------------------ Settings.cpp: the settings file
-	void                      LoadSettings(bool a_log = true);  // a_log false: the quiet early read before the data (main.cpp)
-	void                      SaveSettings();
-	[[nodiscard]] int         BrightnessPercent();
-	void                      SetBrightnessPercent(int a_percent);
-	[[nodiscard]] float       Brightness();
-	[[nodiscard]] int         ReachPercent();
-	void                      SetReachPercent(int a_percent);
-	[[nodiscard]] float       Reach();
-	[[nodiscard]] std::size_t GlowLimit();          // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
-	[[nodiscard]] bool        FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
-	void                      SetFecFrozenFadesOut(bool a_on);
-	[[nodiscard]] bool        FecBurningFadesOut();  // a body FEC burned: its glow fades once its flames die down
-	void                      SetFecBurningFadesOut(bool a_on);
-	[[nodiscard]] bool        HandLightsOn();
-	void                      SetHandLightsOn(bool a_on);
-	[[nodiscard]] bool        StrangeRunesLightOn();  // the Strange Runes switch (Settings.cpp)
-	void                      SetStrangeRunesLightOn(bool a_on);
-	[[nodiscard]] bool        StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
-	[[nodiscard]] bool        StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
-	[[nodiscard]] bool        ShadowFromEachHand();  // both hands lit: each casts its own shadow (Illuminated's same setting)
-	void                      SetShadowFromEachHand(bool a_on);
-	[[nodiscard]] int         VaerEffectsPercent();  // VAE Reborn's swirls, percent of its own (gVaeEffects x100)
-	void                      SetVaerEffectsPercent(int a_percent);
-	[[nodiscard]] bool        BurnEmBannersLoaded();        // BurnEmBanners.esp is loaded
-	[[nodiscard]] bool        BurnEmBannersLightsItself();  // its switch on: Burn'em Banners' own banner light, not ours
-	void                      SetBurnEmBannersLightsItself(bool a_on);
-	void                      MakeBurnEmGlobal();      // data load: RELightBurnEmBannersLight, made in memory (Burn'em's Light Placer file waits on it)
-	void                      SyncBurnEmGlobal();      // main thread: the global at the switch's value
-	void                      WatchBurningBanners();   // data load: a burning banner's fire light (BurningBanners.cpp)
-	void                      TickBurningBanners();    // the player update: the banners the game said started or stopped burning (main thread)
-	void                      RetuneBurningBanners();  // a setting changed: the burning banners' lights under the new values (main thread)
-	void                      DropBurningBanners();    // a load or a loading screen: every banner light let go (main thread)
+	void                                     LoadSettings(bool a_log = true);  // a_log false: the quiet early read before the data (main.cpp)
+	void                                     SaveSettings();
+	[[nodiscard]] int                        BrightnessPercent();
+	void                                     SetBrightnessPercent(int a_percent);
+	[[nodiscard]] float                      Brightness();
+	[[nodiscard]] int                        ReachPercent();
+	void                                     SetReachPercent(int a_percent);
+	[[nodiscard]] float                      Reach();
+	[[nodiscard]] std::size_t                GlowLimit();          // the most body glows on others lit at once, fixed per lighting (Settings.cpp)
+	[[nodiscard]] bool                       FecFrozenFadesOut();  // a body FEC froze: its glow fades a few seconds in (BodyLights.cpp)
+	void                                     SetFecFrozenFadesOut(bool a_on);
+	[[nodiscard]] bool                       FecBurningFadesOut();  // a body FEC burned: its glow fades once its flames die down
+	void                                     SetFecBurningFadesOut(bool a_on);
+	[[nodiscard]] bool                       HandLightsOn();
+	void                                     SetHandLightsOn(bool a_on);
+	[[nodiscard]] bool                       StrangeRunesLightOn();  // the Strange Runes switch (Settings.cpp)
+	void                                     SetStrangeRunesLightOn(bool a_on);
+	[[nodiscard]] bool                       StrangeRunesLoaded();  // StrangeRunes.esp's hand runes were found at data load
+	[[nodiscard]] bool                       StrangeRunesHands();   // the switch on and Strange Runes loaded: its runes light the casting hands
+	[[nodiscard]] bool                       ShadowFromEachHand();  // both hands lit: each casts its own shadow (Illuminated's same setting)
+	void                                     SetShadowFromEachHand(bool a_on);
+	[[nodiscard]] int                        VaerEffectsPercent();  // VAE Reborn's swirls, percent of its own (gVaeEffects x100)
+	void                                     SetVaerEffectsPercent(int a_percent);
+	[[nodiscard]] bool                       BurnEmBannersLoaded();        // BurnEmBanners.esp is loaded
+	[[nodiscard]] bool                       BurnEmBannersLightsItself();  // its switch on: Burn'em Banners' own banner light, not ours
+	void                                     SetBurnEmBannersLightsItself(bool a_on);
+	void                                     MakeBurnEmGlobal();                                           // data load: RELightBurnEmBannersLight, made in memory (Burn'em's Light Placer file waits on it)
+	void                                     SyncBurnEmGlobal();                                           // main thread: the global at the switch's value
+	void                                     WatchBurningBanners();                                        // data load: a burning banner's fire light (BurningBanners.cpp)
+	void                                     WatchRadiantBow();                                            // data load: our Radiant Bow lights follow its color picks (RadiantBowColors.cpp)
+	[[nodiscard]] std::uint32_t              RadiantBowGeneration();                                       // moves on with each read of its picks
+	[[nodiscard]] std::optional<RE::NiColor> RadiantBowSkyColor(std::string_view a_model, bool a_hazard);  // its Sky impact pick on our light, or none
+	void                                     TickBurningBanners();                                         // the player update: the banners the game said started or stopped burning (main thread)
+	void                                     RetuneBurningBanners();                                       // a setting changed: the burning banners' lights under the new values (main thread)
+	void                                     DropBurningBanners();                                         // a load or a loading screen: every banner light let go (main thread)
 	// the five nature switches (Settings.cpp, NatureKind.h): index 0 frost ... 4 plants; -1 = no kind, always on
 	[[nodiscard]] bool NatureLightsOn(int a_index);
 	void               SetNatureLightsOn(int a_index, bool a_on);
@@ -324,16 +332,16 @@ namespace Plugin
 	[[nodiscard]] bool LeftOutByBudget(const RE::Actor* a_actor);
 
 	// ------------------------------------------------------------------ Options.cpp: the switches
-	// lights handed from a hook that may run on a loader thread to the main thread (an SKSE task holds them until then)
+	// the lights one 3D's cull found, held until AdoptOptionLights takes them into the list
 	using LightList = std::vector<RE::NiPointer<RE::NiLight>>;
 	void UpdateOptionLights();  // every frame (main thread)
-	// on a 3D that has just loaded (any thread): a switched-off option's lights under it are put out at once and returned,
-	// with that option in a_option, for AdoptOptionLights to take into the list on the main thread
+	// on a 3D the loads noted (main thread, Hooks.cpp TakeMagicLoads): a switched-off option's lights under it are put out at
+	// once and returned, with that option in a_option, for AdoptOptionLights to take into the list
 	[[nodiscard]] LightList          CullOptionLightsUnder(RE::NiAVObject* a_root, std::size_t& a_option);
 	void                             AdoptOptionLights(std::size_t a_option, const LightList& a_lights);  // main thread
 	[[nodiscard]] bool               HeldOutForOption(const RE::NiLight* a_light);                        // main thread
 	[[nodiscard]] RE::TESObjectREFR* ReferenceOf(RE::NiAVObject* a_obj);                                  // the reference a scene-graph object belongs to
-	// a hazard's or explosion's 3D at its Load3D, and its end (any thread): a plain NiNode root carries no reference, so ReferenceOf asks this pair
+	// a hazard's or explosion's 3D after its Load3D (main thread), and its end: a plain NiNode root carries no reference, so ReferenceOf asks this pair
 	void                      NotePlainRoot(const RE::NiAVObject* a_root, const RE::TESObjectREFR* a_ref);
 	void                      ForgetPlainRoots(const RE::TESObjectREFR* a_ref);
 	[[nodiscard]] std::size_t EnchantOptionOf(const RE::NiLight* a_light);    // kNone unless it is an enchantment light of ours
@@ -380,7 +388,7 @@ namespace Plugin
 		const RE::TESObjectLIGH* copy{ nullptr };                // the plain copy the projectile wears: a row with no tint follows its color now
 	};
 	void                      SetRowRecipes(std::unordered_map<RE::FormID, RowRecipe>&& a_recipes);  // once, data load (Streams.cpp)
-	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // any thread: a projectile's 3D loaded - its row is hung next frame
+	void                      QueueRow(RE::TESObjectREFR* a_ref);                                    // main thread: a projectile's 3D loaded - its row is hung next frame
 	void                      UpdateRows();                                                          // every frame, main thread (the player update)
 	void                      DropRows();                                                            // a game loads: the projectiles they hang on are the old game's
 	[[nodiscard]] bool        IsRowLight(const RE::NiLight* a_light);                                // one of Rows.cpp's lights (any pass that walks the scene skips it)
@@ -396,6 +404,7 @@ namespace Plugin
 	void                      WatchWeaponLights();              // her cell changed, she drew or equipped: her weapon lights checked a while (any thread)
 	void                      NoteHerEquip(RE::FormID a_base);  // she equipped or unequipped something (any thread; judged on the main thread)
 	void                      WatchEvents();                    // at data load: the event sinks (Events.cpp)
+	void                      TakeBodyNotes();                  // main thread, once a frame: a body came or went on a loader thread (Events.cpp)
 	void                      RenewAfterFailedLoad();           // a save that did not load: the lights kPreLoadGame let go made again
 	enum class SweepWhy : std::uint8_t
 	{
@@ -468,7 +477,7 @@ namespace Plugin
 
 	// ------------------------------------------------------------------ Menu.cpp
 	void        RegisterMenu();
-	void        RegisterMenuTail();        // after the fading module's pages: Choose Your Own Color and Performance (the testing DLL's Diagnostics last)
+	void        RegisterMenuTail();        // after the fading module's pages: Performance (the testing DLL's Diagnostics last)
 	std::string ShowTestPage(int a_page);  // devbench only, never saved: a menu page in a window of its own (-1 closes)
 
 	// ------------------------------------------------------------------ DevBench.cpp: the settings and what was made, for a test bench

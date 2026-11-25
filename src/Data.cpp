@@ -739,6 +739,18 @@ namespace Plugin
 
 	const RE::NiColor* TintOf(const RE::TESForm* a_base)
 	{
+		// Radiant Bow's Sky Rune flames and Hallowed Bolt burst wear its Sky impact pick (RadiantBowColors.cpp), ahead of the cache:
+		// the pick changes in its MCM, not with ours. One slot per kind outlives the call, as every answer here does
+		if (a_base && (a_base->Is(RE::FormType::Hazard) || a_base->Is(RE::FormType::Explosion))) {
+			const auto* model = a_base->As<RE::TESModel>();
+			const bool  hazard = a_base->Is(RE::FormType::Hazard);
+			if (const auto pick = model ? RadiantBowSkyColor(model->GetModel() ? model->GetModel() : "", hazard) : std::nullopt) {
+				static RE::NiColor hazardPick, burstPick;
+				auto&              slot = hazard ? hazardPick : burstPick;
+				slot = *pick;
+				return &slot;
+			}
+		}
 		if (!a_base || (gMeshTints.empty() && gBaseTints.empty() && gHands.empty()) || CreatureBases::LeftToCreatures(a_base->GetFormID(), gCreatureBases, gBaseOwner)) {
 			return nullptr;
 		}
@@ -799,7 +811,8 @@ namespace Plugin
 		NoteSliderLook();
 	}
 
-	std::uint32_t TintEpoch() { return gTintEpoch.load(std::memory_order_acquire); }
+	// a Radiant Bow pick changed in its own menu moves it on too (RadiantBowColors.cpp)
+	std::uint32_t TintEpoch() { return gTintEpoch.load(std::memory_order_acquire) + RadiantBowGeneration(); }
 
 	const Stream* HeldOf(const RE::TESBoundObject* a_item, bool a_firstPerson)
 	{
