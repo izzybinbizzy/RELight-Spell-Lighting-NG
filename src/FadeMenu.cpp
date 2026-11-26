@@ -406,7 +406,7 @@ namespace Fade
 			ImGuiMCP::Text(T("%zu light(s) being scaled; %zu glow(s) dimmed"), ScaledLightCount(), DimmedGlowCount());
 			if (const auto frozen = FrozenLightCount()) {
 				ImGuiMCP::TextColored(kGold, T("%zu light(s) held steady: another plugin scales those the same way"), frozen);
-				Tip("Another mod scales these lights too, so they are held steady; the fade still applies.");
+				Tip("Another mod scales these lights too, so those are held steady; the fade still applies.");
 			}
 
 			GlowHeading(Icon::kBook, "Rule files");
