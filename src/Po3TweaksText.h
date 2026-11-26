@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace Po3TweaksText
 {
@@ -99,7 +100,12 @@ namespace Po3TweaksText
 		std::optional<bool> current, legacy;
 		bool                fixes = false;
 		const auto          off = [](std::string_view a_v) { return a_v.starts_with('f') || a_v.starts_with('n') || a_v.starts_with("of") || a_v.starts_with('0'); };
+		bool                first = true;
 		for (std::string line; std::getline(a_ini, line);) {
+			// a UTF-8 mark at the file's start is no part of its first section's name
+			if (std::exchange(first, false) && line.starts_with("\xEF\xBB\xBF")) {
+				line.erase(0, 3);
+			}
 			std::string key;
 			for (const char c : line) {
 				if (c == ';' || c == '#') {

@@ -55,16 +55,26 @@ namespace TranslationText
 		return out;
 	}
 
-	// a translation stands for its English line only when it says something else with the same placeholders; an English line
-	// with a conversion or a "%%" is printed through printf, so both sides are read by printf's own rules
-	[[nodiscard]] inline bool Usable(std::string_view a_english, std::string_view a_translated)
+	// how a line reaches the screen: as plain text (a "%s" argument), as a printf format, or not said - then a line with a
+	// conversion or a "%%" counts as a format ("% d", a space flag alone, is read as text there; a caller that prints it says so)
+	enum class Shown
+	{
+		kGuess,
+		kText,
+		kPrintf
+	};
+
+	// a translation stands for its English line only when it says something else with the same placeholders; a line printed
+	// through printf has both sides read by printf's own rules
+	[[nodiscard]] inline bool Usable(std::string_view a_english, std::string_view a_translated, Shown a_shown = Shown::kGuess)
 	{
 		if (a_translated.empty() || a_translated == a_english) {
 			return false;
 		}
 		const auto lenient = Placeholders(a_english);
-		const bool format = a_english.find("%%") != std::string_view::npos ||
-		                    std::ranges::any_of(lenient, [](const std::string& a_p) { return a_p.starts_with('%'); });
+		const bool format = a_shown == Shown::kPrintf ||
+		                    (a_shown == Shown::kGuess && (a_english.find("%%") != std::string_view::npos ||
+															 std::ranges::any_of(lenient, [](const std::string& a_p) { return a_p.starts_with('%'); })));
 		if (!format) {
 			// a plain line is shown as text, never printed through printf: only its {} fields must match. A translation that brings
 			// a conversion of its own (%s, %d) is refused all the same: its English may be a printf line this scan reads as plain

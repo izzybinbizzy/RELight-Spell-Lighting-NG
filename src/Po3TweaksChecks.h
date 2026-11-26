@@ -16,7 +16,7 @@ namespace Po3TweaksChecks
 	using Check = void (*)(bool a_ok, const char* a_what, int a_line);
 
 	// the checks Run makes (raise it when checks are added)
-	inline constexpr int kCount = 24;
+	inline constexpr int kCount = 27;
 
 #define PO3_CHECK(x) a_check((x), #x, __LINE__)
 
@@ -49,6 +49,8 @@ namespace Po3TweaksChecks
 		// only under [Fixes]: the same key in another section changes nothing
 		PO3_CHECK(ini("[Fixes]\nbLoadEditorIDs = true\n[Other]\nbLoadEditorIDs = false\n") && ini("bLoadEditorIDs = false\n"));
 		PO3_CHECK(!ini("[Other]\nbLoadEditorIDs = true\n[FIXES]\nbLoadEditorIDs = false\n"));
+		// a UTF-8 mark at the start: its first section still read
+		PO3_CHECK(!ini("\xEF\xBB\xBF[Fixes]\nbLoadEditorIDs=false\n") && ini("\xEF\xBB\xBF[Fixes]\nbLoadEditorIDs=true\n"));
 		// the proof: the player's base form named "Player", any case; nothing else
 		PO3_CHECK(ProofHolds("Player") && ProofHolds("PLAYER") && !ProofHolds("") && !ProofHolds(nullptr) && !ProofHolds("PlayerRef"));
 		// the verdict, each step that can stop it

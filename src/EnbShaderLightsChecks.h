@@ -14,7 +14,7 @@ namespace EnbShaderLightsChecks
 {
 	using Check = void (*)(bool a_ok, const char* a_what, int a_line);
 
-	inline constexpr int kCount = 3;
+	inline constexpr int kCount = 5;
 
 #define ENBL_CHECK(x) a_check((x), #x, __LINE__)
 
@@ -28,6 +28,10 @@ namespace EnbShaderLightsChecks
 		// a missing file or key is the player only (its default, upstream validActors{ 0 }); a note is no value; the last line read wins
 		ENBL_CHECK(valid("") == 0 && valid("[Settings]\nValid Actors = 0\n") == 0 && valid("Valid Actors = 1 ; followers\n") == 1 &&
 				   valid("[Settings]\n;Valid Actors = 0\nValid Actors = 2\n") == 2);
+		// a UTF-8 mark at the start reads as no mark
+		ENBL_CHECK(valid("\xEF\xBB\xBFValid Actors = 2\n") == 2 && valid("\xEF\xBB\xBF[Settings]\nValid Actors = 1\n") == 1);
+		// a value with text after its number is no number: the one read before stays, else the default
+		ENBL_CHECK(valid("Valid Actors = 1oops\n") == 0 && valid("Valid Actors = 2\nValid Actors = 1oops\n") == 2);
 		// its own shader test
 		ENBL_CHECK(TakesShader(false, 40.0f) && !TakesShader(true, 40.0f) && !TakesShader(false, 0.0f));
 		// its light models, any case and slash; not another model
