@@ -141,7 +141,7 @@ namespace Fade::Tuning
 				}
 				const auto bar = key.find('|');
 				if (const auto i = TuningText::Nearest(key.substr(0, bar), key.substr(bar + 1), a_texts); i < a_texts.size()) {
-					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over - did you mean [{}] {}?", a_file, e.shown,
+					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over - the nearest setting is [{}] {}", a_file, e.shown,
 						a_texts[i].section, a_texts[i].key);
 				} else {
 					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over", a_file, e.shown);

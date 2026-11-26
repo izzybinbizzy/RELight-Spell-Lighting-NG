@@ -92,7 +92,7 @@ namespace Fade
 		// lines, so 0 and 1 log the same as 2
 		static std::atomic<float> logLevel{ 2.0f };
 		Register("General", "LogLevel", 2.0f, 0.0f, 4.0f,
-			"How much the log file writes: 2 or lower everything (the usual), 3 warnings only, 4 errors only. Keep it at 2 when you send a log with a bug report.",
+			"How much the log file writes: 2 or lower everything (the usual), 3 warnings only, 4 errors only. Keep it at 2 for a log sent with a bug report.",
 			logLevel);
 		Tuning::Load();
 		spdlog::set_level(static_cast<spdlog::level::level_enum>(std::clamp(static_cast<int>(std::lround(Get(logLevel))), 0, 4)));

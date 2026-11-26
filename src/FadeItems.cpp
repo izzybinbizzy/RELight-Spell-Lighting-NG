@@ -759,7 +759,7 @@ namespace Fade::Items
 			search[0] = '\0';
 		}
 		SameLine();
-		TextDisabled("%s", T("Lists only what you hold right now."));
+		TextDisabled("%s", T("Lists only what is in hand right now."));
 		if (Button(T("Reset all"))) {
 			{
 				std::lock_guard lock(gLock);
@@ -830,7 +830,7 @@ namespace Fade::Items
 			PopID();
 		}
 		if (shown == 0) {
-			TextDisabled("%s", handsOnly      ? T("Nothing with a light in your hands right now.") :
+			TextDisabled("%s", handsOnly      ? T("Nothing with a light in hand right now.") :
 							   needle.empty() ? T("Nothing changed yet - search above.") :
 												T("Nothing by that name."));
 		}

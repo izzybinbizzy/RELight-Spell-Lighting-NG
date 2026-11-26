@@ -384,7 +384,7 @@ namespace Plugin
 			ImGuiMCP::SetCursorPosX(column);
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
-			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if they never end."),
+			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if the flames never end."),
 				T("The glow stays for as long as the body burns.") };
 			int                            burning = FecBurningFadesOut() ? 0 : 1;
 			if (ChoiceCombo(T("Burning bodies"), burning, burnItems, burnTips)) {
@@ -412,8 +412,8 @@ namespace Plugin
 			}
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
-			const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),
-				T("The ward, its art and your hand light in white.") };
+			const std::vector<const char*> kColorTips{ T("The ward, its art and the casting hand's light in the game's own blue."),
+				T("The ward, its art and the casting hand's light in white.") };
 			int                            c = WardColor();
 			if (ChoiceCombo(T("Ward color"), c, kColors, kColorTips)) {
 				SetWardColor(c);
@@ -429,7 +429,7 @@ namespace Plugin
 				}
 			}
 			MenuStyle::Tip(T(
-				"One color for the ward's dome, 360 Ward's sphere and flash, your hand art and hand light. Shows on the next cast."));
+				"One color for the ward's dome, 360 Ward's sphere and flash, the hand art and the hand light. Shows on the next cast."));
 		}
 
 		// a kind's strength on top of Brightness, 25 to 200 % (Settings.cpp); beside its switch, or on a line of its own when there is none
@@ -555,7 +555,7 @@ namespace Plugin
 		void WritePresetsSoon()
 		{
 			std::ostringstream text;
-			text << "; RELight - Spell Lighting NG - the presets you saved in the menu, one set per lighting. Written by the menu.\n";
+			text << "; RELight - Spell Lighting NG - the presets saved in the menu, one set per lighting. Written by the menu.\n";
 			for (const auto& p : gPresets) {
 				text << "\n[" << p.lighting << "|" << p.name << "]\n";
 				for (const auto& [k, v] : p.values) {
@@ -577,7 +577,7 @@ namespace Plugin
 			ImGuiMCP::SameLine();
 			ImGuiMCP::TextColored(kGold, T("Automatic - %s"), T(lighting.c_str()));
 			MenuStyle::Tip(T(
-				"Found by itself when the game starts. Your presets are kept apart for each lighting."));
+				"Found automatically when the game starts. Presets are kept apart for each lighting."));
 		}
 
 		void DrawUserPresets()
@@ -685,7 +685,7 @@ namespace Plugin
 			GlowHeading("Flicker", Icon::kBulb);
 			const std::vector<const char*> kDynamic{ T("Off"), T("Regular"), T("Cinematic") };
 			const std::vector<const char*> kDynamicTips{ T("Steady lights, no pulse or flicker. Applies the next time the game starts."),
-				T("Lights pulse as they always have. From Off, it applies at the next game start."),
+				T("Lights pulse the classic way. From Off, it applies at the next game start."),
 				T("Each kind of spell pulses its own way: fire flickers, shock snaps, healing breathes. From Off, applies at the next start.") };
 			int                            dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
 			                                                                                  1;
@@ -703,7 +703,7 @@ namespace Plugin
 				SaveSettings();
 				RehandSoon();
 			}
-			MenuStyle::Tip(T("A light on your hands while you cast, in the color of the spell. Changes reach a spell you are already holding."));
+			MenuStyle::Tip(T("A light on the casting hands, in the color of the spell. Changes reach a spell already in hand."));
 
 			// his call: "a toggle for weapon lights just like hand lights and right under it"
 			bool weapons = WeaponLightsOn();
@@ -713,7 +713,7 @@ namespace Plugin
 				RehandSoon();
 			}
 			MenuStyle::Tip(T(
-				"Every weapon light: enchanted and bound weapons, artifacts and staves. The Configs page switches choose among them."));
+				"Every weapon light: enchanted and bound weapons, artifacts and staves. The Configs page switches pick among these."));
 
 			GlowHeading("Light Strength", Icon::kBulb);
 			int b = BrightnessPercent();
@@ -724,7 +724,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"How bright the lights are. 100% is the measured brightness; Reach sets how far they carry."));
+				"How bright the lights are. 100% is the measured brightness; Reach sets how far the light carries."));
 
 			int r = ReachPercent();
 			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
@@ -768,7 +768,7 @@ namespace Plugin
 			}
 			if (cs) {
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
-				MenuStyle::Tip(T("You don't need CS Light. If you keep it, untick its spell options or those lights glow twice."));
+				MenuStyle::Tip(T("CS Light is not needed. With it installed, untick its spell options, or those lights glow twice."));
 			}
 			if (StrangeRunesLoaded()) {
 				bool runes = StrangeRunesLightOn();
@@ -815,7 +815,7 @@ namespace Plugin
 					T("A deeper, more saturated blue. Needs Kittytail's Frost VFX Edit.") });
 			GlowHeading("Healing");
 			DrawArtPick(3, T("Healing Art"), { T("Vanilla healing"), T("Kittytail healing") },
-				{ T("Healing hands keep the light Skyrim gives them."),
+				{ T("Healing hands keep Skyrim's own light."),
 					T("The cooler blue healing light from Kittytail's pack. Needs Kittytail's healing VFX edit.") });
 			GlowHeading("Shock");
 			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage"), T("Near Voltage") },
@@ -839,7 +839,7 @@ namespace Plugin
 					RehandSoon();
 				}
 				MenuStyle::Tip(T(
-					"Gives spells from mods with no patch a hand light in their own color, so they are not dark in the hand."));
+					"Gives spells from mods with no patch a hand light in the spell's own color, so none is dark in the hand."));
 				ImGuiMCP::SameLine();
 				ImGuiMCP::TextDisabled(T("%zu lit"), AutoHandEffects());
 			}
@@ -856,18 +856,18 @@ namespace Plugin
 			GlowHeading("Performance", Icon::kBulb);
 			const std::vector<const char*> kQuality{ T("Quality"), T("Performance") };
 			const std::vector<const char*> kQualityTips{ T("Every light on; Hand lights for still picks whose hands carry one."),
-				T("Only you and your followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
+				T("Only the player and followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
 			int                            quality = PerformanceMode() ? 1 : 0;
 			if (ChoiceCombo(T("Quality"), quality, kQuality, kQualityTips)) {
 				SetPerformanceMode(quality == 1);
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"Performance: lights for you and your followers only, and no rows along sprays and bolts. For big fights."));
+				"Performance: lights for the player and followers only, and no rows along sprays and bolts. For big fights."));
 			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
-			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, you and your followers only)."),
-				T("Casters carry one only while they are within about forty paces of you."), T("Only you and your followers carry one."),
-				T("Only your own hands carry one.") };
+			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, the player and followers only)."),
+				T("A caster carries one only within about forty paces of the player."), T("Only the player and followers carry one."),
+				T("Only the player's hands carry one.") };
 			int                            who = HandLightsFor();
 			if (ChoiceCombo(T("Hand lights for"), who, kWho, kWhoTips)) {
 				SetHandLightsFor(who);
@@ -883,7 +883,7 @@ namespace Plugin
 				RehandSoon();
 			}
 			MenuStyle::Tip(T(
-				"Turns every light of the mod off, to compare or when every frame counts. Off again brings them back."));
+				"Turns every light of the mod off, to compare or when every frame counts. Off again brings the lights back."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
@@ -934,7 +934,7 @@ namespace Plugin
 			ImGuiMCP::Text(T("Data files: %zu, options: %zu, hand keys: %zu, spray light records: %zu"), DataFiles(), Options().size(), Hands().size(),
 				SprayLightRecords().size());
 			GlowHeading("Made", Icon::kBulb);
-			ImGuiMCP::Text(T("Hand lights made: %zu, for %zu spell(s); %zu of them by an automatic light"), HandLightsMade(), HandEffects(), AutoHandEffects());
+			ImGuiMCP::Text(T("Hand lights made: %zu, for %zu spell(s); %zu of those by an automatic light"), HandLightsMade(), HandEffects(), AutoHandEffects());
 			ImGuiMCP::Text(T("Held weapon lights now: %zu; ground lights now: %zu; game lights kept: %zu"), LiveHeldLights(), GroundLightCount(), KeptLights());
 			GlowHeading("Hands and the log", Icon::kBulb);
 			ImGuiMCP::TextWrapped("%s", T("Each hand's lights right now and the debug log switch are on the Fading - debug page."));

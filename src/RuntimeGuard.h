@@ -17,18 +17,18 @@ namespace RuntimeGuard
 	{
 		if (!a_gameIsVr) {
 			return std::format(
-				"This is the Skyrim VR version of {}, but your game is Skyrim SE / AE.\n\nIt stays off, so your game "
+				"This is the Skyrim VR version of {}, and the game running is Skyrim SE / AE.\n\nIt stays off, so the game "
 				"does not crash. Remove the VR download \"{}\" and install only the main download \"{}\".",
 				a_mod, a_vrFile, a_mainFile);
 		}
 		if (a_vrFile.empty()) {
 			return std::format(
-				"This is the Skyrim SE / AE version of {}, but your game is Skyrim VR.\n\n{} has no Skyrim VR version "
-				"yet, so it stays off and your game does not crash. Remove it from your Skyrim VR setup.",
+				"This is the Skyrim SE / AE version of {}, and the game running is Skyrim VR.\n\n{} has no Skyrim VR version "
+				"yet, so it stays off and the game does not crash. Remove it from the Skyrim VR setup.",
 				a_mod, a_mod);
 		}
 		return std::format(
-			"This is the Skyrim SE / AE version of {}, but your game is Skyrim VR.\n\nIt stays off, so your game does "
+			"This is the Skyrim SE / AE version of {}, and the game running is Skyrim VR.\n\nIt stays off, so the game does "
 			"not crash. Install the optional VR download \"{}\" over the main download.",
 			a_mod, a_vrFile);
 	}
@@ -51,7 +51,7 @@ namespace RuntimeGuard
 		try {
 			const auto text = WrongGameText(gameIsVr, a_mod, a_mainFile, a_vrFile);
 			SKSE::log::error("{}", text);
-			const auto              title = std::format("{} - the wrong version for your game", a_mod);
+			const auto              title = std::format("{} - the wrong version for this game", a_mod);
 			constexpr std::uint32_t kWarningOnTop = 0x30 | 0x40000;  // MB_ICONWARNING | MB_TOPMOST, one OK button
 			REX::W32::MessageBoxA(nullptr, text.c_str(), title.c_str(), kWarningOnTop);
 		} catch (...) {
