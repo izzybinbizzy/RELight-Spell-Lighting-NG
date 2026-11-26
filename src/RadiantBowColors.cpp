@@ -1,8 +1,9 @@
 // RadiantBowColors.cpp - Radiant Bow (korosukenari, Nexus 198744) recolors its bow and its Sky Rune effects by a pick on its MCM's
-// Colours page; our lights on them follow it, as every light of ours follows the art the player sees. Its picks are read from MCM
-// Helper's files at data load and each time the Journal menu (where the MCM lives) closes: the bow and the summon's hand art take
-// the Bow pick, the Sky Rune flames and the Hallowed Bolt burst the Sky impact pick. A pick takes our light's own color to its hue
-// and keeps the light's saturation and strength; White takes the color out. The named colors' hues are written nowhere Radiant Bow
+// Colours page or in its own ini; our lights on them follow it, as every light of ours follows the art the player sees. Its picks
+// are read at data load and each time the Journal menu (where the MCM lives) closes: the bow and the summon's hand art take the Bow
+// pick, the Sky Rune flames and the Hallowed Bolt burst the Sky impact pick (its ini: "the Hallowed Bolt blade and the flames"). A
+// pick takes our light's own color to its hue and keeps the light's saturation, Saturation and Brightness scaling them as the mod
+// scales its art; White takes the color out. The named colors' hues are written nowhere Radiant Bow
 // ships, so a named pick keeps our own color until each hue is read off its art in game (kNamedHue).
 // Shared by Illuminated and RELight (master in Tools\Shared Plugin Code).
 
@@ -29,8 +30,12 @@ namespace Plugin
 		constexpr std::string_view kPlugin = "RadiantBow.esp";
 		constexpr RE::FormID       kBowSpell = 0x80D;  // SMF_RB_Spell: its casting art is the summon's hand art
 		constexpr RE::FormID       kBow = 0x80B;       // SMF_RB_Bow
-		constexpr const char*      kDefaults = "Data/MCM/Config/RadiantBow/settings.ini";
-		constexpr const char*      kUser = "Data/MCM/Settings/RadiantBow.ini";
+		// the MCM's defaults, the plugin's own ini (its [Colours] without the MCM's i / f marks) and the MCM's saved picks, later ones
+		// winning: MCM Helper names the saved file after the config's modName ("RadiantBow"), the mod's script header says
+		// SMF_RadiantBow.ini, so both are read
+		constexpr const char* kDefaults = "Data/MCM/Config/RadiantBow/settings.ini";
+		constexpr const char* kSkse = "Data/SKSE/Plugins/SMF_RadiantBow.ini";
+		constexpr std::array  kUsers{ "Data/MCM/Settings/RadiantBow.ini", "Data/MCM/Settings/SMF_RadiantBow.ini" };
 
 		// our rows' own colors (gen.RADIANTBOW): the hand art, the bow, the Sky Rune flames, the Hallowed Bolt burst
 		constexpr std::array<float, 3> kHand{ 93.0f, 174.0f, 255.0f };
@@ -64,8 +69,19 @@ namespace Plugin
 			return std::string(a_s.substr(first, last - first + 1));
 		}
 
-		// one ini file's [Colours] keys, lower-cased, into a_out (a later file's keys win)
-		void ReadColours(const char* a_path, std::map<std::string, std::string>& a_out)
+		// the plugin's own ini names its keys without the MCM's type mark: each read under the MCM's name
+		[[nodiscard]] std::string MarkedKey(const std::string& a_key)
+		{
+			static const std::map<std::string, std::string> kMarks{ { "global", "iglobal" }, { "globalhue", "fglobalhue" },
+				{ "saturation", "fsaturation" }, { "brightness", "fbrightness" }, { "bow", "ibow" }, { "bowhue", "fbowhue" },
+				{ "skyimpact", "iskyimpact" }, { "skyimpacthue", "fskyimpacthue" } };
+			const auto                                      it = kMarks.find(a_key);
+			return it != kMarks.end() ? it->second : a_key;
+		}
+
+		// one ini file's [Colours] keys, lower-cased, into a_out (a later file's keys win); a_marked: the plugin's own ini, its keys
+		// put under the MCM's names
+		void ReadColours(const char* a_path, std::map<std::string, std::string>& a_out, bool a_marked = false)
 		{
 			std::ifstream in(a_path);
 			std::string   line;
@@ -92,7 +108,7 @@ namespace Plugin
 					value = Trim(std::string_view(value).substr(0, cut));
 				}
 				std::ranges::transform(key, key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-				a_out[key] = value;
+				a_out[a_marked ? MarkedKey(key) : key] = value;
 			}
 		}
 
@@ -115,8 +131,8 @@ namespace Plugin
 			return own == 0 ? global : Pick{ own - 1, Number(a_keys, a_hue, 210.0f) };
 		}
 
-		// our light's color for a pick, or none when the pick leaves it as made
-		[[nodiscard]] std::optional<RE::NiColor> Tint(const std::array<float, 3>& a_ours, const Pick& a_pick, float a_saturation)
+		// our light's color for a pick, or none when the pick leaves it as made; a_brightness: its Brightness for recolored items
+		[[nodiscard]] std::optional<RE::NiColor> Tint(const std::array<float, 3>& a_ours, const Pick& a_pick, float a_saturation, float a_brightness)
 		{
 			float hue = -1.0f;
 			if (a_pick.id == kCustom) {
@@ -129,9 +145,10 @@ namespace Plugin
 			}
 			// our color's value and saturation, the pick's hue (HSV)
 			const float r = a_ours[0] / 255.0f, g = a_ours[1] / 255.0f, b = a_ours[2] / 255.0f;
-			const float v = (std::max)({ r, g, b });
+			const float v = std::clamp((std::max)({ r, g, b }) * a_brightness, 0.0f, 1.0f);
+			const float top = (std::max)({ r, g, b });
 			const float low = (std::min)({ r, g, b });
-			float       s = v > 0.0f ? (v - low) / v : 0.0f;
+			float       s = top > 0.0f ? (top - low) / top : 0.0f;
 			s = a_pick.id == kWhite ? 0.0f : std::clamp(s * a_saturation, 0.0f, 1.0f);
 			const float          h = std::fmod(std::fmod(hue < 0.0f ? 0.0f : hue, 360.0f) + 360.0f, 360.0f) / 60.0f;
 			const float          c = v * s;
@@ -165,26 +182,31 @@ namespace Plugin
 		{
 			std::map<std::string, std::string> keys;
 			ReadColours(kDefaults, keys);
-			ReadColours(kUser, keys);
+			ReadColours(kSkse, keys, true);
+			for (const char* user : kUsers) {
+				ReadColours(user, keys);
+			}
 			const float saturation = std::clamp(Number(keys, "fsaturation", 1.0f), 0.0f, 2.0f);
+			const float brightness = std::clamp(Number(keys, "fbrightness", 1.0f), 0.0f, 2.0f);
 			const Pick  bow = PickOf(keys, "ibow", "fbowhue");
 			const Pick  sky = PickOf(keys, "iskyimpact", "fskyimpacthue");
 			auto*       dh = RE::TESDataHandler::GetSingleton();
 			const auto* spell = dh ? dh->LookupForm(kBowSpell, kPlugin) : nullptr;
 			const auto* weapon = dh ? dh->LookupForm(kBow, kPlugin) : nullptr;
 			if (spell) {
-				Fade::Items::SetAutoColor(spell->GetFormID(), Tint(kHand, bow, saturation));
+				Fade::Items::SetAutoColor(spell->GetFormID(), Tint(kHand, bow, saturation, brightness));
 			}
 			if (weapon) {
-				Fade::Items::SetAutoColor(weapon->GetFormID(), Tint(kBowColor, bow, saturation));
+				Fade::Items::SetAutoColor(weapon->GetFormID(), Tint(kBowColor, bow, saturation, brightness));
 			}
 			{
 				std::lock_guard lock(gLock);
-				gInferno = Tint(kInferno, sky, saturation);
-				gBolt = Tint(kBolt, sky, saturation);
+				gInferno = Tint(kInferno, sky, saturation, brightness);
+				gBolt = Tint(kBolt, sky, saturation, brightness);
 			}
 			gGeneration.fetch_add(1, std::memory_order_release);
-			SKSE::log::info("Radiant Bow: Bow pick {} (hue {}), Sky impact pick {} (hue {}), saturation {}", bow.id, bow.hue, sky.id, sky.hue, saturation);
+			SKSE::log::info("Radiant Bow: Bow pick {} (hue {}), Sky impact pick {} (hue {}), saturation {}, brightness {}", bow.id, bow.hue, sky.id, sky.hue,
+				saturation, brightness);
 		}
 
 		class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
