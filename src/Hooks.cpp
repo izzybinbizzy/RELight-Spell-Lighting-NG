@@ -259,9 +259,10 @@ namespace
 				gShadowsBetween.insert(light);
 				continue;
 			}
-			// its own hand's place, out of her torso when an animation holds the hand against it
+			// its own hand's place, out of her torso when an animation holds the hand against it (her third-person hands only: the
+			// first-person arms are not where that torso is)
 			const auto palm = node->world * LightKit::kHandPoint;
-			const auto out = LightKit::OutOfBody(body, palm);
+			const auto out = rootOf(node) == body ? LightKit::OutOfBody(body, palm) : palm;
 			if (out.GetDistance(palm) > 0.01f) {
 				MoveTo(light, out);
 				gShadowsBetween.insert(light);
@@ -325,6 +326,10 @@ namespace
 				continue;
 			}
 			if (Plugin::ShadowFromEachHand()) {
+				// the first-person arms are not where her third-person torso is: only that view's lights are kept out of it
+				if (first) {
+					continue;
+				}
 				// each hand's lights at its own palm, out of her torso when an animation holds the hand against it
 				for (auto* any : gMagicLights) {
 					auto*       light = netimmerse_cast<RE::NiPointLight*>(any);

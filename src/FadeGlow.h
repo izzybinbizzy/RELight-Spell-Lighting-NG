@@ -164,8 +164,8 @@ namespace Glow
 		} else {
 			const auto& health = a_b.bars[0];
 			// no health bar read but magicka and stamina apart (the vanilla HUD's layout, its health bar between them): the pair
-			// sits over that gap, above the bars - level with them it sat on the health bar (his 717); their union would reach the
-			// screen's right edge
+			// sits over that gap, above the bars - level with them it sat on the health bar; their union would reach the screen's
+			// right edge
 			const auto& magicka = a_b.bars[1];
 			const auto& stamina = a_b.bars[2];
 			const bool  apart = !health.ok && magicka.ok && stamina.ok && (magicka.x1 < stamina.x0 || stamina.x1 < magicka.x0);

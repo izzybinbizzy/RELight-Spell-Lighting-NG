@@ -219,16 +219,27 @@ namespace Plugin
 
 	std::uint32_t RadiantBowGeneration() { return gGeneration.load(std::memory_order_acquire); }
 
+	bool RadiantBowSkyModel(std::string_view a_model, bool a_hazard)
+	{
+		// only the two models our rows light (gen.RADIANTBOW): any other of its effects keeps the colors it was made with
+		constexpr std::string_view kInfernoModel = "smf\\radiantbow\\sky\\rb_sky_inferno.nif";
+		constexpr std::string_view kBoltModel = "smf\\radiantbow\\sky\\rb_sky_hbolt2.nif";
+		if (!gOn.load(std::memory_order_relaxed)) {
+			return false;
+		}
+		std::string model(a_model);
+		std::ranges::replace(model, '/', '\\');
+		std::string_view path(model);
+		if (path.size() >= 7 && _strnicmp(path.data(), "meshes\\", 7) == 0) {
+			path.remove_prefix(7);
+		}
+		const auto want = a_hazard ? kInfernoModel : kBoltModel;
+		return path.size() == want.size() && _strnicmp(path.data(), want.data(), want.size()) == 0;
+	}
+
 	std::optional<RE::NiColor> RadiantBowSkyColor(std::string_view a_model, bool a_hazard)
 	{
-		constexpr std::string_view kFolder = "smf\\radiantbow\\";
-		if (!gOn.load(std::memory_order_relaxed)) {
-			return std::nullopt;
-		}
-		if (a_model.size() >= 7 && _strnicmp(a_model.data(), "meshes\\", 7) == 0) {
-			a_model.remove_prefix(7);
-		}
-		if (a_model.size() <= kFolder.size() || _strnicmp(a_model.data(), kFolder.data(), kFolder.size()) != 0) {
+		if (!RadiantBowSkyModel(a_model, a_hazard)) {
 			return std::nullopt;
 		}
 		std::lock_guard lock(gLock);

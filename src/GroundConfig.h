@@ -31,7 +31,14 @@ namespace Plugin::Ground
 	inline void LetGo() { NoteSweep(SweepWhy::kMagicDrop); }
 
 	// anyone with hands out, from the draw events (Held.cpp keeps the list)
-	[[nodiscard]] inline bool OthersDrawn() { return !DrawnActorIds().empty(); }
+	// anyone besides the player with hands out who gets a ground light (not a creature: ForEachDrawn skips those)
+	[[nodiscard]] inline bool OthersDrawn()
+	{
+		return std::ranges::any_of(DrawnActorIds(), [](RE::FormID a_id) {
+			auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_id);
+			return actor && !actor->IsPlayerRef() && !CreatureSpells::IsCreature(actor);
+		});
+	}
 
 	// the player, then the actors with their hands out (Held.cpp keeps the list, earlier in this update) still in high process; a
 	// creature's lights are Creatures', so it gets no ground light

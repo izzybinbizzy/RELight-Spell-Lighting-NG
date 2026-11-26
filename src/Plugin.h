@@ -260,6 +260,7 @@ namespace Plugin
 	void                                     WatchRadiantBow();                                            // data load: our Radiant Bow lights follow its color picks (RadiantBowColors.cpp)
 	[[nodiscard]] std::uint32_t              RadiantBowGeneration();                                       // moves on with each read of its picks
 	[[nodiscard]] std::optional<RE::NiColor> RadiantBowSkyColor(std::string_view a_model, bool a_hazard);  // its Sky impact pick on our light, or none
+	[[nodiscard]] bool                       RadiantBowSkyModel(std::string_view a_model, bool a_hazard);  // one of the two Sky models our rows light
 	void                                     TickBurningBanners();                                         // the player update: the banners the game said started or stopped burning (main thread)
 	void                                     RetuneBurningBanners();                                       // a setting changed: the burning banners' lights under the new values (main thread)
 	void                                     DropBurningBanners();                                         // a load or a loading screen: every banner light let go (main thread)

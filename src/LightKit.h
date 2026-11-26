@@ -219,8 +219,8 @@ namespace LightKit
 	inline constexpr std::uint32_t kRecordInverseSquare = 1u << 14;
 	inline constexpr RE::NiPoint3  kHandPoint{ 0.0f, -40.0f, 0.0f };  // a hand light out of the palm, in the magic node's frame: in it the fingers throw long shadows
 
-	// some casting animations hold a hand against her chest, and her own body then shadows its light out (carlosChanpio70's
-	// report under Illuminated 3.1): a hand light nearer her body's middle line than this is pushed level out to it
+	// some casting animations hold a hand against her chest, and her own body then shadows its light out: a hand light nearer
+	// her body's middle line than this is pushed level out to it
 	inline constexpr float kBodyClear = 22.0f;
 
 	// a hand light's place kept out of her torso; the middle line runs from the pelvis to the neck of her third-person body
