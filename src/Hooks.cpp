@@ -40,6 +40,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -566,6 +567,24 @@ namespace
 		}
 	}
 
+	// a reference's magic kind, for the loaded cells' walk after a lost note; none for anything else
+	[[nodiscard]] std::optional<LoadKind> KindOf(RE::TESObjectREFR* a_ref)
+	{
+		if (!a_ref) {
+			return std::nullopt;
+		}
+		if (a_ref->As<RE::Hazard>()) {
+			return LoadKind::kHazard;
+		}
+		if (a_ref->As<RE::Explosion>()) {
+			return LoadKind::kExplosion;
+		}
+		if (a_ref->As<RE::Projectile>()) {
+			return LoadKind::kProjectile;
+		}
+		return std::nullopt;
+	}
+
 	// main thread, the player update: each magic object noted by Load3D, read off its reference now. One gone already needs nothing;
 	// a switched-off option's RE::Light light may have shown for the frame between
 	void TakeMagicLoads()
@@ -582,13 +601,16 @@ namespace
 		});
 		if (lost) {
 			// more loads in one frame than the ring holds: a lost hazard's or explosion's plain root has no owner but the one noted
-			// here, so each in the loaded cells is taken as noted (one walk, only on a loss); the option walk looks round for the rest
+			// here, and a lost projectile no row, so every magic object of the loaded cells is taken as noted (one walk, only on a
+			// loss; a row, cloud or cull already made is not made twice)
 			if (auto* tes = RE::TES::GetSingleton()) {
-				tes->ForEachReference([](RE::TESObjectREFR* a_ref) {
-					const LoadKind kind = a_ref && a_ref->As<RE::Hazard>() ? LoadKind::kHazard : LoadKind::kExplosion;
-					if (a_ref && (kind == LoadKind::kHazard || a_ref->As<RE::Explosion>()) &&
-						std::ranges::none_of(loads, [id = a_ref->GetFormID()](const MagicLoad& a_load) { return a_load.id == id; })) {
-						loads.push_back({ a_ref->GetFormID(), kind, 0 });
+				std::unordered_set<RE::FormID> noted;
+				for (const auto& load : loads) {
+					noted.insert(load.id);
+				}
+				tes->ForEachReference([&noted](RE::TESObjectREFR* a_ref) {
+					if (const auto kind = KindOf(a_ref); kind && noted.insert(a_ref->GetFormID()).second) {
+						loads.push_back({ a_ref->GetFormID(), *kind, 0 });
 					}
 					return RE::BSContainer::ForEachResult::kContinue;
 				});
@@ -597,7 +619,7 @@ namespace
 			static bool told = false;
 			if (!told) {
 				told = true;
-				SKSE::log::warn("magic loads: more 3D loads in one frame than the note ring holds; the loaded cells' hazards and explosions are read instead");
+				SKSE::log::warn("magic loads: more 3D loads in one frame than the note ring holds; the loaded cells' magic objects are read instead");
 			}
 		}
 		const LightKit::Cost::Pass pass{ 3, "magic loads" };
