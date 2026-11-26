@@ -28,6 +28,8 @@
 #include "DataText.h"
 #include "Plugin.h"
 
+#include <unordered_set>
+
 namespace Plugin
 {
 	namespace
@@ -613,9 +615,12 @@ namespace Plugin
 		const LightKit::Cost::Scope c{ 18, "option lights: scene walk" };
 		// both lists: with Open Shaders' Promote or the Bottled shadow download a light sits in the shadow list, and a switch off must
 		// reach it there too (Brightness.cpp walks both the same way)
+		// a promoted light can sit in both lists: each is judged and counted once
+		static std::unordered_set<RE::NiLight*> walked;
+		walked.clear();
 		const auto walk = [&opts](auto& a_list) {
 			for (auto& bsLight : a_list) {
-				if (!bsLight || !bsLight->light) {
+				if (!bsLight || !bsLight->light || !walked.insert(bsLight->light.get()).second) {
 					continue;
 				}
 				auto* niLight = bsLight->light.get();

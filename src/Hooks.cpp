@@ -234,23 +234,29 @@ namespace
 			return;
 		}
 		const LightKit::Cost::Pass pass{ 10, "her shadow, promoted hands" };
-		// her two hands are paired per skeleton: a first-person hand never pairs with a third-person one
-		const auto rootOf = [](RE::NiAVObject* a_node) {
-			while (a_node->parent) {
-				a_node = a_node->parent;
+		// her two hands are paired per skeleton, found by walking up from the hand to one of her two 3D roots: a first-person hand
+		// never pairs with a third-person one, and the other hand is searched in her own skeleton, never the scene (an NPC's node)
+		const auto under = [](const RE::NiAVObject* a_node, const RE::NiAVObject* a_root) {
+			for (; a_node && a_root; a_node = a_node->parent) {
+				if (a_node == a_root) {
+					return true;
+				}
 			}
-			return a_node;
+			return false;
 		};
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* body = player ? player->Get3D(false) : nullptr;
+		auto* firstBody = player ? player->Get3D(true) : nullptr;
 		for (auto* light : lights) {
 			auto* node = MagicNodeOf(light);
 			if (!node) {
 				continue;
 			}
+			auto*       skeleton = under(node, body) ? body : under(node, firstBody) ? firstBody :
+			                                                                           nullptr;
 			const bool  left = std::string_view(node->name.c_str()).contains("L MagicNode");
 			const auto* strings = RE::FixedStrings::GetSingleton();
-			auto*       other = strings ? rootOf(node)->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode) : nullptr;
+			auto*       other = strings && skeleton ? skeleton->GetObjectByName(left ? strings->npcRMagicNode : strings->npcLMagicNode) : nullptr;
 			const bool  both = !Plugin::ShadowFromEachHand() && other && std::ranges::any_of(lights, [other](RE::NiLight* a_l) {
 				return MagicNodeOf(a_l) == other && Shows(a_l);
 			});
@@ -262,7 +268,7 @@ namespace
 			// its own hand's place, out of her torso when an animation holds the hand against it (her third-person hands only: the
 			// first-person arms are not where that torso is)
 			const auto palm = node->world * LightKit::kHandPoint;
-			const auto out = rootOf(node) == body ? LightKit::OutOfBody(body, palm) : palm;
+			const auto out = skeleton && skeleton == body ? LightKit::OutOfBody(body, palm) : palm;
 			if (out.GetDistance(palm) > 0.01f) {
 				MoveTo(light, out);
 				gShadowsBetween.insert(light);
@@ -536,17 +542,43 @@ namespace
 		}
 	};
 
+	// a background load returns its 3D before the game stores it on the main thread (13005 / 13015): its note waits this many player
+	// updates for the stored 3D, then is let go
+	constexpr int kStoreWaits = 30;
+
+	struct MagicLoad
+	{
+		RE::FormID id{ 0 };
+		LoadKind   kind{ LoadKind::kProjectile };
+		int        waited{ 0 };
+	};
+
+	// the noted kind still names this reference: a temporary reference's form id can pass to another object between two updates
+	[[nodiscard]] bool StillOfKind(RE::TESObjectREFR* a_ref, LoadKind a_kind)
+	{
+		switch (a_kind) {
+		case LoadKind::kHazard:
+			return a_ref->As<RE::Hazard>() != nullptr;
+		case LoadKind::kExplosion:
+			return a_ref->As<RE::Explosion>() != nullptr;
+		default:
+			return a_ref->As<RE::Projectile>() != nullptr;
+		}
+	}
+
 	// main thread, the player update: each magic object noted by Load3D, read off its reference now. One gone already needs nothing;
 	// a switched-off option's RE::Light light may have shown for the frame between
 	void TakeMagicLoads()
 	{
-		if (!gMagicLoads.Armed()) {
+		static std::vector<MagicLoad> waiting;  // main thread: noted, its 3D not stored yet
+		if (!gMagicLoads.Armed() && waiting.empty()) {
 			return;
 		}
-		static std::vector<std::pair<RE::FormID, LoadKind>> loads;  // main thread; its storage kept between frames
+		static std::vector<MagicLoad> loads;  // main thread; its storage kept between frames
 		loads.clear();
+		loads.swap(waiting);
 		const bool lost = gMagicLoads.Drain([](std::uint64_t a_note) {
-			loads.emplace_back(static_cast<RE::FormID>(a_note >> 8), static_cast<LoadKind>((a_note & 0xFF) - 1));
+			loads.push_back({ static_cast<RE::FormID>(a_note >> 8), static_cast<LoadKind>((a_note & 0xFF) - 1), 0 });
 		});
 		if (lost) {
 			// more loads in one frame than the ring holds: the option walk looks round once for the lights they may have shown
@@ -558,10 +590,16 @@ namespace
 			}
 		}
 		const LightKit::Cost::Pass pass{ 3, "magic loads" };
-		for (const auto& [id, kind] : loads) {
+		for (const auto& [id, kind, waited] : loads) {
 			auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
-			auto* root = ref ? ref->Get3D() : nullptr;
+			if (!ref || !StillOfKind(ref, kind)) {
+				continue;
+			}
+			auto* root = ref->Get3D();
 			if (!root) {
+				if (waited < kStoreWaits) {
+					waiting.push_back({ id, kind, waited + 1 });
+				}
 				continue;
 			}
 			if (kind != LoadKind::kProjectile) {
