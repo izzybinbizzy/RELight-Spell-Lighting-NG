@@ -609,7 +609,9 @@ namespace
 					noted.insert(load.id);
 				}
 				tes->ForEachReference([&noted](RE::TESObjectREFR* a_ref) {
-					if (const auto kind = KindOf(a_ref); kind && noted.insert(a_ref->GetFormID()).second) {
+					// a projectile without its 3D needs no row or cull: one lying in the world is not kept waiting for it
+					const auto kind = KindOf(a_ref);
+					if (kind && (*kind != LoadKind::kProjectile || a_ref->Get3D()) && noted.insert(a_ref->GetFormID()).second) {
 						loads.push_back({ a_ref->GetFormID(), *kind, 0 });
 					}
 					return RE::BSContainer::ForEachResult::kContinue;
