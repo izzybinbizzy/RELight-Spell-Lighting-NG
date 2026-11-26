@@ -982,8 +982,9 @@ namespace Plugin
 			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
 		}
 		SKSE::log::info("{}", Translation::Load("RELightSpellLightingNG"));
-		if (!SKSEMenuFramework::IsInstalled()) {
-			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
+		// its file on the drive is not enough: a framework that did not load takes every page and shows none
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
+			SKSE::log::warn("SKSE Menu Framework is not installed or did not load, so there is no settings page; the settings file still applies");
 			return;
 		}
 		{
@@ -991,27 +992,27 @@ namespace Plugin
 			ReadPresetsLocked();  // here on the main thread, so the menu never reads a file on its own thread
 		}
 		MenuStyle::gTheme = MenuStyle::MakeTheme(0xFFD58A);  // warm spell-light gold
-		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
+		SKSEMenuFramework::SetSection(Translation::MenuName("RELight - Spell Lighting NG"));
 		// Illuminated's order (Choose Your Own Color right below Lights, Praedy's Staves right below Configs); the fading module adds
 		// HUD and Fading after these, then RegisterMenuTail adds Performance
-		SKSEMenuFramework::AddSectionItem(T("Lights"), LightKit::GuardedDraw<RenderLights>);
-		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
-		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
-		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Lights"), LightKit::GuardedDraw<RenderLights>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Configs"), LightKit::GuardedDraw<RenderConfigs>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
 		gTestWindow = SKSEMenuFramework::AddWindow(LightKit::GuardedDraw<DrawTestWindow>, false);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
 	}
 
 	void RegisterMenuTail()
 	{
-		if (!SKSEMenuFramework::IsInstalled()) {
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
 			return;
 		}
-		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
+		SKSEMenuFramework::SetSection(Translation::MenuName("RELight - Spell Lighting NG"));
 		// after the fading module's HUD and Fading
-		SKSEMenuFramework::AddSectionItem(T("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
 #endif
 	}
 }

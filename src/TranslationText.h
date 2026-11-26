@@ -45,8 +45,9 @@ namespace TranslationText
 			} else if (a_s[i] == '{') {
 				const auto j = a_s.find('}', i);
 				if (j == std::string_view::npos) {
+					// an unmatched brace is a marker of its own; the scan goes on, so a conversion after it is still read
 					out.emplace_back("{");
-					break;
+					continue;
 				}
 				out.emplace_back(a_s.substr(i, j - i + 1));
 				i = j;
@@ -118,6 +119,25 @@ namespace TranslationText
 			} else {
 				out += a_text[i];
 			}
+		}
+		return out;
+	}
+
+	// a menu page or section name as SKSE Menu Framework reads it: an unescaped '/' there splits a path, so a slash the
+	// translation brings is marked with a backslash (its header's rule); an English name with a slash of its own means a folder
+	// on purpose and stays as it is
+	[[nodiscard]] inline std::string MenuName(std::string_view a_english, std::string_view a_shown)
+	{
+		if (a_english.find('/') != std::string_view::npos) {
+			return std::string(a_shown);
+		}
+		std::string out;
+		out.reserve(a_shown.size());
+		for (const char c : a_shown) {
+			if (c == '/') {
+				out += '\\';
+			}
+			out += c;
 		}
 		return out;
 	}

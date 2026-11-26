@@ -176,6 +176,10 @@ namespace Translation
 		return a_english;
 	}
 
+	// a page or section name for SKSE Menu Framework: the line in the reader's language with a slash it brings marked
+	// (TranslationText::MenuName), so a translated name never splits into two menu levels
+	inline std::string MenuName(const char* a_english) { return TranslationText::MenuName(a_english, T(a_english)); }
+
 	inline const char* Detail::Resolve(State& a_state, std::string_view a_key)
 	{
 		auto& state = a_state;

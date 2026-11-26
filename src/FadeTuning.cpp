@@ -54,7 +54,8 @@ namespace Fade::Tuning
 			}
 			// read to the size the file system gives, so a read that stops early is a failure, never a shorter file (an empty one reads fine)
 			const auto size = std::filesystem::file_size(a_path, ec);
-			if (ec) {
+			// far past any real settings file: a broken or foreign file is refused before it is read into memory, never written over
+			if (ec || size > (std::uintmax_t{ 1 } << 20)) {
 				a_failed = true;
 				return {};
 			}

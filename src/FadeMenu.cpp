@@ -1041,17 +1041,18 @@ namespace Fade
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(&MenuWatch::Get());  // the HUD elements hide over the game's menus
 		}
 		HudGem::Register();  // the HUD-layer gems (FadeHudGem.cpp)
-		if (!SKSEMenuFramework::IsInstalled()) {
-			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
+		// its file on the drive is not enough: a framework that did not load takes every page and shows none
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
+			SKSE::log::warn("SKSE Menu Framework is not installed or did not load, so there is no settings page; the settings file still applies");
 			return;
 		}
 		// under the mod's own section; the colour scheme is the plugin's (its Menu.cpp sets it first): one DLL, one theme
-		SKSEMenuFramework::SetSection(T(Mod::kName));
+		SKSEMenuFramework::SetSection(Translation::MenuName(Mod::kName));
 		// the mod's own pages up to Configs come before these; Choose Your Own Color and the rest after them (its RegisterMenuTail)
-		SKSEMenuFramework::AddSectionItem(T("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
-		SKSEMenuFramework::AddSectionItem(T("Fading"), LightKit::GuardedDraw<RenderSettings>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Fading"), LightKit::GuardedDraw<RenderSettings>);
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Fading - debug"), LightKit::GuardedDraw<RenderDebug>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Fading - debug"), LightKit::GuardedDraw<RenderDebug>);
 #endif
 		SKSEMenuFramework::AddHudElement(LightKit::GuardedDraw<RenderHud>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
