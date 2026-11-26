@@ -124,6 +124,7 @@ namespace
 		Plugin::WatchEvents();  // the weapon draws and her cell changes that the held lights and the weapon-light give-back wait for
 		Plugin::MakeBurnEmGlobal();
 		Plugin::WatchBurningBanners();  // Burn'em Banners: a burning banner wears our fire light (BurningBanners.cpp)
+		Plugin::WatchRadiantBow();      // Radiant Bow: our lights on its bow and Sky Rune follow its color picks (RadiantBowColors.cpp)
 		Plugin::RegisterMenu();
 		Fade::OnDataLoaded();  // after the menu: its two pages go under our section, after ours
 		Plugin::RegisterMenuTail();
@@ -228,8 +229,10 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	// ONE trampoline for every call this DLL wraps, 14 bytes a 5-byte call: up to 4 spell-light sites and the cell animations
-	// (trampoline check.py counts them); the Floor Light Fix's two calls take their own room
-	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = 5 * 14 + FloorLightFix::kTrampolineBytes });
+	// (trampoline check.py counts them); the Floor Light Fix's two calls take their own room. VR writes only the three
+	// spell-light sites (no fourth, no cell animations, no Floor Light Fix), so it asks for those alone
+	const bool vr = REL::Module::IsVR();
+	SKSE::Init(a_skse, { .trampoline = true, .trampolineSize = vr ? 3 * 14 : 5 * 14 + FloorLightFix::kTrampolineBytes });
 	// the wrong game: loaded but idle - a false here makes SKSE add its own "exit game?" box over the guard's
 	if (!RuntimeGuard::RightGame("RELight - Spell Lighting NG", "RELight - Spell Lighting NG", "RELight - Spell Lighting NG - VR")) {
 		return true;

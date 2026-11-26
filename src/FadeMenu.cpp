@@ -200,7 +200,7 @@ namespace Fade
 				"How much of the fade the light's reach follows too. 0%: only the brightness fades; 100%: the reach shrinks just as much.",
 				save);
 			Toggle("Dim the glow too", s.dimShader,
-				"The blade's glow fades with the charge too, and a self-cast spell's glow with your magicka while Spells is on.",
+				"The blade's glow fades with the charge too, and a self-cast spell's glow with the caster's magicka while Spells is on.",
 				save);
 
 			GlowHeading(Icon::kMoon, "Nearly empty");
@@ -238,7 +238,7 @@ namespace Fade
 			ImGuiMCP::SameLine(column);
 			Toggle("Staves", s.staves, "A staff's lights and glow follow its charge.", save);
 			Toggle("Spells", s.spells,
-				"A spell's hand lights and glow dim as your magicka runs low.",
+				"A spell's hand lights and glow dim as the caster's magicka runs low.",
 				save);
 			Toggle("Bound weapons", s.bound,
 				"A bound weapon has no charge: its light stays full, then fades over the last seconds of its spell.", save);
@@ -257,7 +257,7 @@ namespace Fade
 			{
 				static const char* const kWho[] = { TR_MARK("Player"), TR_MARK("Player and followers"), TR_MARK("Everyone") };
 				Choice("Whose", s.who, kWho, 3,
-					"Whose lights fade: yours, your followers' too, or every caster near you (other people's weapons rarely lose charge).",
+					"Whose lights fade: the player's, followers' too, or every caster nearby (other people's weapons rarely lose charge).",
 					save);
 			}
 
@@ -337,7 +337,7 @@ namespace Fade
 			{
 				Settings s = Config();
 				bool     save = false;
-				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to my log file.", save);
+				Toggle("Debug log", s.debugLog, "Writes each tracked weapon, rule match, pulse and flare to the mod's log file.", save);
 				if (save) {
 					ApplySetting("DebugLog", s.debugLog ? 1 : 0);
 					QueueSave();
@@ -405,8 +405,8 @@ namespace Fade
 			GlowHeading(Icon::kBulb, "Lights");
 			ImGuiMCP::Text(T("%zu light(s) being scaled; %zu glow(s) dimmed"), ScaledLightCount(), DimmedGlowCount());
 			if (const auto frozen = FrozenLightCount()) {
-				ImGuiMCP::TextColored(kGold, T("%zu light(s) held steady: another plugin scales them the same way"), frozen);
-				Tip("Another mod scales these lights too, so I hold them steady; they still fade.");
+				ImGuiMCP::TextColored(kGold, T("%zu light(s) held steady: another plugin scales those the same way"), frozen);
+				Tip("Another mod scales these lights too, so those are held steady; the fade still applies.");
 			}
 
 			GlowHeading(Icon::kBook, "Rule files");
@@ -1041,17 +1041,18 @@ namespace Fade
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(&MenuWatch::Get());  // the HUD elements hide over the game's menus
 		}
 		HudGem::Register();  // the HUD-layer gems (FadeHudGem.cpp)
-		if (!SKSEMenuFramework::IsInstalled()) {
-			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
+		// its file on the drive is not enough: a framework that did not load takes every page and shows none
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
+			SKSE::log::warn("SKSE Menu Framework is not installed or did not load, so there is no settings page; the settings file still applies");
 			return;
 		}
 		// under the mod's own section; the colour scheme is the plugin's (its Menu.cpp sets it first): one DLL, one theme
-		SKSEMenuFramework::SetSection(T(Mod::kName));
+		SKSEMenuFramework::SetSection(Translation::MenuName(Mod::kName));
 		// the mod's own pages up to Configs come before these; Choose Your Own Color and the rest after them (its RegisterMenuTail)
-		SKSEMenuFramework::AddSectionItem(T("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
-		SKSEMenuFramework::AddSectionItem(T("Fading"), LightKit::GuardedDraw<RenderSettings>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("HUD"), LightKit::GuardedDraw<RenderHudSettings>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Fading"), LightKit::GuardedDraw<RenderSettings>);
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Fading - debug"), LightKit::GuardedDraw<RenderDebug>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Fading - debug"), LightKit::GuardedDraw<RenderDebug>);
 #endif
 		SKSEMenuFramework::AddHudElement(LightKit::GuardedDraw<RenderHud>);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());

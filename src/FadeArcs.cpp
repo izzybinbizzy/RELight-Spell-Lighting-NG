@@ -156,9 +156,9 @@ namespace Fade
 		};
 
 		constexpr Def kDefs[]{
-			{ "FadingBoundTime", "Bound weapon time", "How long your bound weapon has left.", "bottom", BoundTime },
-			{ "FadingChargeLeft", "Left weapon charge", "The charge of the enchanted weapon in your left hand.", "left", Charge<0> },
-			{ "FadingChargeRight", "Right weapon charge", "The charge of the enchanted weapon in your right hand.", "right", Charge<1> },
+			{ "FadingBoundTime", "Bound weapon time", "How long the bound weapon has left.", "bottom", BoundTime },
+			{ "FadingChargeLeft", "Left weapon charge", "The charge of the enchanted weapon in the left hand.", "left", Charge<0> },
+			{ "FadingChargeRight", "Right weapon charge", "The charge of the enchanted weapon in the right hand.", "right", Charge<1> },
 		};
 		constexpr std::size_t kArcs = std::size(kDefs);
 	}

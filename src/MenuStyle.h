@@ -93,8 +93,10 @@ namespace MenuStyle
 	{
 		using namespace ImGuiMCP;
 		Spacing();
+		// made before the font is pushed: a throw here leaves no font on the stack
+		const auto icon = FontAwesome::UnicodeToUtf8(a_icon);
 		FontAwesome::PushSolid();
-		TextColored(gTheme.accent, "%s", FontAwesome::UnicodeToUtf8(a_icon).c_str());
+		TextColored(gTheme.accent, "%s", icon.c_str());
 		FontAwesome::Pop();
 		SameLine();
 		TextColored(gTheme.accent, "%s", a_text);

@@ -20,8 +20,8 @@ namespace Fade::Mod
 	// the player's own lines, in no download: they win over the file and an update never replaces them
 	inline constexpr const char* kAdvancedCustomPath = "Data/SKSE/Plugins/RELightSpellLightingNG/RELight - Spell Lighting NG - Advanced Settings - Custom.ini";
 	inline constexpr const char* kHudArtDir = "Data/SKSE/Plugins/RELightSpellLightingNG/HUD/";  // FadeMenu.cpp's soul gem sheets
-	// the same three files under the old name, read only while the new one is not there yet (SettingsText::ReadFrom; HIS ORDER
-	// 2026-10-20: "i want relight update to not affect old settings files") - never written, moved or deleted
+	// the same three files under the old name, read only while the new one is not there yet (SettingsText::ReadFrom), so an
+	// update keeps a player's settings - never written, moved or deleted
 	inline constexpr const char* kOldSettingsPath = "Data/SKSE/Plugins/RelightSpellAddon/Fading.ini";
 	inline constexpr const char* kOldItemsPath = "Data/SKSE/Plugins/RelightSpellAddon/Lights by Item.ini";
 	inline constexpr const char* kOldAdvancedPath = "Data/SKSE/Plugins/RelightSpellAddon/RELight - Spell Addon - Advanced Settings.ini";

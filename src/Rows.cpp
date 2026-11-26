@@ -12,9 +12,9 @@
 // its option switched off. With Dynamic Lighting on the row
 // flickers (BeamRow::Flicker; under Realistic in its spell's shape, BeamRow::Pulsing), held under its cap so the peak can
 // swing (BeamRow::Steady); with it off it holds still.
-// Truman's call after the Lightning Bolt freeze still stands for the loader threads: the Load3D hook only QUEUES the
-// projectile (QueueRow, any thread); every light is made, moved and taken off here on the main thread (UpdateRows, in the
-// player update).
+// Truman's call after the Lightning Bolt freeze still stands for the loader threads: the Load3D hook only notes the
+// projectile and the player update queues it (Hooks.cpp TakeMagicLoads, QueueRow); every light is made, moved and taken off here
+// on the main thread (UpdateRows, in the player update).
 //
 // CREDIT: a light cloned from one master light, marked as moving and handed to the shadow scene node - ReLight by Truman
 // (github.com/TrumanGIT/ReLight, GPL-3.0-or-later, used with his permission), as Held.cpp MakeOwnLight.
@@ -559,9 +559,11 @@ namespace Plugin
 		if (!gRowsAwake.load(std::memory_order_relaxed)) {
 			return;
 		}
-		const LightKit::Cost::Pass                    pass{ 9, "rows" };
-		auto*                                         scene = LightKit::Scene();
-		std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
+		const LightKit::Cost::Pass pass{ 9, "rows" };
+		auto*                      scene = LightKit::Scene();
+		// main thread; swapped with the queue, so neither list's storage is made again each frame
+		static std::vector<RE::NiPointer<RE::TESObjectREFR>> queued;
+		queued.clear();
 		{
 			std::lock_guard l{ gQueueLock };
 			queued.swap(gQueue);
@@ -597,6 +599,7 @@ namespace Plugin
 				}
 			}
 		}
+		queued.clear();  // its references let go now: the pass may sleep before the next frame comes round
 		// only what still flies stays parked: a long stretch on Performance would otherwise keep every spray projectile
 		std::erase_if(gParked, [](const auto& a_ref) {
 			const auto* root = a_ref ? a_ref->Get3D() : nullptr;

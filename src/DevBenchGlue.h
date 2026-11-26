@@ -2,7 +2,7 @@
 // DevBenchGlue.h - ONE identical copy in every plugin of ours that offers itself to DevBench (master: Dynamic Wards'
 // src\DevBenchGlue.h; `PC Runner\devbench glue check.py` fails a copy that differs). GPL-3.0-or-later like the plugin.
 //
-// How our plugins meet DevBench (alandtse's "Use devbench from your mod", adopted 2026-10-06):
+// How our plugins meet DevBench (devbench's "Use devbench from your mod" guide):
 //   inspect kind=<mod>  a READ of what the plugin holds now (RegisterToolExtension: "inspect" already means "read state").
 //   <mod>.control       a top-level TOOL for everything that changes something (RegisterTool, named consumer.verb as
 //                       devbench asks): an `action` enum, a real

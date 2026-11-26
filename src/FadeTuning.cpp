@@ -14,8 +14,11 @@
 #include "Fade.h"
 #include "FadeTuningText.h"
 
+#include <atomic>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <string>
 
 namespace Fade::Tuning
 {
@@ -51,7 +54,8 @@ namespace Fade::Tuning
 			}
 			// read to the size the file system gives, so a read that stops early is a failure, never a shorter file (an empty one reads fine)
 			const auto size = std::filesystem::file_size(a_path, ec);
-			if (ec) {
+			// far past any real settings file: a broken or foreign file is refused before it is read into memory, never written over
+			if (ec || size > (std::uintmax_t{ 1 } << 20)) {
 				a_failed = true;
 				return {};
 			}
@@ -138,7 +142,7 @@ namespace Fade::Tuning
 				}
 				const auto bar = key.find('|');
 				if (const auto i = TuningText::Nearest(key.substr(0, bar), key.substr(bar + 1), a_texts); i < a_texts.size()) {
-					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over - did you mean [{}] {}?", a_file, e.shown,
+					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over - the nearest setting is [{}] {}", a_file, e.shown,
 						a_texts[i].section, a_texts[i].key);
 				} else {
 					SKSE::log::warn("advanced settings: {} {} is not a setting; it is passed over", a_file, e.shown);
@@ -199,6 +203,14 @@ namespace Fade::Tuning
 		WarnUnused(found, "the file:", texts);
 		WarnUnused(mine, "Custom:", texts);
 		SKSE::log::info("advanced settings: {} value(s) of {} read from {}, {} from {}", taken, knobs.size(), from, takenMine, Mod::kAdvancedCustomPath);
+		// for the log, so a bug report shows a player's own values: each value that differs from its default
+		std::string changed;
+		for (const auto& k : knobs) {
+			if (const float v = k.value->load(std::memory_order_relaxed); v != k.text.def) {
+				changed += std::format("{}[{}] {}={} (default {})", changed.empty() ? "" : ", ", k.text.section, k.text.key, v, k.text.def);
+			}
+		}
+		SKSE::log::info("advanced settings: {}", changed.empty() ? std::string("every value at its default") : "changed from the default: " + changed);
 		// written only when there is no file, one older than this layout or one that lacks a value (its own values kept, never the
 		// Custom file's); a UTF-16 file is left alone
 		std::error_code ec;

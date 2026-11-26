@@ -1,7 +1,7 @@
 SKSEMenuFramework.h is copied unchanged from SKSE Menu Framework's example project
 (https://github.com/QTR-Modding/SKSE-Menu-Framework-3-Example, include/SKSEMenuFramework.h).
-It is MIT licensed by its author. Only that file is under this licence; the rest of this
-plugin keeps its own licence (the LICENSE file at the top of the repository).
+It is MIT licensed by its author. This notice covers SKSEMenuFramework.h only; every other
+file keeps the licence its own notice names.
 
 MIT License
 

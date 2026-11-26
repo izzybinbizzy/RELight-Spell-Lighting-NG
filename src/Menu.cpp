@@ -108,7 +108,7 @@ namespace Plugin
 		// amber on the menu's own dark - headings on a soft glow that fades to the right with a thin lit underline, gold
 		// check marks and slider grips, frames a touch warmer when hovered. Scoped to our pages, so no other mod's changes.
 		constexpr ImGuiMCP::ImVec4 kGold{ 1.0f, 0.86f, 0.55f, 1.0f };
-		// every shown line goes through T(): Data\SKSE\Plugins\RELightSpellLightingNG\Translation.json (relightgen.py writes the English one)
+		// every shown line goes through T(): the standard Interface\Translations\RELightSpellLightingNG_<LANGUAGE>.txt (Translation.h)
 		using Translation::T;
 
 #ifdef FADE_DEBUG_PAGE
@@ -384,7 +384,7 @@ namespace Plugin
 			ImGuiMCP::SetCursorPosX(column);
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> burnItems{ T("Glow fades out"), T("Glow stays while burning") };
-			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if they never end."),
+			const std::vector<const char*> burnTips{ T("A burned body glows orange while it burns; the glow goes out with its flames, or a few seconds in if the flames never end."),
 				T("The glow stays for as long as the body burns.") };
 			int                            burning = FecBurningFadesOut() ? 0 : 1;
 			if (ChoiceCombo(T("Burning bodies"), burning, burnItems, burnTips)) {
@@ -412,8 +412,8 @@ namespace Plugin
 			}
 			ImGuiMCP::SetNextItemWidth(220.0f);
 			const std::vector<const char*> kColors{ T("Vanilla blue"), T("White") };
-			const std::vector<const char*> kColorTips{ T("The ward, its art and your hand light in the game's own blue."),
-				T("The ward, its art and your hand light in white.") };
+			const std::vector<const char*> kColorTips{ T("The ward, its art and the casting hand's light in the game's own blue."),
+				T("The ward, its art and the casting hand's light in white.") };
 			int                            c = WardColor();
 			if (ChoiceCombo(T("Ward color"), c, kColors, kColorTips)) {
 				SetWardColor(c);
@@ -429,7 +429,7 @@ namespace Plugin
 				}
 			}
 			MenuStyle::Tip(T(
-				"One color for the ward's dome, 360 Ward's sphere and flash, your hand art and hand light. Shows on the next cast."));
+				"One color for the ward's dome, 360 Ward's sphere and flash, the hand art and the hand light. Shows on the next cast."));
 		}
 
 		// a kind's strength on top of Brightness, 25 to 200 % (Settings.cpp); beside its switch, or on a line of its own when there is none
@@ -442,8 +442,8 @@ namespace Plugin
 				const char* tip;
 			};
 			static constexpr Look kLooks[]{
-				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is as I set them." },
-				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is as I set them." },
+				{ Strength::kExplosions, "Explosion strength", "How bright explosions are, on top of Brightness. 100% is the default." },
+				{ Strength::kStreams, "Stream and spray strength", "How bright the lights along streams, sprays and bolts are, on top of Brightness. 100% is the default." },
 				{ Strength::kGlows, "Glow strength", "How bright glows on people are (cloaks, flesh spells, FEC bodies), on top of Brightness." },
 				{ Strength::kGround, "Ground effect strength", "How bright spells left on the ground are, like walls of fire, on top of Brightness." },
 				{ Strength::kEnchanted, "Enchanted weapon strength", "How bright enchanted weapons' lights are, on top of Brightness. Bound weapons, staves and artifacts use Brightness only." },
@@ -482,7 +482,7 @@ namespace Plugin
 		// presets per version if they switch to say, enb to community shaders mid save." Presets.ini beside the data files,
 		// a section per preset "[<lighting>|<name>]"; the menu shows the presets of the lighting found now (HandLights.cpp).
 		constexpr const char* kPresetsPath = "Data/SKSE/Plugins/RELightSpellLightingNG/Presets.ini";
-		// up to 2.5 in the RelightSpellAddon folder: read while the new one is not there yet, never written (HIS ORDER 2026-10-20)
+		// up to 2.5 in the RelightSpellAddon folder: read while the new one is not there yet, never written
 		constexpr const char* kOldPresetsPath = "Data/SKSE/Plugins/RelightSpellAddon/Presets.ini";
 		struct UserPreset
 		{
@@ -555,7 +555,7 @@ namespace Plugin
 		void WritePresetsSoon()
 		{
 			std::ostringstream text;
-			text << "; RELight - Spell Lighting NG - the presets you saved in the menu, one set per lighting. Written by the menu.\n";
+			text << "; RELight - Spell Lighting NG - the presets saved in the menu, one set per lighting. Written by the menu.\n";
 			for (const auto& p : gPresets) {
 				text << "\n[" << p.lighting << "|" << p.name << "]\n";
 				for (const auto& [k, v] : p.values) {
@@ -577,7 +577,7 @@ namespace Plugin
 			ImGuiMCP::SameLine();
 			ImGuiMCP::TextColored(kGold, T("Automatic - %s"), T(lighting.c_str()));
 			MenuStyle::Tip(T(
-				"Found by itself when the game starts. Your presets are kept apart for each lighting."));
+				"Found automatically when the game starts. Presets are kept apart for each lighting."));
 		}
 
 		void DrawUserPresets()
@@ -652,7 +652,7 @@ namespace Plugin
 			};
 			const Preset presets[] = {
 				{ T("Subtle"), T("Softer lights that stay close to the spell."), 75, 80, -1 },
-				{ T("Default"), T("My lights as I made them."), 100, 100, 0 },
+				{ T("Default"), T("Every light as it was made."), 100, 100, 0 },
 				{ T("Cinematic"), T("Brighter lights that reach further."), 150, 120, -1 },
 			};
 			for (std::size_t i = 0; i < std::size(presets); ++i) {
@@ -685,7 +685,7 @@ namespace Plugin
 			GlowHeading("Flicker", Icon::kBulb);
 			const std::vector<const char*> kDynamic{ T("Off"), T("Regular"), T("Cinematic") };
 			const std::vector<const char*> kDynamicTips{ T("Steady lights, no pulse or flicker. Applies the next time the game starts."),
-				T("Lights pulse as they always have. From Off, it applies at the next game start."),
+				T("Lights pulse the classic way. From Off, it applies at the next game start."),
 				T("Each kind of spell pulses its own way: fire flickers, shock snaps, healing breathes. From Off, applies at the next start.") };
 			int                            dynamic = !DynamicLighting() ? 0 : PulseShapes() ? 2 :
 			                                                                                  1;
@@ -703,7 +703,7 @@ namespace Plugin
 				SaveSettings();
 				RehandSoon();
 			}
-			MenuStyle::Tip(T("A light on your hands while you cast, in the color of the spell. Changes reach a spell you are already holding."));
+			MenuStyle::Tip(T("A light on the casting hands, in the color of the spell. Changes reach a spell already in hand."));
 
 			// his call: "a toggle for weapon lights just like hand lights and right under it"
 			bool weapons = WeaponLightsOn();
@@ -713,7 +713,7 @@ namespace Plugin
 				RehandSoon();
 			}
 			MenuStyle::Tip(T(
-				"Every weapon light: enchanted and bound weapons, artifacts and staves. The Configs page switches choose among them."));
+				"Every weapon light: enchanted and bound weapons, artifacts and staves. The Configs page switches pick among these."));
 
 			GlowHeading("Light Strength", Icon::kBulb);
 			int b = BrightnessPercent();
@@ -724,7 +724,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"How bright my lights are. 100% is the measured brightness; Reach sets how far they carry."));
+				"How bright the lights are. 100% is the measured brightness; Reach sets how far the light carries."));
 
 			int r = ReachPercent();
 			if (ImGuiMCP::SliderInt(T("Reach"), &r, 50, 150, "%d%%")) {
@@ -734,7 +734,7 @@ namespace Plugin
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"How far my lights carry. 100% is the measured reach; Brightness sets how bright."));
+				"How far the lights carry. 100% is the measured reach; Brightness sets how bright."));
 
 			// Illuminated's same setting (his 646): with both hands lit each hand casts its own shadow; off, one from between them
 			bool eachHand = ShadowFromEachHand();
@@ -768,7 +768,7 @@ namespace Plugin
 			}
 			if (cs) {
 				ImGuiMCP::TextColored(kGold, T("%s is loaded."), cs);
-				MenuStyle::Tip(T("You don't need CS Light. If you keep it, untick its spell options or those lights glow twice."));
+				MenuStyle::Tip(T("CS Light is not needed. With it installed, untick its spell options, or those lights glow twice."));
 			}
 			if (StrangeRunesLoaded()) {
 				bool runes = StrangeRunesLightOn();
@@ -815,7 +815,7 @@ namespace Plugin
 					T("A deeper, more saturated blue. Needs Kittytail's Frost VFX Edit.") });
 			GlowHeading("Healing");
 			DrawArtPick(3, T("Healing Art"), { T("Vanilla healing"), T("Kittytail healing") },
-				{ T("Healing hands keep the light Skyrim gives them."),
+				{ T("Healing hands keep Skyrim's own light."),
 					T("The cooler blue healing light from Kittytail's pack. Needs Kittytail's healing VFX edit.") });
 			GlowHeading("Shock");
 			DrawArtPick(2, T("Shock Art"), { T("Vanilla shock"), T("Kittytail Lightning"), T("Voltage"), T("Near Voltage") },
@@ -833,13 +833,13 @@ namespace Plugin
 				DrawArtPicks();
 				GlowHeading("Spells Without a Patch", Icon::kBulb);
 				bool autoOn = AutoLightsOn();
-				if (ImGuiMCP::Checkbox(T("Light spells I have no patch for"), &autoOn)) {
+				if (ImGuiMCP::Checkbox(T("Light spells with no patch"), &autoOn)) {
 					SetAutoLightsOn(autoOn);
 					SaveSettings();
 					RehandSoon();
 				}
 				MenuStyle::Tip(T(
-					"Gives spells from mods with no patch a hand light in their own color, so they are not dark in the hand."));
+					"Gives spells from mods with no patch a hand light in the spell's own color, so none is dark in the hand."));
 				ImGuiMCP::SameLine();
 				ImGuiMCP::TextDisabled(T("%zu lit"), AutoHandEffects());
 			}
@@ -855,19 +855,19 @@ namespace Plugin
 			const GlowStyle style;
 			GlowHeading("Performance", Icon::kBulb);
 			const std::vector<const char*> kQuality{ T("Quality"), T("Performance") };
-			const std::vector<const char*> kQualityTips{ T("All my lights; Hand lights for still picks whose hands carry one."),
-				T("Only you and your followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
+			const std::vector<const char*> kQualityTips{ T("Every light on; Hand lights for still picks whose hands carry one."),
+				T("Only the player and followers carry hand, weapon and body lights; sprays and bolts keep only their own light.") };
 			int                            quality = PerformanceMode() ? 1 : 0;
 			if (ChoiceCombo(T("Quality"), quality, kQuality, kQualityTips)) {
 				SetPerformanceMode(quality == 1);
 				SaveSettings();
 			}
 			MenuStyle::Tip(T(
-				"Performance: lights for you and your followers only, and no rows along sprays and bolts. For big fights."));
+				"Performance: lights for the player and followers only, and no rows along sprays and bolts. For big fights."));
 			const std::vector<const char*> kWho{ T("Everyone"), T("Everyone nearby"), T("Player and followers"), T("Player only") };
-			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, you and your followers only)."),
-				T("Casters carry one only while they are within about forty paces of you."), T("Only you and your followers carry one."),
-				T("Only your own hands carry one.") };
+			const std::vector<const char*> kWhoTips{ T("Every caster's hands carry a spell light (with Quality on Performance, the player and followers only)."),
+				T("A caster carries one only within about forty paces of the player."), T("Only the player and followers carry one."),
+				T("Only the player's hands carry one.") };
 			int                            who = HandLightsFor();
 			if (ChoiceCombo(T("Hand lights for"), who, kWho, kWhoTips)) {
 				SetHandLightsFor(who);
@@ -877,13 +877,13 @@ namespace Plugin
 				"Which casters' hands carry a spell light. Fewer lights keep big fights smooth."));
 			// his list: "under performance add a toggle to turn off lights completely for the entire mod"
 			bool allOff = AllLightsOff();
-			if (ImGuiMCP::Checkbox(T("All my lights off"), &allOff)) {
+			if (ImGuiMCP::Checkbox(T("All lights off"), &allOff)) {
 				SetAllLightsOff(allOff);
 				SaveSettings();
 				RehandSoon();
 			}
 			MenuStyle::Tip(T(
-				"Turns all my lights off, to compare or when every frame counts. Off again brings them back."));
+				"Turns every light of the mod off, to compare or when every frame counts. Off again brings the lights back."));
 		}
 
 		// Illuminated's Configs page: the spells' own switches under "Spells and Effects" (Artifacts and Bound Weapons with them), Creation
@@ -934,7 +934,7 @@ namespace Plugin
 			ImGuiMCP::Text(T("Data files: %zu, options: %zu, hand keys: %zu, spray light records: %zu"), DataFiles(), Options().size(), Hands().size(),
 				SprayLightRecords().size());
 			GlowHeading("Made", Icon::kBulb);
-			ImGuiMCP::Text(T("Hand lights made: %zu, for %zu spell(s); %zu of them by an automatic light"), HandLightsMade(), HandEffects(), AutoHandEffects());
+			ImGuiMCP::Text(T("Hand lights made: %zu, for %zu spell(s); %zu of those by an automatic light"), HandLightsMade(), HandEffects(), AutoHandEffects());
 			ImGuiMCP::Text(T("Held weapon lights now: %zu; ground lights now: %zu; game lights kept: %zu"), LiveHeldLights(), GroundLightCount(), KeptLights());
 			GlowHeading("Hands and the log", Icon::kBulb);
 			ImGuiMCP::TextWrapped("%s", T("Each hand's lights right now and the debug log switch are on the Fading - debug page."));
@@ -982,8 +982,9 @@ namespace Plugin
 			gFecLoaded = data->LookupLoadedModByName("FEC.esp") || data->LookupLoadedLightModByName("FEC.esp");
 		}
 		SKSE::log::info("{}", Translation::Load("RELightSpellLightingNG"));
-		if (!SKSEMenuFramework::IsInstalled()) {
-			SKSE::log::warn("SKSE Menu Framework is not installed, so there is no settings page; the settings file still applies");
+		// its file on the drive is not enough: a framework that did not load takes every page and shows none
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
+			SKSE::log::warn("SKSE Menu Framework is not installed or did not load, so there is no settings page; the settings file still applies");
 			return;
 		}
 		{
@@ -991,27 +992,27 @@ namespace Plugin
 			ReadPresetsLocked();  // here on the main thread, so the menu never reads a file on its own thread
 		}
 		MenuStyle::gTheme = MenuStyle::MakeTheme(0xFFD58A);  // warm spell-light gold
-		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
+		SKSEMenuFramework::SetSection(Translation::MenuName("RELight - Spell Lighting NG"));
 		// Illuminated's order (Choose Your Own Color right below Lights, Praedy's Staves right below Configs); the fading module adds
 		// HUD and Fading after these, then RegisterMenuTail adds Performance
-		SKSEMenuFramework::AddSectionItem(T("Lights"), LightKit::GuardedDraw<RenderLights>);
-		SKSEMenuFramework::AddSectionItem(T("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
-		SKSEMenuFramework::AddSectionItem(T("Configs"), LightKit::GuardedDraw<RenderConfigs>);
-		SKSEMenuFramework::AddSectionItem(T("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Lights"), LightKit::GuardedDraw<RenderLights>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Choose Your Own Color"), LightKit::GuardedDraw<RenderItems>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Configs"), LightKit::GuardedDraw<RenderConfigs>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Praedy's Staves"), LightKit::GuardedDraw<RenderPraedys>);
 		gTestWindow = SKSEMenuFramework::AddWindow(LightKit::GuardedDraw<DrawTestWindow>, false);
 		SKSE::log::info("settings pages added to SKSE Menu Framework {}", SKSEMenuFramework::GetMenuFrameworkVersion());
 	}
 
 	void RegisterMenuTail()
 	{
-		if (!SKSEMenuFramework::IsInstalled()) {
+		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
 			return;
 		}
-		SKSEMenuFramework::SetSection(T("RELight - Spell Lighting NG"));
+		SKSEMenuFramework::SetSection(Translation::MenuName("RELight - Spell Lighting NG"));
 		// after the fading module's HUD and Fading
-		SKSEMenuFramework::AddSectionItem(T("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Performance"), LightKit::GuardedDraw<RenderPerformance>);  // the last page
 #ifdef FADE_DEBUG_PAGE
-		SKSEMenuFramework::AddSectionItem(T("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
+		SKSEMenuFramework::AddSectionItem(Translation::MenuName("Diagnostics"), LightKit::GuardedDraw<RenderDiagnostics>);
 #endif
 	}
 }

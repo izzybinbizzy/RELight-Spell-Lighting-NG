@@ -36,8 +36,8 @@ namespace AdvancedLayout
 		std::string_view name, note;
 	};
 	inline constexpr std::array<Section, 15> kOrder{ {
-		{ "General", "Who gets lights and how far from you." },
-		{ "Brightness and Reach", "How bright the lights are and how far they reach, beyond the menu's sliders." },
+		{ "General", "Who gets lights and how far from the player." },
+		{ "Brightness and Reach", "How bright the lights are and how far each reaches, beyond the menu's sliders." },
 		{ "Color", "How strong and true the light colors are." },
 		{ "Flicker", "How lights flicker and pulse." },
 		{ "Fading with Magicka", "How hand and weapon lights dim as magicka or charge runs out." },
@@ -47,7 +47,7 @@ namespace AdvancedLayout
 		{ "Enchanted Weapons", "The lights of enchanted weapons." },
 		{ "Fade on death", "How a dying creature's light fades out." },
 		{ "Glow when casting", "How a creature's light brightens while it casts or breathes." },
-		{ "Dark until noticed", "How a creature's light waits dark, then fades up when it notices you." },
+		{ "Dark until noticed", "How a creature's light waits dark, then fades up when it notices the player." },
 		{ "Vanilla and ENB", "Values used only without Community Shaders." },
 		{ "Performance", "Limits that keep big fights smooth." },
 		{ "HUD", "Where the charge gems sit on screen." },
@@ -133,11 +133,11 @@ namespace AdvancedLayout
 		  << ";  nearest end.\n"
 		  << ";\n"
 		  << ";  TO RESET A VALUE: delete its line, or the whole file, and the default\n"
-		  << ";  comes back - unless your Custom file (below) sets it: take the line out\n"
+		  << ";  comes back - unless the Custom file (below) sets it: take the line out\n"
 		  << ";  there too.\n"
 		  << ";\n"
-		  << ";  TO KEEP YOUR CHANGES THROUGH UPDATES: an update replaces this file. Put\n"
-		  << ";  only the lines you change, under their [Section], in a file of their own\n"
+		  << ";  TO KEEP CHANGES THROUGH UPDATES: an update replaces this file. Put\n"
+		  << ";  only the changed lines, under their [Section], in a file of their own\n"
 		  << ";  beside this one:\n"
 		  << ";    " << a_customName << "\n"
 		  << ";  Its lines win over this file, and no update touches it.\n"

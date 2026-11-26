@@ -5,7 +5,7 @@
 // LIGHTS BY ITEM - HIS ORDER: "completely remove own light for unlit weapons option. put that as an entirely new main
 // menu and make it work for spells and weapons. have it be to where the user can search for the weapon/spell and change it's
 // lights. so basically dynamic wards feature." His picks the same morning: a search over every spell, staff and weapon, an on /
-// off switch per item, a color per item (Auto = the light's own, or one the player picks), "in my hands now", reset one / reset
+// off switch per item, a color per item (Auto = the light's own, or one the player picks), "in hand now", reset one / reset
 // all - and "no slider per item, they all work with the main sliders".
 //
 // An item's choice is applied where its light is: once a frame on the main thread, at the end of the fading module's pass (so
@@ -102,7 +102,9 @@ namespace Fade::Items
 		std::unordered_map<RE::FormID, Choice> gChoices;
 		std::atomic<bool>                      gAnyChoice{ false };
 		std::atomic<std::uint32_t>             gGeneration{ 0 };  // bumped on every change; the main thread copies on a change
-		std::array<std::atomic<RE::FormID>, 2> gInHands{};        // the player's left / right item now, for "in my hands now"
+		// the player's choices alone (an edit or a read of the file): a save's retry is let go only when these moved on
+		std::atomic<std::uint32_t>             gChoiceGeneration{ 0 };
+		std::array<std::atomic<RE::FormID>, 2> gInHands{};  // the player's left / right item now, for "in hand now"
 		// the file is written by the main thread once the changes settle, never by the menu while it holds gLock (CodeRabbit,
 		// Illuminated #6 / RELight #8: a color drag changes the choice every frame)
 		std::atomic<bool>         gDirty{ false };
@@ -121,6 +123,9 @@ namespace Fade::Items
 		{
 			return std::ranges::any_of(gChoices, [](const auto& a_entry) { return !IsExternal(a_entry.first); });
 		}
+
+		// another mod's own color pick for its item (Radiant Bow's), under gLock: worn while the player's choice is Auto, never saved
+		std::unordered_map<RE::FormID, RE::NiColor> gAutoColors;
 
 		// main thread only: this frame's copy of the choices, and every light a choice is on now
 		std::unordered_map<RE::FormID, Choice> gApplied;
@@ -247,6 +252,7 @@ namespace Fade::Items
 		void MarkChanged()
 		{
 			gGeneration.fetch_add(1, std::memory_order_relaxed);
+			gChoiceGeneration.fetch_add(1, std::memory_order_relaxed);
 			gSaveFailures.store(0, std::memory_order_relaxed);
 			gChangedAt.store(NowMs(), std::memory_order_relaxed);
 			gDirty.store(true, std::memory_order_release);
@@ -278,14 +284,15 @@ namespace Fade::Items
 				return;  // no task to write it with: kept dirty for the next try, never written under the lock
 			}
 			gDirty.store(false, std::memory_order_relaxed);
-			const auto                             generation = gGeneration.load(std::memory_order_relaxed);
+			const auto                             generation = gChoiceGeneration.load(std::memory_order_relaxed);
 			std::unordered_map<RE::FormID, Choice> copy;
 			{
 				std::lock_guard lock(gLock);
 				copy = gChoices;
 			}
 			// a failed write is tried again after kSaveQuietMs, up to kSaveRetries times, then at the next change. A copy that a
-			// newer change or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
+			// newer choice or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
+			// Another mod's auto color is never saved, so it does not count here.
 			tasks->AddTask([c = std::move(copy), generation]() {
 				bool saved = false;
 				LightKit::Guarded("lights by item save", [&c, &saved]() { saved = Save(c); });  // a throw is a failed write, tried again below
@@ -294,7 +301,7 @@ namespace Fade::Items
 						gSaveFailures.store(0, std::memory_order_relaxed);
 						return;
 					}
-					if (generation != gGeneration.load(std::memory_order_relaxed)) {
+					if (generation != gChoiceGeneration.load(std::memory_order_relaxed)) {
 						return;
 					}
 					if (gSaveFailures.fetch_add(1, std::memory_order_relaxed) < kSaveRetries) {
@@ -506,6 +513,7 @@ namespace Fade::Items
 		}
 		gAnyChoice.store(AnyOwnChoice(), std::memory_order_relaxed);
 		gGeneration.fetch_add(1, std::memory_order_relaxed);
+		gChoiceGeneration.fetch_add(1, std::memory_order_relaxed);
 		SKSE::log::info("lights by item: {} choice(s) read from {} ({} name an item not in this load order's list)", read, from, missing);
 	}
 
@@ -590,6 +598,11 @@ namespace Fade::Items
 			{
 				std::lock_guard lock(gLock);
 				gApplied = gChoices;
+				for (const auto& [id, color] : gAutoColors) {
+					if (const auto it = gApplied.find(id); it == gApplied.end() || it->second.Auto()) {
+						gApplied[id] = Choice{ false, true, color };
+					}
+				}
 			}
 			gAppliedGen = gen;
 			std::unordered_map<RE::FormID, Choice> external;
@@ -671,6 +684,26 @@ namespace Fade::Items
 		});
 	}
 
+	void SetAutoColor(RE::FormID a_id, std::optional<RE::NiColor> a_color)
+	{
+		{
+			std::lock_guard lock(gLock);
+			const auto      it = gAutoColors.find(a_id);
+			if (a_color ? (it != gAutoColors.end() && it->second.red == a_color->red && it->second.green == a_color->green && it->second.blue == a_color->blue) :
+						  it == gAutoColors.end()) {
+				return;
+			}
+			if (a_color) {
+				gAutoColors[a_id] = *a_color;
+			} else {
+				gAutoColors.erase(it);
+			}
+		}
+		gGeneration.fetch_add(1, std::memory_order_relaxed);
+		// only the hands' pass applies it (Apply), and it may rest with nothing else to wake it
+		WakeHands();
+	}
+
 	bool AnyChoice() noexcept
 	{
 		return gAnyChoice.load(std::memory_order_relaxed);
@@ -721,12 +754,12 @@ namespace Fade::Items
 		}
 		SameLine();
 		TextDisabled("%s", T("Type part of a name to find it."));
-		if (Button(T("In my hands now"))) {
+		if (Button(T("In hand now"))) {
 			handsOnly = true;
 			search[0] = '\0';
 		}
 		SameLine();
-		TextDisabled("%s", T("Lists only what you hold right now."));
+		TextDisabled("%s", T("Lists only what is in hand right now."));
 		if (Button(T("Reset all"))) {
 			{
 				std::lock_guard lock(gLock);
@@ -797,7 +830,7 @@ namespace Fade::Items
 			PopID();
 		}
 		if (shown == 0) {
-			TextDisabled("%s", handsOnly      ? T("Nothing with a light in your hands right now.") :
+			TextDisabled("%s", handsOnly      ? T("Nothing with a light in hand right now.") :
 							   needle.empty() ? T("Nothing changed yet - search above.") :
 												T("Nothing by that name."));
 		}

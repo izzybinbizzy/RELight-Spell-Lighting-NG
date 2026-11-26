@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace EnbShaderLightsText
 {
@@ -24,7 +25,12 @@ namespace EnbShaderLightsText
 	[[nodiscard]] inline int ValidActors(std::istream& a_ini)
 	{
 		std::optional<int> value;
+		bool               first = true;
 		for (std::string line; std::getline(a_ini, line);) {
+			// a UTF-8 mark at the file's start is no part of its first key
+			if (std::exchange(first, false) && line.starts_with("\xEF\xBB\xBF")) {
+				line.erase(0, 3);
+			}
 			std::string key;
 			for (const char c : line) {
 				if (c == ';' || c == '#') {
@@ -37,7 +43,9 @@ namespace EnbShaderLightsText
 			if (key.starts_with("validactors=")) {
 				int        v = 0;
 				const auto digits = std::string_view(key).substr(12);
-				if (const auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), v); ec == std::errc{}) {
+				// the whole value a number ("1oops" is none): a value that does not read keeps the one read before
+				if (const auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), v);
+					ec == std::errc{} && end == digits.data() + digits.size()) {
 					value = v;
 				}
 			}

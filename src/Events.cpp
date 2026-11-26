@@ -140,11 +140,15 @@ namespace Plugin
 			}
 		};
 
-		// lights leave with an actor's 3D, and an actor may arrive with its weapon out and an enchantment light on it
-		void Note3D(const RE::Actor* a_actor, bool a_in)
+		// an actor's body came or went: the fading hands look once on the main thread (TakeBodyNotes) - one null test of it here
+		std::atomic<bool> gBodiesMoved{ false };
+
+		// lights leave with an actor's 3D, and an actor may arrive with its weapon out and an enchantment light on it. Runs on the game's
+		// loader and job threads inside its own 3D chain: every call below only sets a word, nothing reads the actor
+		void Note3D(bool a_in)
 		{
 			NoteSweep(a_in ? SweepWhy::kActor3D : SweepWhy::kActor3DOut);
-			Fade::NoteActor3D(a_actor);
+			gBodiesMoved.store(true, std::memory_order_relaxed);
 			if (a_in) {
 				NoteActorLoaded();
 				NoteOptionsLook();
@@ -163,7 +167,7 @@ namespace Plugin
 			{
 				auto* root = load(a_this, a_backgroundLoading);
 				if (root) {
-					LightKit::Guarded("actor 3D in", [a_this]() { Note3D(a_this, true); });
+					Note3D(true);
 				}
 				return root;
 			}
@@ -173,7 +177,7 @@ namespace Plugin
 				const bool had = a_this->Is3DLoaded();
 				set(a_this, a_object, a_queue3DTasks);
 				if (a_object || had) {
-					LightKit::Guarded("actor 3D set", [a_this, a_object]() { Note3D(a_this, a_object != nullptr); });
+					Note3D(a_object != nullptr);
 				}
 			}
 			static inline REL::Relocation<decltype(LoadThunk)> load;
@@ -193,6 +197,13 @@ namespace Plugin
 	{
 		AfterLoadingScreen();
 		Fade::WakeHands();
+	}
+
+	void TakeBodyNotes()
+	{
+		if (gBodiesMoved.exchange(false, std::memory_order_relaxed)) {
+			Fade::WakeHands();
+		}
 	}
 
 	void WatchEvents()
