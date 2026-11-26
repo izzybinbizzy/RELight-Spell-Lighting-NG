@@ -102,7 +102,9 @@ namespace Fade::Items
 		std::unordered_map<RE::FormID, Choice> gChoices;
 		std::atomic<bool>                      gAnyChoice{ false };
 		std::atomic<std::uint32_t>             gGeneration{ 0 };  // bumped on every change; the main thread copies on a change
-		std::array<std::atomic<RE::FormID>, 2> gInHands{};        // the player's left / right item now, for "in hand now"
+		// the player's choices alone (an edit or a read of the file): a save's retry is let go only when these moved on
+		std::atomic<std::uint32_t>             gChoiceGeneration{ 0 };
+		std::array<std::atomic<RE::FormID>, 2> gInHands{};  // the player's left / right item now, for "in hand now"
 		// the file is written by the main thread once the changes settle, never by the menu while it holds gLock (CodeRabbit,
 		// Illuminated #6 / RELight #8: a color drag changes the choice every frame)
 		std::atomic<bool>         gDirty{ false };
@@ -250,6 +252,7 @@ namespace Fade::Items
 		void MarkChanged()
 		{
 			gGeneration.fetch_add(1, std::memory_order_relaxed);
+			gChoiceGeneration.fetch_add(1, std::memory_order_relaxed);
 			gSaveFailures.store(0, std::memory_order_relaxed);
 			gChangedAt.store(NowMs(), std::memory_order_relaxed);
 			gDirty.store(true, std::memory_order_release);
@@ -281,14 +284,15 @@ namespace Fade::Items
 				return;  // no task to write it with: kept dirty for the next try, never written under the lock
 			}
 			gDirty.store(false, std::memory_order_relaxed);
-			const auto                             generation = gGeneration.load(std::memory_order_relaxed);
+			const auto                             generation = gChoiceGeneration.load(std::memory_order_relaxed);
 			std::unordered_map<RE::FormID, Choice> copy;
 			{
 				std::lock_guard lock(gLock);
 				copy = gChoices;
 			}
 			// a failed write is tried again after kSaveQuietMs, up to kSaveRetries times, then at the next change. A copy that a
-			// newer change or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
+			// newer choice or a read of the file has passed is not tried again: the newer choices are saved with their own tries.
+			// Another mod's auto color is never saved, so it does not count here.
 			tasks->AddTask([c = std::move(copy), generation]() {
 				bool saved = false;
 				LightKit::Guarded("lights by item save", [&c, &saved]() { saved = Save(c); });  // a throw is a failed write, tried again below
@@ -297,7 +301,7 @@ namespace Fade::Items
 						gSaveFailures.store(0, std::memory_order_relaxed);
 						return;
 					}
-					if (generation != gGeneration.load(std::memory_order_relaxed)) {
+					if (generation != gChoiceGeneration.load(std::memory_order_relaxed)) {
 						return;
 					}
 					if (gSaveFailures.fetch_add(1, std::memory_order_relaxed) < kSaveRetries) {
@@ -509,6 +513,7 @@ namespace Fade::Items
 		}
 		gAnyChoice.store(AnyOwnChoice(), std::memory_order_relaxed);
 		gGeneration.fetch_add(1, std::memory_order_relaxed);
+		gChoiceGeneration.fetch_add(1, std::memory_order_relaxed);
 		SKSE::log::info("lights by item: {} choice(s) read from {} ({} name an item not in this load order's list)", read, from, missing);
 	}
 
@@ -695,6 +700,8 @@ namespace Fade::Items
 			}
 		}
 		gGeneration.fetch_add(1, std::memory_order_relaxed);
+		// only the hands' pass applies it (Apply), and it may rest with nothing else to wake it
+		WakeHands();
 	}
 
 	bool AnyChoice() noexcept

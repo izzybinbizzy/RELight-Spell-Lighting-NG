@@ -581,12 +581,23 @@ namespace
 			loads.push_back({ static_cast<RE::FormID>(a_note >> 8), static_cast<LoadKind>((a_note & 0xFF) - 1), 0 });
 		});
 		if (lost) {
-			// more loads in one frame than the ring holds: the option walk looks round once for the lights they may have shown
+			// more loads in one frame than the ring holds: a lost hazard's or explosion's plain root has no owner but the one noted
+			// here, so each in the loaded cells is taken as noted (one walk, only on a loss); the option walk looks round for the rest
+			if (auto* tes = RE::TES::GetSingleton()) {
+				tes->ForEachReference([](RE::TESObjectREFR* a_ref) {
+					const LoadKind kind = a_ref && a_ref->As<RE::Hazard>() ? LoadKind::kHazard : LoadKind::kExplosion;
+					if (a_ref && (kind == LoadKind::kHazard || a_ref->As<RE::Explosion>()) &&
+						std::ranges::none_of(loads, [id = a_ref->GetFormID()](const MagicLoad& a_load) { return a_load.id == id; })) {
+						loads.push_back({ a_ref->GetFormID(), kind, 0 });
+					}
+					return RE::BSContainer::ForEachResult::kContinue;
+				});
+			}
 			Plugin::NoteOptionsLook();
 			static bool told = false;
 			if (!told) {
 				told = true;
-				SKSE::log::warn("magic loads: more 3D loads in one frame than the note ring holds; the option walk looks round instead");
+				SKSE::log::warn("magic loads: more 3D loads in one frame than the note ring holds; the loaded cells' hazards and explosions are read instead");
 			}
 		}
 		const LightKit::Cost::Pass pass{ 3, "magic loads" };
